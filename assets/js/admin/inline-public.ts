@@ -149,6 +149,9 @@ const ollamaModel = (import.meta.env.VITE_OLLAMA_MODEL as string | undefined) ||
 const ollamaBaseUrl =
   (import.meta.env.VITE_OLLAMA_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
   'http://127.0.0.1:11434';
+const isLocalHost = () =>
+  window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1');
+const isLoopbackOllama = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(ollamaBaseUrl);
 
 const getTargetText = (element: Element) => {
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
@@ -180,15 +183,34 @@ const findAiTarget = (root: Element): Element | null => {
   return root.querySelector('[contenteditable="true"], input[type="text"], input[type="url"], textarea');
 };
 
-const rewriteWithOllama = async (input: string) => {
-  const isRemoteSite = !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1');
-  const isLoopbackOllama = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(ollamaBaseUrl);
-  if (isRemoteSite && isLoopbackOllama) {
-    throw new Error(
-      'AI Update cannot run from the deployed site with local Ollama. Open the site locally (localhost) for AI Update, or use a hosted AI/proxy endpoint.'
-    );
+const rewriteWithHostedAi = async (input: string) => {
+  let response: Response;
+  try {
+    response = await fetch('/api/ai-rewrite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ input })
+    });
+  } catch {
+    throw new Error('Could not reach production AI endpoint. Check deployment and try again.');
   }
 
+  const payload = (await response.json().catch(() => ({}))) as { response?: string; error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error || `Production AI request failed (${response.status}).`);
+  }
+
+  const rewritten = (payload.response ?? '').trim();
+  if (!rewritten) {
+    throw new Error('Production AI returned an empty result. Try again.');
+  }
+
+  return rewritten;
+};
+
+const rewriteWithOllama = async (input: string) => {
   const prompt = [
     'Rewrite the text for a school website admin editor.',
     'Keep the original meaning and factual details.',
@@ -215,11 +237,6 @@ const rewriteWithOllama = async (input: string) => {
       })
     });
   } catch {
-    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-      throw new Error(
-        'AI Update blocked: this deployed site cannot call local Ollama unless CORS is enabled. Set OLLAMA_ORIGINS to include this site, restart Ollama, or use the site locally.'
-      );
-    }
     throw new Error('Could not reach local Ollama. Ensure Ollama is running on port 11434.');
   }
 
@@ -259,8 +276,11 @@ const attachAiButton = (controls: HTMLElement, root: Element) => {
     try {
       aiBtn.disabled = true;
       aiBtn.textContent = 'AI Working...';
-      showStatus(`Using local Ollama (${ollamaModel})...`);
-      const rewritten = await rewriteWithOllama(sourceText);
+      const shouldUseHostedAi = !isLocalHost() && isLoopbackOllama;
+      showStatus(shouldUseHostedAi ? 'Using production AI...' : `Using local Ollama (${ollamaModel})...`);
+      const rewritten = shouldUseHostedAi
+        ? await rewriteWithHostedAi(sourceText)
+        : await rewriteWithOllama(sourceText);
       setTargetText(target, rewritten);
       target.dispatchEvent(new Event('input', { bubbles: true }));
       showStatus('AI update applied. Review and save.');

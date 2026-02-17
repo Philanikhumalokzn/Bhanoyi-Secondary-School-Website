@@ -737,6 +737,54 @@ h1 {
   background: var(--surface);
 }
 
+.admin-auth {
+  width: min(520px, 100%);
+  margin: 5vh auto 0;
+  padding: 28px;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(13, 34, 56, 0.08);
+}
+
+.admin-auth h1 {
+  margin-bottom: 8px;
+}
+
+.admin-auth .lead {
+  margin: 0 0 18px;
+  max-width: 46ch;
+}
+
+.admin-auth .admin-form {
+  gap: 14px;
+}
+
+.admin-auth .admin-form label {
+  font-size: 0.94rem;
+  color: var(--text);
+}
+
+.admin-auth .admin-form input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.admin-auth .admin-form input:focus-visible {
+  border-color: var(--primary);
+}
+
+.admin-auth .btn {
+  min-height: 44px;
+  width: 100%;
+}
+
+#auth-status {
+  min-height: 1.4rem;
+  margin-top: 12px;
+  color: var(--muted);
+}
+
 .admin-form {
   display: grid;
   gap: 10px;
@@ -813,6 +861,17 @@ h1 {
 }
 
 @media (max-width: 640px) {
+  .admin-shell {
+    width: min(100%, 94%);
+    margin-top: 20px;
+  }
+
+  .admin-auth {
+    margin-top: 2vh;
+    padding: 20px;
+    border-radius: 12px;
+  }
+
   .latest-news-header {
     align-items: flex-start;
     flex-direction: column;
