@@ -501,7 +501,7 @@ h1 {
 .inline-admin-active .footer-hours-1,
 .inline-admin-active .footer-hours-2 {
   cursor: text;
-  text-decoration: underline dotted;
+  text-decoration: none;
 }
 
 .inline-editable-field {
