@@ -230,11 +230,7 @@ const addCard = async () => {
   let imageUrl = '';
   if (sectionKey === 'latest_news') {
     category = (prompt('News category (e.g. Sports, Academics, Culture)', 'General') ?? 'General').trim() || 'General';
-    imageUrl = (prompt('Image URL (required for Latest News)', '') ?? '').trim();
-    if (!imageUrl) {
-      showStatus('Latest News requires an image URL.');
-      return;
-    }
+    imageUrl = (prompt('Image URL (optional)', '') ?? '').trim();
   }
 
   await saveCard({
@@ -412,6 +408,9 @@ const wireCardInline = (item: Element) => {
   const bodyEl = item.querySelector('p');
   const categoryEl = item.querySelector('.news-category');
   const imageEl = item.querySelector('.latest-news-image') as HTMLImageElement | null;
+  const fallbackEl = item.querySelector('.latest-news-image-fallback') as HTMLElement | null;
+  const fallbackTitleEl = item.querySelector('.latest-news-fallback-title') as HTMLElement | null;
+  const fallbackBodyEl = item.querySelector('.latest-news-fallback-body') as HTMLElement | null;
 
   let urlEditor: HTMLInputElement | null = null;
   let categoryEditor: HTMLInputElement | null = null;
@@ -420,6 +419,23 @@ const wireCardInline = (item: Element) => {
   let imageUploadButton: HTMLButtonElement | null = null;
 
   const readState = { ...record };
+
+  const syncLatestNewsMedia = (imageUrl: string, title: string, body: string) => {
+    if (!isLatestNews) return;
+    const hasImage = Boolean((imageUrl || '').trim());
+
+    if (imageEl) {
+      imageEl.classList.toggle('is-hidden', !hasImage);
+      imageEl.src = hasImage ? imageUrl : '';
+    }
+
+    if (fallbackEl) {
+      fallbackEl.classList.toggle('is-hidden', hasImage);
+    }
+
+    if (fallbackTitleEl) fallbackTitleEl.textContent = title;
+    if (fallbackBodyEl) fallbackBodyEl.textContent = body;
+  };
 
   const exitEdit = () => {
     setEditable(titleEl, false);
@@ -498,11 +514,6 @@ const wireCardInline = (item: Element) => {
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
 
-        if (isLatestNews && !payload.image_url) {
-          showStatus('Latest News cards require an image. Upload or paste an image URL before saving.');
-          return;
-        }
-
         await saveCard(payload);
         showStatus('Card saved. Refreshing...');
         window.location.reload();
@@ -519,7 +530,7 @@ const wireCardInline = (item: Element) => {
       if (titleEl) titleEl.textContent = readState.title;
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
-      if (imageEl) imageEl.src = readState.imageUrl || '/images/news/news-default.svg';
+      syncLatestNewsMedia(readState.imageUrl, readState.title, readState.body);
       if (record.clickable && item instanceof HTMLAnchorElement) {
         item.setAttribute('href', readState.href || '#');
       }
@@ -554,7 +565,11 @@ const wireCardInline = (item: Element) => {
       imageUrlEditor = input;
 
       imageUrlEditor.addEventListener('input', () => {
-        if (imageEl) imageEl.src = imageUrlEditor?.value || '/images/news/news-default.svg';
+        syncLatestNewsMedia(
+          imageUrlEditor?.value || '',
+          (titleEl?.textContent ?? readState.title).trim(),
+          (bodyEl?.textContent ?? readState.body).trim()
+        );
       });
     }
 
@@ -579,7 +594,11 @@ const wireCardInline = (item: Element) => {
           uploadBtn.textContent = 'Uploading...';
           const url = await uploadNewsImage(file);
           if (imageUrlEditor) imageUrlEditor.value = url;
-          if (imageEl) imageEl.src = url;
+          syncLatestNewsMedia(
+            url,
+            (titleEl?.textContent ?? readState.title).trim(),
+            (bodyEl?.textContent ?? readState.body).trim()
+          );
           showStatus('Image uploaded. Save the card to publish changes.');
         } catch (error) {
           showStatus(
@@ -598,6 +617,8 @@ const wireCardInline = (item: Element) => {
   };
 
   renderReadControls();
+
+  syncLatestNewsMedia(readState.imageUrl, readState.title, readState.body);
 
   item.addEventListener('click', (event) => {
     if ((event.target as HTMLElement).closest('.inline-admin-controls')) return;
