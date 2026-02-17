@@ -2,10 +2,12 @@ import {
   deleteAnnouncement,
   deleteCard,
   deleteDownload,
+  deleteHeroNotice,
   getSession,
   saveAnnouncement,
   saveCard,
   saveDownload,
+  saveHeroNotice,
   signOut
 } from './api';
 
@@ -31,6 +33,14 @@ type DownloadRecord = {
   id?: string;
   section: 'admissions' | 'policies';
   sortOrder: number;
+  title: string;
+  body: string;
+  href: string;
+  linkLabel: string;
+};
+
+type HeroNoticeRecord = {
+  pageKey: string;
   title: string;
   body: string;
   href: string;
@@ -108,6 +118,19 @@ const toDownloadRecord = (item: Element): DownloadRecord => {
     body: (item.querySelector('p')?.textContent ?? '').trim(),
     href: ((item.querySelector('a.download-link') as HTMLAnchorElement | null)?.getAttribute('href') ?? '').trim(),
     linkLabel: ((item.querySelector('a.download-link') as HTMLAnchorElement | null)?.textContent ?? 'Download File').trim()
+  };
+};
+
+const toHeroNoticeRecord = (): HeroNoticeRecord | null => {
+  const notice = document.querySelector('.hero-notice');
+  if (!notice) return null;
+
+  return {
+    pageKey: (notice as HTMLElement).dataset.pageKey || currentPageKey(),
+    title: getText(notice, '.hero-notice-title'),
+    body: getText(notice, '.hero-notice-body'),
+    href: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.getAttribute('href') ?? '').trim(),
+    linkLabel: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.textContent ?? 'View notice').trim()
   };
 };
 
@@ -240,6 +263,41 @@ const addDownload = async () => {
   });
 
   showStatus('Download added. Refreshing...');
+  window.location.reload();
+};
+
+const editHeroNotice = async () => {
+  const existing = toHeroNoticeRecord();
+  const pageKey = currentPageKey();
+
+  const title = prompt('Important notice title', existing?.title ?? 'Important Notice');
+  if (title === null) return;
+  const body = prompt('Important notice body', existing?.body ?? '');
+  if (body === null) return;
+  const href = prompt('Notice link URL', existing?.href ?? '#');
+  if (href === null) return;
+  const linkLabel = prompt('Notice link label', existing?.linkLabel ?? 'View notice');
+  if (linkLabel === null) return;
+
+  await saveHeroNotice({
+    page_key: pageKey,
+    title,
+    body,
+    href,
+    link_label: linkLabel,
+    is_active: true
+  });
+
+  showStatus('Important notice saved. Refreshing...');
+  window.location.reload();
+};
+
+const removeHeroNotice = async () => {
+  const ok = confirm('Remove the Important Notice from this page?');
+  if (!ok) return;
+
+  await deleteHeroNotice(currentPageKey());
+  showStatus('Important notice removed. Refreshing...');
   window.location.reload();
 };
 
@@ -396,6 +454,8 @@ const mountToolbar = () => {
   toolbar.innerHTML = `
     <strong>Admin Mode</strong>
     <button type="button" id="inline-add-announcement">Add Announcement</button>
+    <button type="button" id="inline-edit-hero-notice">Edit Important Notice</button>
+    <button type="button" id="inline-remove-hero-notice">Remove Important Notice</button>
     <button type="button" id="inline-add-card">Add Card</button>
     <button type="button" id="inline-add-download">Add Download</button>
     <button type="button" id="inline-admin-logout">Logout</button>
@@ -408,6 +468,24 @@ const mountToolbar = () => {
       await addRecord();
     } catch (error) {
       showStatus(error instanceof Error ? error.message : 'Failed to add announcement.');
+    }
+  });
+
+  const editNoticeBtn = document.getElementById('inline-edit-hero-notice') as HTMLButtonElement | null;
+  editNoticeBtn?.addEventListener('click', async () => {
+    try {
+      await editHeroNotice();
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
+    }
+  });
+
+  const removeNoticeBtn = document.getElementById('inline-remove-hero-notice') as HTMLButtonElement | null;
+  removeNoticeBtn?.addEventListener('click', async () => {
+    try {
+      await removeHeroNotice();
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to remove important notice.');
     }
   });
 
@@ -451,5 +529,5 @@ export const initInlinePublicAdmin = async () => {
   document.body.classList.add('inline-admin-active');
   mountToolbar();
   bindInlineActions();
-  showStatus('Admin mode active. Click an announcement body to edit.');
+  showStatus('Admin mode active. Use the toolbar to edit content, including Important Notice.');
 };

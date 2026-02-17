@@ -35,6 +35,18 @@ create table if not exists public.site_cards (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.site_hero_notice (
+  id uuid primary key default gen_random_uuid(),
+  page_key text not null unique,
+  title text not null default '',
+  body text not null default '',
+  href text not null default '#',
+  link_label text not null default 'View notice',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.admin_users (
   email text primary key,
   is_active boolean not null default true,

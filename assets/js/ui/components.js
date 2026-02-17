@@ -50,7 +50,7 @@ export const renderHeader = (siteContent, pageKey) => {
   `;
 };
 
-export const renderHero = (hero) => {
+export const renderHero = (hero, pageKey) => {
   if (!hero) {
     return '';
   }
@@ -63,10 +63,10 @@ export const renderHero = (hero) => {
     .join('');
 
   const notice = hero.notice
-    ? `<aside class="alert-box" aria-label="Important announcement">
-        <h2>${hero.notice.title}</h2>
-        <p>${hero.notice.body}</p>
-        <a href="${hero.notice.href}">${hero.notice.linkLabel}</a>
+    ? `<aside class="alert-box hero-notice" aria-label="Important announcement" data-page-key="${pageKey || ''}" data-notice-id="${hero.notice.id || ''}">
+        <h2 class="hero-notice-title">${hero.notice.title}</h2>
+        <p class="hero-notice-body">${hero.notice.body}</p>
+        <a class="hero-notice-link" href="${hero.notice.href}">${hero.notice.linkLabel}</a>
       </aside>`
     : '';
 

@@ -12,6 +12,16 @@ export type SiteCard = {
   is_active: boolean;
 };
 
+export type HeroNotice = {
+  id: string;
+  page_key: string;
+  title: string;
+  body: string;
+  href: string;
+  link_label: string;
+  is_active: boolean;
+};
+
 const toMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error) {
@@ -169,4 +179,36 @@ export const saveCard = async (entry: Partial<SiteCard>) => {
 export const deleteCard = async (id: string) => {
   const { error } = await supabase.from('site_cards').delete().eq('id', id);
   if (error) throw toError(error, 'Card delete failed');
+};
+
+export const saveHeroNotice = async (entry: Partial<HeroNotice> & { page_key: string }) => {
+  const payload = {
+    page_key: entry.page_key,
+    title: entry.title ?? '',
+    body: entry.body ?? '',
+    href: entry.href ?? '#',
+    link_label: entry.link_label ?? 'View notice',
+    is_active: entry.is_active ?? true
+  };
+
+  const { error } = await supabase.from('site_hero_notice').upsert(payload, { onConflict: 'page_key' });
+  if (error) throw toError(error, 'Important notice save failed');
+};
+
+export const deleteHeroNotice = async (pageKey: string) => {
+  const { error } = await supabase
+    .from('site_hero_notice')
+    .upsert(
+      {
+        page_key: pageKey,
+        title: '',
+        body: '',
+        href: '#',
+        link_label: 'View notice',
+        is_active: false
+      },
+      { onConflict: 'page_key' }
+    );
+
+  if (error) throw toError(error, 'Important notice delete failed');
 };

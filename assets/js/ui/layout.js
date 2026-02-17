@@ -59,7 +59,7 @@ export const renderSite = (siteContent, page) => {
   app.innerHTML = `
     ${renderHeader(siteContent, page.key)}
     <main id="main-content">
-      ${renderHero(page.hero)}
+      ${renderHero(page.hero, page.key)}
       ${renderSections(page.sections)}
     </main>
     ${renderFooter(siteContent)}

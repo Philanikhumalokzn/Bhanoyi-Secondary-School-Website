@@ -1,5 +1,5 @@
 type SiteContent = {
-  pages: Record<string, { sections: Array<any> }>;
+  pages: Record<string, { hero?: any; sections: Array<any> }>;
 };
 
 type AnnouncementRow = {
@@ -27,6 +27,16 @@ type CardRow = {
   body: string;
   href: string | null;
   sort_order: number;
+};
+
+type HeroNoticeRow = {
+  id: string;
+  page_key: string;
+  title: string;
+  body: string;
+  href: string;
+  link_label: string;
+  is_active: boolean;
 };
 
 const getConfig = () => {
@@ -82,6 +92,19 @@ const fetchCards = async (): Promise<CardRow[]> => {
 
   if (!response.ok) return [];
   return (await response.json()) as CardRow[];
+};
+
+const fetchHeroNotices = async (): Promise<HeroNoticeRow[]> => {
+  const { url, key } = getConfig();
+  if (!url || !key) return [];
+
+  const response = await fetch(
+    `${url}/rest/v1/site_hero_notice?select=id,page_key,title,body,href,link_label,is_active`,
+    { headers: restHeaders(key) }
+  );
+
+  if (!response.ok) return [];
+  return (await response.json()) as HeroNoticeRow[];
 };
 
 const applyAnnouncements = (siteContent: SiteContent, rows: AnnouncementRow[]) => {
@@ -162,20 +185,41 @@ const applyCards = (siteContent: SiteContent, rows: CardRow[]) => {
   });
 };
 
+const applyHeroNotices = (siteContent: SiteContent, rows: HeroNoticeRow[]) => {
+  if (rows.length === 0) return;
+
+  rows.forEach((row) => {
+    const page = siteContent.pages[row.page_key];
+    if (!page || !page.hero) return;
+
+    page.hero.notice = row.is_active
+      ? {
+          id: row.id,
+          title: row.title,
+          body: row.body,
+          href: row.href,
+          linkLabel: row.link_label || 'View notice'
+        }
+      : null;
+  });
+};
+
 export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T): Promise<T> => {
   if (!hasConfig()) {
     return siteContent;
   }
 
   try {
-    const [announcements, downloads, cards] = await Promise.all([
+    const [announcements, downloads, cards, notices] = await Promise.all([
       fetchAnnouncements(),
       fetchDownloads(),
-      fetchCards()
+      fetchCards(),
+      fetchHeroNotices()
     ]);
     applyAnnouncements(siteContent, announcements);
     applyDownloads(siteContent, downloads);
     applyCards(siteContent, cards);
+    applyHeroNotices(siteContent, notices);
     return siteContent;
   } catch {
     return siteContent;

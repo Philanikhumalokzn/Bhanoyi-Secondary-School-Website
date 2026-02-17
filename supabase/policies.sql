@@ -1,7 +1,8 @@
-alter table public.site_announcements enable row level security;
-alter table public.site_downloads enable row level security;
-alter table public.site_cards enable row level security;
-alter table public.admin_users enable row level security;
+alter table if exists public.site_announcements enable row level security;
+alter table if exists public.site_downloads enable row level security;
+alter table if exists public.site_cards enable row level security;
+alter table if exists public.site_hero_notice enable row level security;
+alter table if exists public.admin_users enable row level security;
 
 -- Public read for website visitors
 drop policy if exists "Public read announcements" on public.site_announcements;
@@ -21,6 +22,14 @@ create policy "Public read cards"
 on public.site_cards
 for select
 using (is_active = true);
+
+do $$
+begin
+  if to_regclass('public.site_hero_notice') is not null then
+    execute 'drop policy if exists "Public read hero notice" on public.site_hero_notice';
+    execute 'create policy "Public read hero notice" on public.site_hero_notice for select using (true)';
+  end if;
+end $$;
 
 -- Admin list is private
 drop policy if exists "Admin users can read allowlist" on public.admin_users;
@@ -90,3 +99,30 @@ with check (
       and au.is_active = true
   )
 );
+
+do $$
+begin
+  if to_regclass('public.site_hero_notice') is not null then
+    execute 'drop policy if exists "Allowlisted admins manage hero notice" on public.site_hero_notice';
+    execute $policy$
+      create policy "Allowlisted admins manage hero notice"
+      on public.site_hero_notice
+      for all
+      to authenticated
+      using (
+        exists (
+          select 1 from public.admin_users au
+          where lower(au.email) = lower(auth.jwt() ->> 'email')
+            and au.is_active = true
+        )
+      )
+      with check (
+        exists (
+          select 1 from public.admin_users au
+          where lower(au.email) = lower(auth.jwt() ->> 'email')
+            and au.is_active = true
+        )
+      )
+    $policy$;
+  end if;
+end $$;
