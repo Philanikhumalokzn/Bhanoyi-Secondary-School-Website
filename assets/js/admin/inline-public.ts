@@ -664,10 +664,9 @@ const wireCardInline = (item: Element) => {
   });
   item.appendChild(controls);
 
-  const titleEl = isLatestNews ? item.querySelector('.latest-news-title') : item.querySelector('h3');
-  const bodyEl = isLatestNews
-    ? item.querySelector('.latest-news-body') || item.querySelector('.latest-news-fallback-body')
-    : item.querySelector('p');
+  const newsTitleEl = item.querySelector('.latest-news-title') as HTMLElement | null;
+  const titleEl = isLatestNews ? newsTitleEl || item.querySelector('.latest-news-fallback-title') : item.querySelector('h3');
+  const bodyEl = isLatestNews ? item.querySelector('.latest-news-body') || item.querySelector('.latest-news-fallback-body') : item.querySelector('p');
   const categoryEl = item.querySelector('.news-category');
   const subtitleEl = item.querySelector('.latest-news-subtitle');
   const visibleBodyEl = item.querySelector('.latest-news-body') as HTMLElement | null;
@@ -704,6 +703,22 @@ const wireCardInline = (item: Element) => {
 
     if (fallbackTitleEl) fallbackTitleEl.textContent = subtitle.trim() || title;
     if (fallbackBodyEl) fallbackBodyEl.textContent = body;
+    if (newsTitleEl) newsTitleEl.textContent = title;
+    if (visibleBodyEl) visibleBodyEl.textContent = body;
+  };
+
+  const getLatestNewsTitleText = () => {
+    if (!isLatestNews) return (titleEl?.textContent ?? '').trim();
+    const isFallbackVisible = Boolean(fallbackEl && !fallbackEl.classList.contains('is-hidden'));
+    const source = isFallbackVisible ? fallbackTitleEl?.textContent : newsTitleEl?.textContent;
+    return (source ?? newsTitleEl?.textContent ?? fallbackTitleEl?.textContent ?? '').trim();
+  };
+
+  const getLatestNewsBodyText = () => {
+    if (!isLatestNews) return (bodyEl?.textContent ?? '').trim();
+    const isFallbackVisible = Boolean(fallbackEl && !fallbackEl.classList.contains('is-hidden'));
+    const source = isFallbackVisible ? fallbackBodyEl?.textContent : visibleBodyEl?.textContent;
+    return (source ?? visibleBodyEl?.textContent ?? fallbackBodyEl?.textContent ?? '').trim();
   };
 
   const setLatestNewsEditingState = (editing: boolean) => {
@@ -719,6 +734,12 @@ const wireCardInline = (item: Element) => {
 
   const exitEdit = () => {
     setEditable(titleEl, false);
+    if (isLatestNews) {
+      setEditable(newsTitleEl, false);
+      setEditable(fallbackTitleEl, false);
+      setEditable(visibleBodyEl, false);
+      setEditable(fallbackBodyEl, false);
+    }
     setEditable(subtitleEl, false);
     setEditable(bodyEl, false);
     setLatestNewsEditingState(false);
@@ -792,8 +813,8 @@ const wireCardInline = (item: Element) => {
           sort_order: record.sortOrder,
           category: isLatestNews ? (categoryEditor?.value ?? readState.category).trim() : '',
           subtitle: isLatestNews ? (subtitleEl?.textContent ?? readState.subtitle).trim() : '',
-          title: (titleEl?.textContent ?? '').trim(),
-          body: (bodyEl?.textContent ?? '').trim(),
+          title: isLatestNews ? getLatestNewsTitleText() : (titleEl?.textContent ?? '').trim(),
+          body: isLatestNews ? getLatestNewsBodyText() : (bodyEl?.textContent ?? '').trim(),
           image_url: isLatestNews ? (imageUrlEditor?.value ?? readState.imageUrl).trim() : '',
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
@@ -812,6 +833,7 @@ const wireCardInline = (item: Element) => {
     cancelBtn.addEventListener('click', (event) => {
       event.preventDefault();
       if (titleEl) titleEl.textContent = readState.title;
+      if (newsTitleEl) newsTitleEl.textContent = readState.title;
       if (subtitleEl) subtitleEl.textContent = readState.subtitle;
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
@@ -831,6 +853,12 @@ const wireCardInline = (item: Element) => {
     event?.preventDefault();
     setLatestNewsEditingState(true);
     setEditable(titleEl, true);
+    if (isLatestNews) {
+      setEditable(newsTitleEl, true);
+      setEditable(fallbackTitleEl, true);
+      setEditable(visibleBodyEl, true);
+      setEditable(fallbackBodyEl, true);
+    }
     setEditable(subtitleEl, true);
     setEditable(bodyEl, true);
 
@@ -854,9 +882,9 @@ const wireCardInline = (item: Element) => {
       imageUrlEditor.addEventListener('input', () => {
         syncLatestNewsMedia(
           imageUrlEditor?.value || '',
-          (titleEl?.textContent ?? readState.title).trim(),
+          getLatestNewsTitleText() || readState.title,
           (subtitleEl?.textContent ?? readState.subtitle).trim(),
-          (bodyEl?.textContent ?? readState.body).trim()
+          getLatestNewsBodyText() || readState.body
         );
       });
     }
@@ -884,9 +912,9 @@ const wireCardInline = (item: Element) => {
           if (imageUrlEditor) imageUrlEditor.value = url;
           syncLatestNewsMedia(
             url,
-            (titleEl?.textContent ?? readState.title).trim(),
+            getLatestNewsTitleText() || readState.title,
             (subtitleEl?.textContent ?? readState.subtitle).trim(),
-            (bodyEl?.textContent ?? readState.body).trim()
+            getLatestNewsBodyText() || readState.body
           );
           showStatus('Image uploaded. Save the card to publish changes.');
         } catch (error) {
@@ -914,9 +942,21 @@ const wireCardInline = (item: Element) => {
     if ((event.target as HTMLElement).closest('.inline-url-editor')) return;
     if ((event.target as HTMLElement).closest('.inline-file-editor')) return;
     event.preventDefault();
-  });
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  }, true);
 
-  bodyEl?.addEventListener('click', enterEdit);
+  const editTriggers = isLatestNews
+    ? [newsTitleEl, subtitleEl, visibleBodyEl, fallbackTitleEl, fallbackBodyEl]
+    : [bodyEl, titleEl];
+
+  editTriggers.forEach((trigger) => {
+    trigger?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      enterEdit(event);
+    });
+  });
 };
 
 const wireDownloadInline = (item: Element) => {
