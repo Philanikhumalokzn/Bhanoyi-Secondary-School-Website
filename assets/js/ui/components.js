@@ -39,7 +39,9 @@ const renderLatestNewsSection = (section) => {
               const slides = items
                 .map((item, idx) => {
                   const hasImage = Boolean((item.imageUrl || '').trim());
-                  const fallbackHeading = (item.subtitle || '').trim() || item.title;
+                  const normalizedSubtitle = (item.subtitle || '').trim();
+                  const fallbackHeading = item.title;
+                  const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
                   const attrs = [
                     section.editable ? 'data-editable-card="true"' : '',
                     section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
@@ -62,8 +64,8 @@ const renderLatestNewsSection = (section) => {
                       </div>
                       <div class="latest-news-content">
                         <span class="news-category">${category}</span>
-                        <h3 class="latest-news-title">${item.title}</h3>
-                        ${item.subtitle ? `<p class="latest-news-subtitle">${item.subtitle}</p>` : ''}
+                        <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
+                        ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
                         <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
                       </div>
                     </a>
