@@ -6,6 +6,7 @@ export type SiteCard = {
   page_key: string;
   section_key: string;
   category: string;
+  subtitle: string;
   title: string;
   body: string;
   image_url: string;
@@ -146,7 +147,7 @@ export const deleteDownload = async (id: string) => {
 export const listCards = async (pageKey: string, sectionKey: string): Promise<SiteCard[]> => {
   const { data, error } = await supabase
     .from('site_cards')
-    .select('id,page_key,section_key,category,title,body,image_url,href,sort_order,is_active')
+    .select('id,page_key,section_key,category,subtitle,title,body,image_url,href,sort_order,is_active')
     .eq('page_key', pageKey)
     .eq('section_key', sectionKey)
     .order('sort_order', { ascending: true });
@@ -159,6 +160,7 @@ export const saveCard = async (entry: Partial<SiteCard>) => {
   if (entry.id) {
     const updatePayload: Partial<SiteCard> = {};
     if (entry.category !== undefined) updatePayload.category = entry.category;
+    if (entry.subtitle !== undefined) updatePayload.subtitle = entry.subtitle;
     if (entry.title !== undefined) updatePayload.title = entry.title;
     if (entry.body !== undefined) updatePayload.body = entry.body;
     if (entry.image_url !== undefined) updatePayload.image_url = entry.image_url;
@@ -175,6 +177,7 @@ export const saveCard = async (entry: Partial<SiteCard>) => {
     page_key: entry.page_key ?? 'home',
     section_key: entry.section_key ?? '',
     category: entry.category ?? '',
+    subtitle: entry.subtitle ?? '',
     title: entry.title ?? '',
     body: entry.body ?? '',
     image_url: entry.image_url ?? '',

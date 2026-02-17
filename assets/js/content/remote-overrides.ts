@@ -25,6 +25,7 @@ type CardRow = {
   page_key: string;
   section_key: string;
   category: string;
+  subtitle: string;
   title: string;
   body: string;
   image_url: string;
@@ -94,7 +95,7 @@ const fetchCards = async (): Promise<CardRow[]> => {
   if (!url || !key) return [];
 
   const response = await fetch(
-    `${url}/rest/v1/site_cards?select=id,page_key,section_key,category,title,body,image_url,href,sort_order&is_active=eq.true&order=sort_order.asc`,
+    `${url}/rest/v1/site_cards?select=id,page_key,section_key,category,subtitle,title,body,image_url,href,sort_order&is_active=eq.true&order=sort_order.asc`,
     { headers: restHeaders(key) }
   );
 
@@ -198,6 +199,7 @@ const applyCards = (siteContent: SiteContent, rows: CardRow[]) => {
         items: items.map((item) => ({
           id: item.id,
           category: item.category || 'General',
+          subtitle: item.subtitle || '',
           title: item.title,
           body: item.body,
           imageUrl: item.image_url || '',

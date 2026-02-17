@@ -27,6 +27,7 @@ type CardRecord = {
   sortOrder: number;
   clickable: boolean;
   category: string;
+  subtitle: string;
   title: string;
   body: string;
   imageUrl: string;
@@ -162,6 +163,7 @@ const toCardRecord = (item: Element): CardRecord => {
   const body = (item.querySelector('p')?.textContent ?? '').trim();
   const href = (item as HTMLAnchorElement).getAttribute?.('href') ?? '';
   const category = ((item as HTMLElement).dataset.cardCategory || getText(item, '.news-category') || 'General').trim();
+  const subtitle = ((item as HTMLElement).dataset.cardSubtitle || getText(item, '.latest-news-subtitle') || '').trim();
   const imageUrl = ((item as HTMLElement).dataset.cardImageUrl ||
     (item.querySelector('.latest-news-image') as HTMLImageElement | null)?.getAttribute('src') ||
     '')
@@ -173,6 +175,7 @@ const toCardRecord = (item: Element): CardRecord => {
     sortOrder: Number((item as HTMLElement).dataset.sortOrder || '0'),
     clickable: (item as HTMLElement).dataset.cardClickable === 'true',
     category,
+    subtitle,
     title,
     body,
     imageUrl,
@@ -203,6 +206,150 @@ const toHeroNoticeRecord = (notice: Element): HeroNoticeRecord => ({
   href: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.getAttribute('href') ?? '').trim(),
   linkLabel: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.textContent ?? 'View notice').trim()
 });
+
+const getLatestNewsCategories = () => {
+  const fromLanes = Array.from(document.querySelectorAll('.latest-news-lane-head h3'))
+    .map((el) => (el.textContent ?? '').trim())
+    .filter(Boolean);
+
+  const defaults = ['Academics', 'Parents', 'Sports', 'Extra-curricular'];
+  return Array.from(new Set([...defaults, ...fromLanes]));
+};
+
+const openLatestNewsComposer = () => {
+  const existingOverlay = document.querySelector('.news-overlay');
+  if (existingOverlay) return;
+
+  const categories = getLatestNewsCategories();
+  const overlay = document.createElement('div');
+  overlay.className = 'news-overlay';
+  overlay.innerHTML = `
+    <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Post new article">
+      <h3>Post new article</h3>
+      <form class="news-overlay-form" id="news-overlay-form">
+        <label>
+          Title
+          <input type="text" name="title" required />
+        </label>
+        <label>
+          Subtitle
+          <input type="text" name="subtitle" />
+        </label>
+        <label>
+          Preview / Body
+          <textarea name="body" rows="4" required></textarea>
+        </label>
+        <label>
+          Category
+          <select name="category" id="news-category-select">
+            ${categories.map((cat) => `<option value="${cat}">${cat}</option>`).join('')}
+            <option value="__new__">Add new category</option>
+          </select>
+        </label>
+        <label id="news-new-category-wrap" style="display:none;">
+          New category name
+          <input type="text" name="newCategory" />
+        </label>
+        <label>
+          Article link (optional)
+          <input type="url" name="href" value="#" />
+        </label>
+        <label>
+          Image URL (optional)
+          <input type="url" name="imageUrl" />
+        </label>
+        <label>
+          Upload image (optional)
+          <input type="file" name="imageFile" accept="image/*" />
+        </label>
+        <div class="news-overlay-actions">
+          <button type="button" id="news-overlay-cancel">Cancel</button>
+          <button type="submit" id="news-overlay-save">Post article</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const form = overlay.querySelector('#news-overlay-form') as HTMLFormElement | null;
+  const categorySelect = overlay.querySelector('#news-category-select') as HTMLSelectElement | null;
+  const newCategoryWrap = overlay.querySelector('#news-new-category-wrap') as HTMLElement | null;
+  const cancelBtn = overlay.querySelector('#news-overlay-cancel') as HTMLButtonElement | null;
+  const saveBtn = overlay.querySelector('#news-overlay-save') as HTMLButtonElement | null;
+
+  categorySelect?.addEventListener('change', () => {
+    if (!newCategoryWrap) return;
+    newCategoryWrap.style.display = categorySelect.value === '__new__' ? 'grid' : 'none';
+  });
+
+  cancelBtn?.addEventListener('click', () => {
+    overlay.remove();
+  });
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      overlay.remove();
+    }
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!form || !saveBtn) return;
+
+    const formData = new FormData(form);
+    const title = String(formData.get('title') || '').trim();
+    const subtitle = String(formData.get('subtitle') || '').trim();
+    const body = String(formData.get('body') || '').trim();
+    const href = String(formData.get('href') || '#').trim() || '#';
+    const imageUrlInput = String(formData.get('imageUrl') || '').trim();
+    const selectedCategory = String(formData.get('category') || '').trim();
+    const newCategory = String(formData.get('newCategory') || '').trim();
+    const imageFile = formData.get('imageFile') as File | null;
+
+    const category = selectedCategory === '__new__' ? newCategory : selectedCategory;
+    if (!title || !body || !category) {
+      showStatus('Title, body, and category are required.');
+      return;
+    }
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Posting...';
+
+      let imageUrl = imageUrlInput;
+      if (imageFile && imageFile.size > 0) {
+        imageUrl = await uploadNewsImage(imageFile);
+      }
+
+      const currentOrders = Array.from(document.querySelectorAll('.latest-news-slide'))
+        .map((el) => Number((el as HTMLElement).dataset.sortOrder || '0'))
+        .filter((value) => !Number.isNaN(value));
+      const nextSortOrder = (currentOrders.length ? Math.max(...currentOrders) : 0) + 1;
+
+      await saveCard({
+        page_key: currentPageKey(),
+        section_key: 'latest_news',
+        category,
+        subtitle,
+        title,
+        body,
+        image_url: imageUrl,
+        href,
+        sort_order: nextSortOrder
+      });
+
+      showStatus('Latest news article posted. Refreshing...');
+      overlay.remove();
+      window.location.reload();
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to post article.');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Post article';
+    }
+  });
+};
 
 const wireAnnouncementInline = (item: Element) => {
   const record = toRecord(item);
@@ -338,6 +485,7 @@ const wireCardInline = (item: Element) => {
   const titleEl = item.querySelector('h3');
   const bodyEl = item.querySelector('p');
   const categoryEl = item.querySelector('.news-category');
+  const subtitleEl = item.querySelector('.latest-news-subtitle');
   const imageEl = item.querySelector('.latest-news-image') as HTMLImageElement | null;
   const fallbackEl = item.querySelector('.latest-news-image-fallback') as HTMLElement | null;
   const fallbackTitleEl = item.querySelector('.latest-news-fallback-title') as HTMLElement | null;
@@ -370,6 +518,7 @@ const wireCardInline = (item: Element) => {
 
   const exitEdit = () => {
     setEditable(titleEl, false);
+    setEditable(subtitleEl, false);
     setEditable(bodyEl, false);
     if (categoryEditor) {
       categoryEditor.parentElement?.remove();
@@ -439,6 +588,7 @@ const wireCardInline = (item: Element) => {
           section_key: record.sectionKey,
           sort_order: record.sortOrder,
           category: isLatestNews ? (categoryEditor?.value ?? readState.category).trim() : '',
+          subtitle: isLatestNews ? (subtitleEl?.textContent ?? readState.subtitle).trim() : '',
           title: (titleEl?.textContent ?? '').trim(),
           body: (bodyEl?.textContent ?? '').trim(),
           image_url: isLatestNews ? (imageUrlEditor?.value ?? readState.imageUrl).trim() : '',
@@ -459,6 +609,7 @@ const wireCardInline = (item: Element) => {
     cancelBtn.addEventListener('click', (event) => {
       event.preventDefault();
       if (titleEl) titleEl.textContent = readState.title;
+      if (subtitleEl) subtitleEl.textContent = readState.subtitle;
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
       syncLatestNewsMedia(readState.imageUrl, readState.title, readState.body);
@@ -476,6 +627,7 @@ const wireCardInline = (item: Element) => {
   const enterEdit = (event?: Event) => {
     event?.preventDefault();
     setEditable(titleEl, true);
+    setEditable(subtitleEl, true);
     setEditable(bodyEl, true);
 
     if (record.clickable && !urlEditor) {
@@ -922,6 +1074,11 @@ const bindInlineActions = () => {
   editableDownloads.forEach(wireDownloadInline);
 
   wireFooterInline();
+
+  const postNewsButton = document.querySelector('[data-post-news]') as HTMLButtonElement | null;
+  postNewsButton?.addEventListener('click', () => {
+    openLatestNewsComposer();
+  });
 };
 
 export const initInlinePublicAdmin = async () => {

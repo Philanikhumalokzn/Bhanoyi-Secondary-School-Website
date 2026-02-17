@@ -29,7 +29,10 @@ const renderLatestNewsSection = (section) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''} latest-news-shell" id="latest-news">
       <div class="container">
-        <h2>${section.title}</h2>
+        <div class="latest-news-header">
+          <h2>${section.title}</h2>
+          <button type="button" class="latest-news-post-btn" data-post-news>Post new article</button>
+        </div>
         <div class="latest-news-grid">
           ${categories
             .map(([category, items]) => {
@@ -41,6 +44,7 @@ const renderLatestNewsSection = (section) => {
                     section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
                     item.id ? `data-card-id="${item.id}"` : '',
                     `data-card-category="${category}"`,
+                    `data-card-subtitle="${item.subtitle || ''}"`,
                     `data-card-image-url="${item.imageUrl || ''}"`,
                     typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
                     'data-card-clickable="true"'
@@ -57,6 +61,7 @@ const renderLatestNewsSection = (section) => {
                       </div>
                       <div class="latest-news-content">
                         <span class="news-category">${category}</span>
+                        ${item.subtitle ? `<p class="latest-news-subtitle">${item.subtitle}</p>` : ''}
                         <h3>${item.title}</h3>
                         <p>${item.body}</p>
                       </div>

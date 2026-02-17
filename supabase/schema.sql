@@ -28,6 +28,7 @@ create table if not exists public.site_cards (
   page_key text not null,
   section_key text not null,
   category text not null default '',
+  subtitle text not null default '',
   title text not null,
   body text not null,
   image_url text not null default '',
@@ -39,6 +40,9 @@ create table if not exists public.site_cards (
 
 alter table if exists public.site_cards
   add column if not exists category text not null default '';
+
+alter table if exists public.site_cards
+  add column if not exists subtitle text not null default '';
 
 alter table if exists public.site_cards
   add column if not exists image_url text not null default '';
