@@ -30,7 +30,7 @@ const replaceTokens = (value, source) => {
 const resolvePlaceholders = (siteContent) => replaceTokens(siteContent, siteContent);
 
 const fetchJsonContent = async () => {
-  const response = await fetch('./assets/content/site-content.json', { cache: 'no-store' });
+  const response = await fetch('/content/site-content.json', { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`Content load failed with status ${response.status}`);
   }
