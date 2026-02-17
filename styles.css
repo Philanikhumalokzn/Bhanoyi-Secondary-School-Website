@@ -95,22 +95,23 @@ body {
   text-decoration: none;
   color: var(--text);
   font-weight: 700;
+  font-size: 1.35rem;
 }
 
 .brand-mark {
   display: inline-grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 72px;
+  height: 72px;
   border-radius: 999px;
   background: var(--primary);
   color: #fff;
-  font-size: 0.8rem;
+  font-size: 1.6rem;
 }
 
 .brand-logo {
-  width: 40px;
-  height: 40px;
+  width: 80px;
+  height: 80px;
   object-fit: contain;
   border-radius: 8px;
 }
