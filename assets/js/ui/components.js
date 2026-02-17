@@ -295,6 +295,136 @@ export const initLatestNewsRotators = () => {
   });
 };
 
+const openLatestNewsReadOverlay = (slide) => {
+  const existing = document.getElementById('news-read-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const lane = slide.closest('.latest-news-lane');
+  const laneSlides = lane ? Array.from(lane.querySelectorAll('.latest-news-slide')) : [slide];
+  let currentIndex = Math.max(0, laneSlides.indexOf(slide));
+
+  const readArticle = (currentSlide) => {
+    const category = (currentSlide.querySelector('.news-category')?.textContent ?? '').trim();
+    const title = (currentSlide.querySelector('.latest-news-title')?.textContent ?? '').trim();
+    const subtitle = (currentSlide.querySelector('.latest-news-subtitle')?.textContent ?? '').trim();
+    const body = (
+      currentSlide.querySelector('.latest-news-body')?.textContent ??
+      currentSlide.querySelector('.latest-news-fallback-body')?.textContent ??
+      ''
+    ).trim();
+    const image = currentSlide.querySelector('.latest-news-image');
+    const imageUrl = image && !image.classList.contains('is-hidden') ? image.getAttribute('src') || '' : '';
+    const href = (currentSlide.getAttribute('href') || '#').trim();
+
+    return {
+      category,
+      title,
+      subtitle,
+      body,
+      imageUrl,
+      href
+    };
+  };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'news-read-overlay';
+  overlay.className = 'news-read-overlay';
+  overlay.innerHTML = `
+    <article class="news-read-panel" role="dialog" aria-modal="true" aria-label="Latest news article">
+      <button type="button" class="news-read-close" aria-label="Close article">×</button>
+      <div class="news-read-dynamic"></div>
+      <div class="news-read-nav ${laneSlides.length > 1 ? '' : 'is-hidden'}">
+        <button type="button" class="news-read-nav-btn" data-news-prev>Previous</button>
+        <span class="news-read-nav-state" data-news-state></span>
+        <button type="button" class="news-read-nav-btn" data-news-next>Next</button>
+      </div>
+    </article>
+  `;
+
+  const dynamic = overlay.querySelector('.news-read-dynamic');
+  const state = overlay.querySelector('[data-news-state]');
+
+  const renderArticle = () => {
+    const article = readArticle(laneSlides[currentIndex]);
+    if (!dynamic) return;
+
+    dynamic.innerHTML = `
+      ${article.imageUrl ? `<img class="news-read-image" src="${article.imageUrl}" alt="${article.title}" />` : ''}
+      <div class="news-read-content">
+        ${article.category ? `<p class="news-read-category">${article.category}</p>` : ''}
+        <h3>${article.title}</h3>
+        ${article.subtitle ? `<p class="news-read-subtitle">${article.subtitle}</p>` : ''}
+        <p class="news-read-body">${article.body || 'No article content provided yet.'}</p>
+        ${article.href && article.href !== '#' ? `<a class="btn btn-secondary" href="${article.href}">Open linked page</a>` : ''}
+      </div>
+    `;
+
+    if (state) {
+      state.textContent = `${currentIndex + 1} of ${laneSlides.length}`;
+    }
+  };
+
+  const nextArticle = () => {
+    if (laneSlides.length <= 1) return;
+    currentIndex = (currentIndex + 1) % laneSlides.length;
+    renderArticle();
+  };
+
+  const previousArticle = () => {
+    if (laneSlides.length <= 1) return;
+    currentIndex = (currentIndex - 1 + laneSlides.length) % laneSlides.length;
+    renderArticle();
+  };
+
+  const close = () => {
+    document.removeEventListener('keydown', onKeyDown);
+    overlay.remove();
+  };
+
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      close();
+      return;
+    }
+
+    if (event.key === 'ArrowRight') {
+      nextArticle();
+      return;
+    }
+
+    if (event.key === 'ArrowLeft') {
+      previousArticle();
+    }
+  };
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  overlay.querySelector('[data-news-next]')?.addEventListener('click', nextArticle);
+  overlay.querySelector('[data-news-prev]')?.addEventListener('click', previousArticle);
+  overlay.querySelector('.news-read-close')?.addEventListener('click', close);
+  document.addEventListener('keydown', onKeyDown);
+  document.body.appendChild(overlay);
+  renderArticle();
+};
+
+export const initLatestNewsReaders = () => {
+  if (document.body.classList.contains('inline-admin-active')) {
+    return;
+  }
+
+  const slides = Array.from(document.querySelectorAll('.latest-news-slide'));
+  slides.forEach((slide) => {
+    slide.addEventListener('click', (event) => {
+      event.preventDefault();
+      openLatestNewsReadOverlay(slide);
+    });
+  });
+};
+
 export const renderFooter = (siteContent) => `
   <footer class="site-footer">
     <div class="container footer-grid">
