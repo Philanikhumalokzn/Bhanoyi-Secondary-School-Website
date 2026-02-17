@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin | Bhanoyi Secondary School</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="admin-shell">
+      <section class="admin-auth panel" id="auth-panel">
+        <h1>Admin Login</h1>
+        <p class="lead">Sign in to manage announcements and download links.</p>
+        <form id="login-form" class="admin-form">
+          <label>
+            Email
+            <input type="email" id="email" required />
+          </label>
+          <label>
+            Password
+            <input type="password" id="password" required />
+          </label>
+          <button type="submit" class="btn btn-primary">Sign in</button>
+        </form>
+        <p id="auth-status" aria-live="polite"></p>
+      </section>
+
+      <section class="admin-app" id="admin-panel" hidden>
+        <header class="admin-topbar panel">
+          <h1>Content Admin</h1>
+          <div class="admin-topbar-actions">
+            <button id="refresh-data" class="btn btn-secondary">Refresh</button>
+            <button id="logout" class="btn btn-secondary">Logout</button>
+          </div>
+        </header>
+
+        <div class="admin-grid">
+          <article class="panel">
+            <h2>Announcements</h2>
+            <form id="announcement-form" class="admin-form">
+              <input type="hidden" id="announcement-id" />
+              <label>Date<input id="announcement-date" required /></label>
+              <label>Tag<input id="announcement-tag" /></label>
+              <label>Title<input id="announcement-title" required /></label>
+              <label>Body<textarea id="announcement-body" rows="3" required></textarea></label>
+              <label>Sort Order<input id="announcement-sort" type="number" value="0" /></label>
+              <button type="submit" class="btn btn-primary">Save Announcement</button>
+            </form>
+            <div id="announcement-list" class="admin-list"></div>
+          </article>
+
+          <article class="panel">
+            <h2>Downloads</h2>
+            <form id="download-form" class="admin-form">
+              <input type="hidden" id="download-id" />
+              <label>Section
+                <select id="download-section">
+                  <option value="admissions">Admissions</option>
+                  <option value="policies">Policies</option>
+                </select>
+              </label>
+              <label>Title<input id="download-title" required /></label>
+              <label>Description<textarea id="download-body" rows="3" required></textarea></label>
+              <label>File/Link URL<input id="download-href" required /></label>
+              <label>Button Label<input id="download-label" value="Download File" /></label>
+              <label>Sort Order<input id="download-sort" type="number" value="0" /></label>
+              <button type="submit" class="btn btn-primary">Save Download</button>
+            </form>
+            <div id="download-list" class="admin-list"></div>
+          </article>
+        </div>
+
+        <p id="admin-status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script type="module" src="assets/js/admin/bootstrap.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,120 @@
+type SiteContent = {
+  pages: Record<string, { sections: Array<any> }>;
+};
+
+type AnnouncementRow = {
+  date: string;
+  tag: string;
+  title: string;
+  body: string;
+};
+
+type DownloadRow = {
+  section: 'admissions' | 'policies';
+  title: string;
+  body: string;
+  href: string;
+  link_label: string;
+};
+
+const getConfig = () => {
+  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  return { url, key };
+};
+
+const hasConfig = () => {
+  const { url, key } = getConfig();
+  return Boolean(url && key);
+};
+
+const restHeaders = (key: string) => ({
+  apikey: key,
+  Authorization: `Bearer ${key}`
+});
+
+const fetchAnnouncements = async (): Promise<AnnouncementRow[]> => {
+  const { url, key } = getConfig();
+  if (!url || !key) return [];
+
+  const response = await fetch(
+    `${url}/rest/v1/site_announcements?select=date,tag,title,body&is_active=eq.true&order=sort_order.asc`,
+    { headers: restHeaders(key) }
+  );
+
+  if (!response.ok) return [];
+  return (await response.json()) as AnnouncementRow[];
+};
+
+const fetchDownloads = async (): Promise<DownloadRow[]> => {
+  const { url, key } = getConfig();
+  if (!url || !key) return [];
+
+  const response = await fetch(
+    `${url}/rest/v1/site_downloads?select=section,title,body,href,link_label&is_active=eq.true&order=sort_order.asc`,
+    { headers: restHeaders(key) }
+  );
+
+  if (!response.ok) return [];
+  return (await response.json()) as DownloadRow[];
+};
+
+const applyAnnouncements = (siteContent: SiteContent, rows: AnnouncementRow[]) => {
+  if (rows.length === 0) return;
+  const home = siteContent.pages.home;
+  if (!home) return;
+
+  home.sections = home.sections.map((section) => {
+    if (section.type !== 'announcements') return section;
+    return {
+      ...section,
+      items: rows
+    };
+  });
+};
+
+const applyDownloads = (siteContent: SiteContent, rows: DownloadRow[]) => {
+  if (rows.length === 0) return;
+
+  const bySection = {
+    admissions: rows.filter((row) => row.section === 'admissions'),
+    policies: rows.filter((row) => row.section === 'policies')
+  };
+
+  const rewrite = (pageKey: 'admissions' | 'policies', items: DownloadRow[]) => {
+    if (items.length === 0) return;
+    const page = siteContent.pages[pageKey];
+    if (!page) return;
+
+    page.sections = page.sections.map((section) => {
+      if (section.type !== 'downloads') return section;
+      return {
+        ...section,
+        items: items.map((row) => ({
+          title: row.title,
+          body: row.body,
+          href: row.href,
+          linkLabel: row.link_label || 'Download File'
+        }))
+      };
+    });
+  };
+
+  rewrite('admissions', bySection.admissions);
+  rewrite('policies', bySection.policies);
+};
+
+export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T): Promise<T> => {
+  if (!hasConfig()) {
+    return siteContent;
+  }
+
+  try {
+    const [announcements, downloads] = await Promise.all([fetchAnnouncements(), fetchDownloads()]);
+    applyAnnouncements(siteContent, announcements);
+    applyDownloads(siteContent, downloads);
+    return siteContent;
+  } catch {
+    return siteContent;
+  }
+};

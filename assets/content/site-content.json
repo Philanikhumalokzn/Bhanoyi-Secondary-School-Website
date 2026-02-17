@@ -1,0 +1,397 @@
+{
+  "school": {
+    "shortName": "BS",
+    "name": "Bhanoyi Secondary School",
+    "logoPath": "/assets/Favicons%20and%20Logos/Bhanoyi%20Logo.png",
+    "tagline": "Empowering learners for life and leadership.",
+    "phone": "+27 (0)00 000 0000",
+    "email": "info@bhanoyisecondary.co.za",
+    "address": "[School Address], KwaZulu-Natal, South Africa",
+    "hours": ["Mon–Fri: 07:30 – 15:30", "Office closes at 16:00"]
+  },
+  "navigation": [
+    { "key": "home", "label": "Home", "href": "index.html" },
+    { "key": "about", "label": "About", "href": "about.html" },
+    { "key": "academics", "label": "Academics", "href": "academics.html" },
+    { "key": "admissions", "label": "Admissions", "href": "admissions.html" },
+    { "key": "policies", "label": "Policies", "href": "policies.html" },
+    { "key": "contact", "label": "Contact", "href": "contact.html" }
+  ],
+  "pages": {
+    "home": {
+      "key": "home",
+      "metaTitle": "Bhanoyi Secondary School",
+      "metaDescription": "Bhanoyi Secondary School official website: admissions, news, events, academics, policies, and contact information.",
+      "hero": {
+        "eyebrow": "Welcome to",
+        "title": "Bhanoyi Secondary School",
+        "lead": "Building future-ready learners through academic excellence, discipline, and community values.",
+        "cta": [
+          { "label": "Apply / Enquire", "href": "admissions.html", "variant": "primary" },
+          { "label": "Contact School", "href": "contact.html", "variant": "secondary" }
+        ],
+        "notice": {
+          "title": "Important Notice",
+          "body": "2026 applications are open. Submit forms before 31 March 2026.",
+          "href": "admissions.html",
+          "linkLabel": "View admission details"
+        }
+      },
+      "sections": [
+        {
+          "type": "cards",
+          "title": "Quick Links",
+          "clickable": true,
+          "items": [
+            {
+              "title": "Admissions",
+              "body": "Application process, required documents, and deadlines.",
+              "href": "admissions.html"
+            },
+            {
+              "title": "School Calendar",
+              "body": "Term dates, exam periods, and parent meeting dates.",
+              "href": "index.html#events"
+            },
+            {
+              "title": "Academic Programmes",
+              "body": "Subjects, learning support, and exam preparation.",
+              "href": "academics.html"
+            },
+            {
+              "title": "Policies & Documents",
+              "body": "Code of conduct, uniform guide, and complaints process.",
+              "href": "policies.html"
+            }
+          ]
+        },
+        {
+          "type": "cards",
+          "title": "Latest News",
+          "alt": true,
+          "columns": 3,
+          "items": [
+            {
+              "title": "Grade 12 Exam Support Programme",
+              "body": "Saturday revision classes continue this term."
+            },
+            {
+              "title": "Parents Meeting",
+              "body": "Parent-teacher consultations scheduled for next week."
+            },
+            {
+              "title": "Sports Update",
+              "body": "Our teams performed strongly in the district fixtures."
+            }
+          ]
+        },
+        {
+          "type": "announcements",
+          "title": "Notices & Announcements",
+          "items": [
+            {
+              "date": "17 Feb 2026",
+              "tag": "Admissions",
+              "title": "2026 Application Window Open",
+              "body": "All Grade 8 admissions applications must be submitted by 31 March 2026."
+            },
+            {
+              "date": "15 Feb 2026",
+              "tag": "Academics",
+              "title": "Mid-Term Assessment Timetable",
+              "body": "Assessment timetables are available from class teachers and office notice boards."
+            },
+            {
+              "date": "12 Feb 2026",
+              "tag": "Parents",
+              "title": "Parent Consultation Reminder",
+              "body": "Parent consultations begin next week. Please book your preferred time slot."
+            }
+          ]
+        },
+        {
+          "type": "cards",
+          "title": "Upcoming Events",
+          "columns": 3,
+          "items": [
+            { "title": "Open Day", "body": "Date: 09 March 2026" },
+            { "title": "Mid-Term Tests", "body": "Date: 18–26 March 2026" },
+            { "title": "Parent Forum", "body": "Date: 02 April 2026" }
+          ]
+        }
+      ]
+    },
+    "about": {
+      "key": "about",
+      "metaTitle": "About | Bhanoyi Secondary School",
+      "metaDescription": "Learn about Bhanoyi Secondary School vision, values, leadership, and school culture.",
+      "hero": {
+        "eyebrow": "Who we are",
+        "title": "About Our School",
+        "lead": "Bhanoyi Secondary School is committed to quality education and holistic learner development.",
+        "cta": [{ "label": "Contact Leadership", "href": "contact.html", "variant": "secondary" }]
+      },
+      "sections": [
+        {
+          "type": "split",
+          "title": "Vision and Values",
+          "body": "We partner with parents and the wider community to create a safe and focused environment where every learner can succeed.",
+          "panel": {
+            "title": "Principal’s Message",
+            "body": "We aim to nurture responsibility, resilience, and academic confidence in every learner."
+          }
+        },
+        {
+          "type": "cards",
+          "title": "School Culture",
+          "alt": true,
+          "columns": 3,
+          "items": [
+            {
+              "title": "Discipline",
+              "body": "Clear behaviour expectations that support learning outcomes."
+            },
+            {
+              "title": "Community",
+              "body": "Strong parent-school communication and collaboration."
+            },
+            {
+              "title": "Growth",
+              "body": "Balanced focus on academics, leadership, and character."
+            }
+          ]
+        }
+      ]
+    },
+    "academics": {
+      "key": "academics",
+      "metaTitle": "Academics | Bhanoyi Secondary School",
+      "metaDescription": "Academic programmes, curriculum, assessment, and learner support at Bhanoyi Secondary School.",
+      "hero": {
+        "eyebrow": "Teaching and learning",
+        "title": "Academics",
+        "lead": "Comprehensive subject offerings and structured support to help learners achieve excellent results.",
+        "cta": [{ "label": "View Admissions", "href": "admissions.html", "variant": "primary" }]
+      },
+      "sections": [
+        {
+          "type": "cards",
+          "title": "Academic Programme",
+          "columns": 3,
+          "items": [
+            {
+              "title": "Curriculum",
+              "body": "Comprehensive subject offerings aligned with national standards."
+            },
+            {
+              "title": "Assessment",
+              "body": "Continuous assessment and exam readiness support for all grades."
+            },
+            {
+              "title": "Learner Support",
+              "body": "Guidance and academic support for improved outcomes."
+            }
+          ]
+        },
+        {
+          "type": "split",
+          "title": "Curriculum Information",
+          "alt": true,
+          "body": "Parents and guardians can request full curriculum details by grade and subject stream.",
+          "panel": {
+            "title": "Need Subject Guidance?",
+            "body": "Contact the academics office for help selecting subjects and pathways.",
+            "link": { "href": "contact.html", "label": "Get in touch" }
+          }
+        }
+      ]
+    },
+    "admissions": {
+      "key": "admissions",
+      "metaTitle": "Admissions | Bhanoyi Secondary School",
+      "metaDescription": "Admissions process, requirements, and application support for Bhanoyi Secondary School.",
+      "hero": {
+        "eyebrow": "Join our school",
+        "title": "Admissions",
+        "lead": "Apply by completing the admission form and submitting required documents before the deadline.",
+        "cta": [{ "label": "Contact Admissions", "href": "contact.html", "variant": "primary" }]
+      },
+      "sections": [
+        {
+          "type": "split",
+          "title": "Application Requirements",
+          "body": "Submit all required documents to the school office to complete your application.",
+          "list": [
+            "Certified copy of learner birth certificate or ID",
+            "Latest school report",
+            "Proof of residence",
+            "Parent or guardian ID copy"
+          ],
+          "panel": {
+            "title": "Application Deadline",
+            "body": "2026 applications close on 31 March 2026.",
+            "link": { "href": "contact.html", "label": "Ask admissions a question" }
+          }
+        },
+        {
+          "type": "cards",
+          "alt": true,
+          "title": "Admission Support",
+          "columns": 3,
+          "items": [
+            {
+              "title": "Office Guidance",
+              "body": "In-person support for form completion and submissions."
+            },
+            {
+              "title": "Enquiry Handling",
+              "body": "Parents can call the office during school hours."
+            },
+            {
+              "title": "Status Updates",
+              "body": "Applicants receive communication once processing is complete."
+            }
+          ]
+        },
+        {
+          "type": "downloads",
+          "title": "Admission Forms & Documents",
+          "items": [
+            {
+              "title": "Admission Application Form",
+              "body": "Download and complete the learner application form before submission.",
+              "href": "/documents/admission-application-form.txt",
+              "linkLabel": "Download Form"
+            },
+            {
+              "title": "Required Documents Checklist",
+              "body": "Use this checklist to make sure your application is complete.",
+              "href": "/documents/admission-checklist.txt",
+              "linkLabel": "Download Checklist"
+            },
+            {
+              "title": "Admission Policy",
+              "body": "Read the school admission policy and placement criteria.",
+              "href": "/documents/admission-policy.txt",
+              "linkLabel": "Download Policy"
+            }
+          ]
+        }
+      ]
+    },
+    "policies": {
+      "key": "policies",
+      "metaTitle": "Policies | Bhanoyi Secondary School",
+      "metaDescription": "School policies and public information for Bhanoyi Secondary School.",
+      "hero": {
+        "eyebrow": "Governance and compliance",
+        "title": "Policies & Public Information",
+        "lead": "Access the core policy areas parents and learners need most.",
+        "cta": [{ "label": "Contact School Office", "href": "contact.html", "variant": "secondary" }]
+      },
+      "sections": [
+        {
+          "type": "cards",
+          "title": "Policy Categories",
+          "items": [
+            {
+              "title": "Code of Conduct",
+              "body": "Behaviour expectations, learner responsibilities, and discipline."
+            },
+            {
+              "title": "School Uniform",
+              "body": "Uniform requirements and approved items by season."
+            },
+            {
+              "title": "Complaints Procedure",
+              "body": "How parents and guardians can raise concerns formally."
+            },
+            {
+              "title": "Curriculum Information",
+              "body": "Subjects offered per grade and assessment approach."
+            }
+          ]
+        },
+        {
+          "type": "cards",
+          "alt": true,
+          "title": "Public Information Areas",
+          "columns": 3,
+          "items": [
+            { "title": "School Hours", "body": "Official start and end times for the school day." },
+            { "title": "Admissions", "body": "Entry process, key dates, and application guidance." },
+            {
+              "title": "Careers Guidance",
+              "body": "Support pathways for learners transitioning after school."
+            }
+          ]
+        },
+        {
+          "type": "downloads",
+          "title": "Policy Downloads",
+          "items": [
+            {
+              "title": "Code of Conduct (PDF)",
+              "body": "Learner behavior standards, responsibilities, and disciplinary procedures.",
+              "href": "/documents/code-of-conduct.txt",
+              "linkLabel": "Download File"
+            },
+            {
+              "title": "Uniform Policy (PDF)",
+              "body": "Approved uniform items, seasonal wear, and compliance expectations.",
+              "href": "/documents/uniform-policy.txt",
+              "linkLabel": "Download File"
+            },
+            {
+              "title": "Complaints Procedure (PDF)",
+              "body": "Formal process for submitting and resolving school complaints.",
+              "href": "/documents/complaints-procedure.txt",
+              "linkLabel": "Download File"
+            },
+            {
+              "title": "Curriculum Overview (PDF)",
+              "body": "Grade-level subject offerings and progression pathways.",
+              "href": "/documents/curriculum-overview.txt",
+              "linkLabel": "Download File"
+            }
+          ]
+        }
+      ]
+    },
+    "contact": {
+      "key": "contact",
+      "metaTitle": "Contact | Bhanoyi Secondary School",
+      "metaDescription": "Contact details and office hours for Bhanoyi Secondary School.",
+      "hero": {
+        "eyebrow": "Get in touch",
+        "title": "Contact Us",
+        "lead": "Reach the school office for admissions, academic, and general enquiries."
+      },
+      "sections": [
+        {
+          "type": "contact-cards",
+          "title": "Contact Information",
+          "items": [
+            { "title": "Phone", "body": "{{school.phone}}" },
+            { "title": "Email", "body": "{{school.email}}" },
+            { "title": "Address", "body": "{{school.address}}" }
+          ]
+        },
+        {
+          "type": "cards",
+          "alt": true,
+          "title": "Office Hours",
+          "columns": 3,
+          "items": [
+            { "title": "Weekdays", "body": "{{school.hours.0}}" },
+            { "title": "Office Closing", "body": "{{school.hours.1}}" },
+            {
+              "title": "Response Time",
+              "body": "General email enquiries are answered within 2 business days."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
