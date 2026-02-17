@@ -145,6 +145,112 @@ const createFileEditor = () => {
   return { wrapper, input, button };
 };
 
+const ollamaModel = (import.meta.env.VITE_OLLAMA_MODEL as string | undefined) || 'llama3.2:3b';
+
+const getTargetText = (element: Element) => {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    return element.value;
+  }
+  return (element.textContent ?? '').trim();
+};
+
+const setTargetText = (element: Element, value: string) => {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    element.value = value;
+    return;
+  }
+  element.textContent = value;
+};
+
+const findAiTarget = (root: Element): Element | null => {
+  const active = document.activeElement;
+  if (active instanceof Element && root.contains(active)) {
+    if (
+      active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active.getAttribute('contenteditable') === 'true'
+    ) {
+      return active;
+    }
+  }
+
+  return root.querySelector('[contenteditable="true"], input[type="text"], input[type="url"], textarea');
+};
+
+const rewriteWithOllama = async (input: string) => {
+  const prompt = [
+    'Rewrite the text for a school website admin editor.',
+    'Keep the original meaning and factual details.',
+    'Improve grammar, clarity, and readability.',
+    'Return only the rewritten text with no quotes or extra labels.',
+    '',
+    input
+  ].join('\n');
+
+  const response = await fetch('http://127.0.0.1:11434/api/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: ollamaModel,
+      prompt,
+      stream: false,
+      options: {
+        temperature: 0.3
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error('Could not reach local Ollama. Ensure Ollama is running on port 11434.');
+  }
+
+  const payload = (await response.json()) as { response?: string };
+  const rewritten = (payload.response ?? '').trim();
+  if (!rewritten) {
+    throw new Error('Ollama returned an empty result. Try again.');
+  }
+
+  return rewritten;
+};
+
+const attachAiButton = (controls: HTMLElement, root: Element) => {
+  const aiBtn = document.createElement('button');
+  aiBtn.type = 'button';
+  aiBtn.textContent = 'AI Update';
+  aiBtn.addEventListener('click', async () => {
+    const target = findAiTarget(root);
+    if (!target) {
+      showStatus('Click into a field first, then use AI Update.');
+      return;
+    }
+
+    const sourceText = getTargetText(target).trim();
+    if (!sourceText) {
+      showStatus('Add text in the field first, then use AI Update.');
+      return;
+    }
+
+    try {
+      aiBtn.disabled = true;
+      aiBtn.textContent = 'AI Working...';
+      showStatus(`Using local Ollama (${ollamaModel})...`);
+      const rewritten = await rewriteWithOllama(sourceText);
+      setTargetText(target, rewritten);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      showStatus('AI update applied. Review and save.');
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'AI update failed.');
+    } finally {
+      aiBtn.disabled = false;
+      aiBtn.textContent = 'AI Update';
+    }
+  });
+
+  controls.appendChild(aiBtn);
+};
+
 const toRecord = (item: Element): AnnouncementRecord | null => {
   const id = (item as HTMLElement).dataset.announcementId;
   if (!id) return null;
@@ -414,6 +520,7 @@ const wireAnnouncementInline = (item: Element) => {
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+    attachAiButton(controls, item);
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
@@ -590,6 +697,7 @@ const wireCardInline = (item: Element) => {
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+    attachAiButton(controls, item);
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
@@ -789,6 +897,7 @@ const wireDownloadInline = (item: Element) => {
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+    attachAiButton(controls, item);
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
@@ -896,6 +1005,7 @@ const wireHeroNoticeInline = (notice: Element, isNew = false) => {
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+    attachAiButton(controls, notice);
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
@@ -1020,6 +1130,7 @@ const wireFooterInline = () => {
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+    attachAiButton(controls, footer);
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
