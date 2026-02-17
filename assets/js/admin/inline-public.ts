@@ -330,6 +330,9 @@ const wireCardInline = (item: Element) => {
   const isLatestNews = record.sectionKey === 'latest_news';
   const controls = document.createElement('div');
   controls.className = 'inline-admin-controls';
+  if (isLatestNews) {
+    controls.classList.add('latest-news-inline-controls');
+  }
   item.appendChild(controls);
 
   const titleEl = item.querySelector('h3');

@@ -318,6 +318,14 @@ h1 {
   background: var(--surface);
 }
 
+.latest-news-slide .latest-news-inline-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  margin-top: 0;
+}
+
 .latest-news-slide.is-active {
   opacity: 1;
   pointer-events: auto;
