@@ -3,13 +3,19 @@ const renderCard = (item, clickable = false, context = {}) => {
     'data-editable-card="true"',
     context.sectionKey ? `data-section-key="${context.sectionKey}"` : '',
     item.id ? `data-card-id="${item.id}"` : '',
+    `data-card-image-url="${item.imageUrl || ''}"`,
     typeof context.sortOrder === 'number' ? `data-sort-order="${context.sortOrder}"` : '',
     clickable ? 'data-card-clickable="true"' : 'data-card-clickable="false"'
   ]
     .filter(Boolean)
     .join(' ');
 
-  const content = `<h3>${item.title}</h3><p>${item.body}</p>`;
+  const hasImage = Boolean((item.imageUrl || '').trim());
+  const content = `
+    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? item.imageUrl : ''}" alt="${item.title}" loading="lazy" />
+    <h3>${item.title}</h3>
+    <p>${item.body}</p>
+  `;
   if (clickable) {
     return `<a class="card" href="${item.href || '#'}" ${attrs}>${content}</a>`;
   }
@@ -209,6 +215,8 @@ const renderSectionByType = (section, sectionIndex) => {
   }
 
   if (section.type === 'split') {
+    const panelImageUrl = section.panel?.imageUrl || '';
+    const hasPanelImage = Boolean(panelImageUrl.trim());
     return `
       <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="split">
         <div class="container section-grid">
@@ -218,6 +226,7 @@ const renderSectionByType = (section, sectionIndex) => {
             ${section.list ? `<ul class="list">${section.list.map((entry) => `<li>${entry}</li>`).join('')}</ul>` : ''}
           </div>
           <aside class="panel">
+            <img class="split-panel-image ${hasPanelImage ? '' : 'is-hidden'}" src="${hasPanelImage ? panelImageUrl : ''}" alt="${section.panel.title}" loading="lazy" />
             <h3>${section.panel.title}</h3>
             <p>${section.panel.body}</p>
             ${section.panel.link ? `<a href="${section.panel.link.href}">${section.panel.link.label}</a>` : ''}

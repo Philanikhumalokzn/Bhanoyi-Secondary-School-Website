@@ -343,6 +343,7 @@ const toCardRecord = (item: Element): CardRecord => {
   const subtitle = ((item as HTMLElement).dataset.cardSubtitle || getText(item, '.latest-news-subtitle') || '').trim();
   const imageUrl = ((item as HTMLElement).dataset.cardImageUrl ||
     (item.querySelector('.latest-news-image') as HTMLImageElement | null)?.getAttribute('src') ||
+    (item.querySelector('.card-image') as HTMLImageElement | null)?.getAttribute('src') ||
     '')
     .trim();
 
@@ -670,6 +671,7 @@ const wireCardInline = (item: Element) => {
   const categoryEl = item.querySelector('.news-category');
   const subtitleEl = item.querySelector('.latest-news-subtitle');
   const visibleBodyEl = item.querySelector('.latest-news-body') as HTMLElement | null;
+  const cardImageEl = item.querySelector('.card-image') as HTMLImageElement | null;
   const imageEl = item.querySelector('.latest-news-image') as HTMLImageElement | null;
   const fallbackEl = item.querySelector('.latest-news-image-fallback') as HTMLElement | null;
   const fallbackTitleEl = item.querySelector('.latest-news-fallback-title') as HTMLElement | null;
@@ -705,6 +707,15 @@ const wireCardInline = (item: Element) => {
     if (fallbackBodyEl) fallbackBodyEl.textContent = body;
     if (newsTitleEl) newsTitleEl.textContent = title;
     if (visibleBodyEl) visibleBodyEl.textContent = body;
+  };
+
+  const syncStandardCardMedia = (imageUrl: string, title: string) => {
+    if (isLatestNews) return;
+    if (!cardImageEl) return;
+    const hasImage = Boolean((imageUrl || '').trim());
+    cardImageEl.classList.toggle('is-hidden', !hasImage);
+    cardImageEl.src = hasImage ? imageUrl : '';
+    cardImageEl.alt = title;
   };
 
   const getLatestNewsTitleText = () => {
@@ -815,7 +826,7 @@ const wireCardInline = (item: Element) => {
           subtitle: isLatestNews ? (subtitleEl?.textContent ?? readState.subtitle).trim() : '',
           title: isLatestNews ? getLatestNewsTitleText() : (titleEl?.textContent ?? '').trim(),
           body: isLatestNews ? getLatestNewsBodyText() : (bodyEl?.textContent ?? '').trim(),
-          image_url: isLatestNews ? (imageUrlEditor?.value ?? readState.imageUrl).trim() : '',
+          image_url: (imageUrlEditor?.value ?? readState.imageUrl).trim(),
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
 
@@ -838,6 +849,7 @@ const wireCardInline = (item: Element) => {
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
       syncLatestNewsMedia(readState.imageUrl, readState.title, readState.subtitle, readState.body);
+      syncStandardCardMedia(readState.imageUrl, readState.title);
       if (record.clickable && item instanceof HTMLAnchorElement) {
         item.setAttribute('href', readState.href || '#');
       }
@@ -874,22 +886,25 @@ const wireCardInline = (item: Element) => {
       categoryEditor = input;
     }
 
-    if (isLatestNews && !imageUrlEditor) {
+    if (!imageUrlEditor) {
       const { wrapper, input } = createUrlEditor('Image URL', readState.imageUrl || '');
       item.appendChild(wrapper);
       imageUrlEditor = input;
 
       imageUrlEditor.addEventListener('input', () => {
+        const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
+        const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
         syncLatestNewsMedia(
           imageUrlEditor?.value || '',
-          getLatestNewsTitleText() || readState.title,
+          liveTitle,
           (subtitleEl?.textContent ?? readState.subtitle).trim(),
-          getLatestNewsBodyText() || readState.body
+          liveBody
         );
+        syncStandardCardMedia(imageUrlEditor?.value || '', liveTitle);
       });
     }
 
-    if (isLatestNews && !imageFileInput) {
+    if (!imageFileInput) {
       const { wrapper, input, button } = createFileEditor();
       item.appendChild(wrapper);
       imageFileInput = input;
@@ -910,12 +925,15 @@ const wireCardInline = (item: Element) => {
           uploadBtn.textContent = 'Uploading...';
           const url = await uploadNewsImage(file);
           if (imageUrlEditor) imageUrlEditor.value = url;
+          const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
+          const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
           syncLatestNewsMedia(
             url,
-            getLatestNewsTitleText() || readState.title,
+            liveTitle,
             (subtitleEl?.textContent ?? readState.subtitle).trim(),
-            getLatestNewsBodyText() || readState.body
+            liveBody
           );
+          syncStandardCardMedia(url, liveTitle);
           showStatus('Image uploaded. Save the card to publish changes.');
         } catch (error) {
           showStatus(
@@ -936,6 +954,7 @@ const wireCardInline = (item: Element) => {
   renderReadControls();
 
   syncLatestNewsMedia(readState.imageUrl, readState.title, readState.subtitle, readState.body);
+  syncStandardCardMedia(readState.imageUrl, readState.title);
 
   item.addEventListener('click', (event) => {
     if ((event.target as HTMLElement).closest('.inline-admin-controls')) return;
@@ -1215,8 +1234,12 @@ const wireSplitSectionInline = (section: Element) => {
   const panelTitleEl = panel.querySelector('h3');
   const panelBodyEl = panel.querySelector('p');
   const panelLinkEl = panel.querySelector('a') as HTMLAnchorElement | null;
+  const panelImageEl = panel.querySelector('.split-panel-image') as HTMLImageElement | null;
 
   let linkUrlEditor: HTMLInputElement | null = null;
+  let panelImageUrlEditor: HTMLInputElement | null = null;
+  let panelImageFileInput: HTMLInputElement | null = null;
+  let panelImageUploadButton: HTMLButtonElement | null = null;
   let addListItemBtn: HTMLButtonElement | null = null;
 
   const readState = {
@@ -1226,7 +1249,16 @@ const wireSplitSectionInline = (section: Element) => {
     panelTitle: (panelTitleEl?.textContent ?? '').trim(),
     panelBody: (panelBodyEl?.textContent ?? '').trim(),
     panelLinkLabel: (panelLinkEl?.textContent ?? '').trim(),
-    panelLinkHref: panelLinkEl?.getAttribute('href') ?? ''
+    panelLinkHref: panelLinkEl?.getAttribute('href') ?? '',
+    panelImageUrl: (panelImageEl?.getAttribute('src') ?? '').trim()
+  };
+
+  const syncSplitPanelImage = (imageUrl: string, title: string) => {
+    if (!panelImageEl) return;
+    const hasImage = Boolean((imageUrl || '').trim());
+    panelImageEl.classList.toggle('is-hidden', !hasImage);
+    panelImageEl.src = hasImage ? imageUrl : '';
+    panelImageEl.alt = title;
   };
 
   const removeListDeleteButtons = () => {
@@ -1271,6 +1303,15 @@ const wireSplitSectionInline = (section: Element) => {
       linkUrlEditor.parentElement?.remove();
       linkUrlEditor = null;
     }
+    if (panelImageUrlEditor) {
+      panelImageUrlEditor.parentElement?.remove();
+      panelImageUrlEditor = null;
+    }
+    if (panelImageFileInput?.parentElement) {
+      panelImageFileInput.parentElement.remove();
+      panelImageFileInput = null;
+      panelImageUploadButton = null;
+    }
     if (addListItemBtn) {
       addListItemBtn.remove();
       addListItemBtn = null;
@@ -1306,7 +1347,8 @@ const wireSplitSectionInline = (section: Element) => {
           body: (bodyEl?.textContent ?? '').trim(),
           panel: {
             title: (panelTitleEl?.textContent ?? '').trim(),
-            body: (panelBodyEl?.textContent ?? '').trim()
+            body: (panelBodyEl?.textContent ?? '').trim(),
+            imageUrl: (panelImageUrlEditor?.value ?? readState.panelImageUrl).trim()
           }
         };
 
@@ -1349,6 +1391,7 @@ const wireSplitSectionInline = (section: Element) => {
         panelLinkEl.textContent = readState.panelLinkLabel;
         panelLinkEl.setAttribute('href', readState.panelLinkHref || '#');
       }
+      syncSplitPanelImage(readState.panelImageUrl, readState.panelTitle);
       if (listEl) {
         listEl.innerHTML = readState.list.map((entry) => `<li>${entry}</li>`).join('');
       }
@@ -1375,10 +1418,56 @@ const wireSplitSectionInline = (section: Element) => {
       linkUrlEditor = input;
     }
 
+    if (!panelImageUrlEditor) {
+      const { wrapper, input } = createUrlEditor('Panel Image URL', readState.panelImageUrl || '');
+      panel.appendChild(wrapper);
+      panelImageUrlEditor = input;
+      panelImageUrlEditor.addEventListener('input', () => {
+        syncSplitPanelImage(panelImageUrlEditor?.value || '', (panelTitleEl?.textContent ?? readState.panelTitle).trim());
+      });
+    }
+
+    if (!panelImageFileInput) {
+      const { wrapper, input, button } = createFileEditor();
+      panel.appendChild(wrapper);
+      panelImageFileInput = input;
+      panelImageUploadButton = button;
+
+      panelImageUploadButton.addEventListener('click', async (eventUpload) => {
+        eventUpload.preventDefault();
+        const uploadBtn = panelImageUploadButton;
+        if (!uploadBtn) return;
+        const file = panelImageFileInput?.files?.[0];
+        if (!file) {
+          showStatus('Choose an image file first.');
+          return;
+        }
+
+        try {
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Uploading...';
+          const url = await uploadNewsImage(file);
+          if (panelImageUrlEditor) panelImageUrlEditor.value = url;
+          syncSplitPanelImage(url, (panelTitleEl?.textContent ?? readState.panelTitle).trim());
+          showStatus('Image uploaded. Save the section to publish changes.');
+        } catch (error) {
+          showStatus(
+            error instanceof Error
+              ? `${error.message}. Ensure a public storage bucket named news-images exists.`
+              : 'Image upload failed.'
+          );
+        } finally {
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Upload';
+        }
+      });
+    }
+
     renderEditControls();
   };
 
   renderReadControls();
+  syncSplitPanelImage(readState.panelImageUrl, readState.panelTitle);
 };
 
 const wireContactCardsInline = (section: Element) => {
