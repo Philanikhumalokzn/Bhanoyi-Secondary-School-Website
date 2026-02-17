@@ -203,79 +203,6 @@ const toHeroNoticeRecord = (notice: Element): HeroNoticeRecord => ({
   linkLabel: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.textContent ?? 'View notice').trim()
 });
 
-const addRecord = async () => {
-  const date = prompt('New announcement date (e.g. 20 Feb 2026)', '');
-  if (!date) return;
-  const tag = prompt('Tag (optional)', '') ?? '';
-  const title = prompt('Title', '');
-  if (!title) return;
-  const body = prompt('Body', '');
-  if (!body) return;
-
-  await saveAnnouncement({ date, tag, title, body, sort_order: 0 });
-  showStatus('Announcement added. Refreshing...');
-  window.location.reload();
-};
-
-const addCard = async () => {
-  const sectionKey = prompt('Section key (e.g. quick_links, latest_news, upcoming_events)', 'latest_news');
-  if (!sectionKey) return;
-  const title = prompt('Card title', '');
-  if (!title) return;
-  const body = prompt('Card body', '');
-  if (!body) return;
-  const href = prompt('Link URL (use # if not clickable)', '#') ?? '#';
-
-  let category = '';
-  let imageUrl = '';
-  if (sectionKey === 'latest_news') {
-    category = (prompt('News category (e.g. Sports, Academics, Culture)', 'General') ?? 'General').trim() || 'General';
-    imageUrl = (prompt('Image URL (optional)', '') ?? '').trim();
-  }
-
-  await saveCard({
-    page_key: currentPageKey(),
-    section_key: sectionKey,
-    category,
-    title,
-    body,
-    image_url: imageUrl,
-    href,
-    sort_order: 0
-  });
-
-  showStatus('Card added. Refreshing...');
-  window.location.reload();
-};
-
-const addDownload = async () => {
-  const page = currentPageKey();
-  if (page !== 'admissions' && page !== 'policies') {
-    showStatus('Open Admissions or Policies page to add downloads.');
-    return;
-  }
-
-  const title = prompt('Download title', '');
-  if (!title) return;
-  const body = prompt('Download description', '');
-  if (!body) return;
-  const href = prompt('Download URL', '/documents/');
-  if (!href) return;
-  const linkLabel = prompt('Button label', 'Download File') || 'Download File';
-
-  await saveDownload({
-    section: page,
-    title,
-    body,
-    href,
-    link_label: linkLabel,
-    sort_order: 0
-  });
-
-  showStatus('Download added. Refreshing...');
-  window.location.reload();
-};
-
 const wireAnnouncementInline = (item: Element) => {
   const record = toRecord(item);
   if (!record) return;
@@ -747,24 +674,6 @@ const wireDownloadInline = (item: Element) => {
   bodyEl?.addEventListener('click', enterEdit);
 };
 
-const createHeroNoticeElement = () => {
-  const heroGrid = document.querySelector('.hero .hero-grid');
-  if (!heroGrid) return null;
-
-  const notice = document.createElement('aside');
-  notice.className = 'alert-box hero-notice';
-  notice.setAttribute('aria-label', 'Important announcement');
-  (notice as HTMLElement).dataset.pageKey = currentPageKey();
-  notice.innerHTML = `
-    <h2 class="hero-notice-title">Important Notice</h2>
-    <p class="hero-notice-body">Write the notice details here.</p>
-    <a class="hero-notice-link" href="#">View notice</a>
-  `;
-
-  heroGrid.appendChild(notice);
-  return notice;
-};
-
 const wireHeroNoticeInline = (notice: Element, isNew = false) => {
   const controls = document.createElement('div');
   controls.className = 'inline-admin-controls';
@@ -886,25 +795,10 @@ const wireHeroNoticeInline = (notice: Element, isNew = false) => {
   }
 };
 
-let openHeroNoticeEditor: (() => void) | null = null;
-
 const bindInlineActions = () => {
   const heroNotice = document.querySelector('.hero-notice');
   if (heroNotice) {
     wireHeroNoticeInline(heroNotice);
-    openHeroNoticeEditor = () => {
-      const editBtn = heroNotice.querySelector('.inline-admin-controls button');
-      (editBtn as HTMLButtonElement | null)?.click();
-    };
-  } else {
-    openHeroNoticeEditor = () => {
-      const created = createHeroNoticeElement();
-      if (!created) {
-        showStatus('This page does not have a hero section for an Important Notice.');
-        return;
-      }
-      wireHeroNoticeInline(created, true);
-    };
   }
 
   const noticeItems = Array.from(document.querySelectorAll('.notice-item'));
@@ -915,58 +809,6 @@ const bindInlineActions = () => {
 
   const editableDownloads = Array.from(document.querySelectorAll('[data-editable-download="true"]'));
   editableDownloads.forEach(wireDownloadInline);
-};
-
-const mountToolbar = () => {
-  const toolbar = document.createElement('div');
-  toolbar.className = 'inline-admin-toolbar';
-  toolbar.innerHTML = `
-    <strong>Admin Mode</strong>
-    <button type="button" id="inline-add-announcement">Add Announcement</button>
-    <button type="button" id="inline-edit-hero-notice">Edit Important Notice</button>
-    <button type="button" id="inline-add-card">Add Card</button>
-    <button type="button" id="inline-add-download">Add Download</button>
-    <button type="button" id="inline-admin-logout">Logout</button>
-  `;
-  document.body.appendChild(toolbar);
-
-  const addBtn = document.getElementById('inline-add-announcement') as HTMLButtonElement | null;
-  addBtn?.addEventListener('click', async () => {
-    try {
-      await addRecord();
-    } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Failed to add announcement.');
-    }
-  });
-
-  const editNoticeBtn = document.getElementById('inline-edit-hero-notice') as HTMLButtonElement | null;
-  editNoticeBtn?.addEventListener('click', () => {
-    openHeroNoticeEditor?.();
-  });
-
-  const addCardBtn = document.getElementById('inline-add-card') as HTMLButtonElement | null;
-  addCardBtn?.addEventListener('click', async () => {
-    try {
-      await addCard();
-    } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Failed to add card.');
-    }
-  });
-
-  const addDownloadBtn = document.getElementById('inline-add-download') as HTMLButtonElement | null;
-  addDownloadBtn?.addEventListener('click', async () => {
-    try {
-      await addDownload();
-    } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Failed to add download.');
-    }
-  });
-
-  const logoutBtn = document.getElementById('inline-admin-logout') as HTMLButtonElement | null;
-  logoutBtn?.addEventListener('click', async () => {
-    await signOut();
-    window.location.href = 'admin.html';
-  });
 };
 
 export const initInlinePublicAdmin = async () => {
@@ -982,7 +824,6 @@ export const initInlinePublicAdmin = async () => {
   }
 
   document.body.classList.add('inline-admin-active');
-  mountToolbar();
   bindInlineActions();
-  showStatus('Admin mode active. Click content and edit directly on the page.');
+  showStatus('Admin mode active. Use inline Edit/Save controls in each section.');
 };
