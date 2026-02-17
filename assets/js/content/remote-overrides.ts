@@ -1,4 +1,5 @@
 type SiteContent = {
+  school: any;
   pages: Record<string, { hero?: any; sections: Array<any> }>;
 };
 
@@ -39,6 +40,11 @@ type HeroNoticeRow = {
   href: string;
   link_label: string;
   is_active: boolean;
+};
+
+type SiteSettingRow = {
+  setting_key: string;
+  setting_value: string;
 };
 
 const getConfig = () => {
@@ -107,6 +113,19 @@ const fetchHeroNotices = async (): Promise<HeroNoticeRow[]> => {
 
   if (!response.ok) return [];
   return (await response.json()) as HeroNoticeRow[];
+};
+
+const fetchSiteSettings = async (): Promise<SiteSettingRow[]> => {
+  const { url, key } = getConfig();
+  if (!url || !key) return [];
+
+  const response = await fetch(
+    `${url}/rest/v1/site_settings?select=setting_key,setting_value`,
+    { headers: restHeaders(key) }
+  );
+
+  if (!response.ok) return [];
+  return (await response.json()) as SiteSettingRow[];
 };
 
 const applyAnnouncements = (siteContent: SiteContent, rows: AnnouncementRow[]) => {
@@ -208,22 +227,49 @@ const applyHeroNotices = (siteContent: SiteContent, rows: HeroNoticeRow[]) => {
   });
 };
 
+const applySiteSettings = (siteContent: SiteContent, rows: SiteSettingRow[]) => {
+  if (rows.length === 0) return;
+
+  const map = rows.reduce<Record<string, string>>((acc, row) => {
+    acc[row.setting_key] = row.setting_value;
+    return acc;
+  }, {});
+
+  if (map.school_name !== undefined) siteContent.school.name = map.school_name;
+  if (map.school_tagline !== undefined) siteContent.school.tagline = map.school_tagline;
+  if (map.school_phone !== undefined) siteContent.school.phone = map.school_phone;
+  if (map.school_email !== undefined) siteContent.school.email = map.school_email;
+  if (map.school_address !== undefined) siteContent.school.address = map.school_address;
+
+  const hours1 = map.school_hours_1;
+  const hours2 = map.school_hours_2;
+  if (hours1 !== undefined || hours2 !== undefined) {
+    const existingHours = Array.isArray(siteContent.school.hours) ? siteContent.school.hours : ['', ''];
+    siteContent.school.hours = [
+      hours1 !== undefined ? hours1 : existingHours[0] || '',
+      hours2 !== undefined ? hours2 : existingHours[1] || ''
+    ];
+  }
+};
+
 export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T): Promise<T> => {
   if (!hasConfig()) {
     return siteContent;
   }
 
   try {
-    const [announcements, downloads, cards, notices] = await Promise.all([
+    const [announcements, downloads, cards, notices, settings] = await Promise.all([
       fetchAnnouncements(),
       fetchDownloads(),
       fetchCards(),
-      fetchHeroNotices()
+      fetchHeroNotices(),
+      fetchSiteSettings()
     ]);
     applyAnnouncements(siteContent, announcements);
     applyDownloads(siteContent, downloads);
     applyCards(siteContent, cards);
     applyHeroNotices(siteContent, notices);
+    applySiteSettings(siteContent, settings);
     return siteContent;
   } catch {
     return siteContent;

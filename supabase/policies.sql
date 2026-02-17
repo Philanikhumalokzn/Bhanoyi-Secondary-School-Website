@@ -3,6 +3,7 @@ alter table if exists public.site_downloads enable row level security;
 alter table if exists public.site_cards enable row level security;
 alter table if exists public.site_hero_notice enable row level security;
 alter table if exists public.admin_users enable row level security;
+alter table if exists public.site_settings enable row level security;
 
 -- Public read for website visitors
 drop policy if exists "Public read announcements" on public.site_announcements;
@@ -22,6 +23,12 @@ create policy "Public read cards"
 on public.site_cards
 for select
 using (is_active = true);
+
+drop policy if exists "Public read site settings" on public.site_settings;
+create policy "Public read site settings"
+on public.site_settings
+for select
+using (true);
 
 do $$
 begin
@@ -83,6 +90,26 @@ with check (
 drop policy if exists "Allowlisted admins manage cards" on public.site_cards;
 create policy "Allowlisted admins manage cards"
 on public.site_cards
+for all
+to authenticated
+using (
+  exists (
+    select 1 from public.admin_users au
+    where lower(au.email) = lower(auth.jwt() ->> 'email')
+      and au.is_active = true
+  )
+)
+with check (
+  exists (
+    select 1 from public.admin_users au
+    where lower(au.email) = lower(auth.jwt() ->> 'email')
+      and au.is_active = true
+  )
+);
+
+drop policy if exists "Allowlisted admins manage site settings" on public.site_settings;
+create policy "Allowlisted admins manage site settings"
+on public.site_settings
 for all
 to authenticated
 using (

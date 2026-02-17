@@ -8,6 +8,7 @@ import {
   saveCard,
   saveDownload,
   saveHeroNotice,
+  saveSiteSettings,
   uploadNewsImage,
   signOut
 } from './api';
@@ -795,6 +796,113 @@ const wireHeroNoticeInline = (notice: Element, isNew = false) => {
   }
 };
 
+const wireFooterInline = () => {
+  const footer = document.querySelector('.site-footer');
+  if (!footer) return;
+
+  const footerGrid = footer.querySelector('.footer-grid > div:first-child');
+  if (!footerGrid) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  footerGrid.appendChild(controls);
+
+  const nameEl = footer.querySelector('.footer-school-name');
+  const taglineEl = footer.querySelector('.footer-tagline');
+  const phoneEl = footer.querySelector('.footer-phone');
+  const emailEl = footer.querySelector('.footer-email');
+  const addressEl = footer.querySelector('.footer-address');
+  const hours1El = footer.querySelector('.footer-hours-1');
+  const hours2El = footer.querySelector('.footer-hours-2');
+
+  const readState = {
+    school_name: (nameEl?.textContent ?? '').trim(),
+    school_tagline: (taglineEl?.textContent ?? '').trim(),
+    school_phone: (phoneEl?.textContent ?? '').trim(),
+    school_email: (emailEl?.textContent ?? '').trim(),
+    school_address: (addressEl?.textContent ?? '').trim(),
+    school_hours_1: (hours1El?.textContent ?? '').trim(),
+    school_hours_2: (hours2El?.textContent ?? '').trim()
+  };
+
+  const exitEdit = () => {
+    setEditable(nameEl, false);
+    setEditable(taglineEl, false);
+    setEditable(phoneEl, false);
+    setEditable(emailEl, false);
+    setEditable(addressEl, false);
+    setEditable(hours1El, false);
+    setEditable(hours2El, false);
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', enterEdit);
+
+    controls.appendChild(editBtn);
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        await saveSiteSettings({
+          school_name: (nameEl?.textContent ?? '').trim(),
+          school_tagline: (taglineEl?.textContent ?? '').trim(),
+          school_phone: (phoneEl?.textContent ?? '').trim(),
+          school_email: (emailEl?.textContent ?? '').trim(),
+          school_address: (addressEl?.textContent ?? '').trim(),
+          school_hours_1: (hours1El?.textContent ?? '').trim(),
+          school_hours_2: (hours2El?.textContent ?? '').trim()
+        });
+        showStatus('Footer updated. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to update footer.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      if (nameEl) nameEl.textContent = readState.school_name;
+      if (taglineEl) taglineEl.textContent = readState.school_tagline;
+      if (phoneEl) phoneEl.textContent = readState.school_phone;
+      if (emailEl) emailEl.textContent = readState.school_email;
+      if (addressEl) addressEl.textContent = readState.school_address;
+      if (hours1El) hours1El.textContent = readState.school_hours_1;
+      if (hours2El) hours2El.textContent = readState.school_hours_2;
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    setEditable(nameEl, true);
+    setEditable(taglineEl, true);
+    setEditable(phoneEl, true);
+    setEditable(emailEl, true);
+    setEditable(addressEl, true);
+    setEditable(hours1El, true);
+    setEditable(hours2El, true);
+    renderEditControls();
+  };
+
+  renderReadControls();
+};
+
 const bindInlineActions = () => {
   const heroNotice = document.querySelector('.hero-notice');
   if (heroNotice) {
@@ -809,6 +917,8 @@ const bindInlineActions = () => {
 
   const editableDownloads = Array.from(document.querySelectorAll('[data-editable-download="true"]'));
   editableDownloads.forEach(wireDownloadInline);
+
+  wireFooterInline();
 };
 
 export const initInlinePublicAdmin = async () => {

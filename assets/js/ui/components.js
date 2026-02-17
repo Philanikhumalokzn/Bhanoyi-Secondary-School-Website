@@ -293,19 +293,19 @@ export const renderFooter = (siteContent) => `
   <footer class="site-footer">
     <div class="container footer-grid">
       <div>
-        <h2>${siteContent.school.name}</h2>
-        <p>${siteContent.school.tagline}</p>
+        <h2 class="footer-school-name">${siteContent.school.name}</h2>
+        <p class="footer-tagline">${siteContent.school.tagline}</p>
       </div>
       <div>
         <h3>Contact</h3>
-        <p><strong>Phone:</strong> ${siteContent.school.phone}</p>
-        <p><strong>Email:</strong> ${siteContent.school.email}</p>
-        <p><strong>Address:</strong> ${siteContent.school.address}</p>
+        <p><strong>Phone:</strong> <span class="footer-phone">${siteContent.school.phone}</span></p>
+        <p><strong>Email:</strong> <span class="footer-email">${siteContent.school.email}</span></p>
+        <p><strong>Address:</strong> <span class="footer-address">${siteContent.school.address}</span></p>
       </div>
       <div>
         <h3>School Hours</h3>
-        <p>${siteContent.school.hours[0]}</p>
-        <p>${siteContent.school.hours[1]}</p>
+        <p class="footer-hours-1">${siteContent.school.hours[0]}</p>
+        <p class="footer-hours-2">${siteContent.school.hours[1]}</p>
       </div>
     </div>
     <div class="container footer-bottom">

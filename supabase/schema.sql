@@ -60,3 +60,9 @@ create table if not exists public.admin_users (
   is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+create table if not exists public.site_settings (
+  setting_key text primary key,
+  setting_value text not null default '',
+  updated_at timestamptz not null default now()
+);

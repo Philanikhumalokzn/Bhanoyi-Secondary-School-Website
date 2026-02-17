@@ -24,6 +24,11 @@ export type HeroNotice = {
   is_active: boolean;
 };
 
+export type SiteSetting = {
+  setting_key: string;
+  setting_value: string;
+};
+
 const toMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error) {
@@ -233,4 +238,14 @@ export const deleteHeroNotice = async (pageKey: string) => {
     );
 
   if (error) throw toError(error, 'Important notice delete failed');
+};
+
+export const saveSiteSettings = async (entries: Record<string, string>) => {
+  const payload: SiteSetting[] = Object.entries(entries).map(([setting_key, setting_value]) => ({
+    setting_key,
+    setting_value
+  }));
+
+  const { error } = await supabase.from('site_settings').upsert(payload, { onConflict: 'setting_key' });
+  if (error) throw toError(error, 'Site settings save failed');
 };
