@@ -738,51 +738,95 @@ h1 {
 }
 
 .admin-auth {
-  width: min(520px, 100%);
+  width: min(500px, 100%);
   margin: 5vh auto 0;
-  padding: 28px;
+  padding: 30px;
   border-radius: 16px;
   box-shadow: 0 12px 30px rgba(13, 34, 56, 0.08);
+  border-color: #cfdcea;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+}
+
+.admin-auth .eyebrow {
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
 }
 
 .admin-auth h1 {
   margin-bottom: 8px;
+  font-size: clamp(1.55rem, 2vw, 1.95rem);
 }
 
 .admin-auth .lead {
   margin: 0 0 18px;
-  max-width: 46ch;
+  max-width: 44ch;
+  font-size: 0.98rem;
+  color: #3e5369;
 }
 
 .admin-auth .admin-form {
   gap: 14px;
+  max-width: 420px;
 }
 
 .admin-auth .admin-form label {
   font-size: 0.94rem;
   color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .admin-auth .admin-form input {
   width: 100%;
   min-height: 44px;
   border-radius: 10px;
-  background: var(--surface);
+  background: #fff;
+  padding-inline: 12px;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.admin-auth .admin-form input::placeholder {
+  color: var(--muted);
 }
 
 .admin-auth .admin-form input:focus-visible {
   border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+  transform: translateY(-1px);
 }
 
 .admin-auth .btn {
   min-height: 44px;
   width: 100%;
+  transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.admin-auth .btn:hover,
+.admin-auth .btn:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(13, 34, 56, 0.14);
 }
 
 #auth-status {
   min-height: 1.4rem;
   margin-top: 12px;
-  color: var(--muted);
+  color: #23384e;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-auth .admin-form input,
+  .admin-auth .btn {
+    transition: none;
+  }
+
+  .admin-auth .admin-form input:focus-visible,
+  .admin-auth .btn:hover,
+  .admin-auth .btn:focus-visible {
+    transform: none;
+  }
 }
 
 .admin-form {
@@ -870,6 +914,43 @@ h1 {
     margin-top: 2vh;
     padding: 20px;
     border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(13, 34, 56, 0.08);
+  }
+
+  .admin-auth .eyebrow {
+    margin-bottom: 4px;
+    font-size: 0.75rem;
+  }
+
+  .admin-auth h1 {
+    margin-bottom: 6px;
+    font-size: clamp(1.35rem, 6vw, 1.65rem);
+  }
+
+  .admin-auth .lead {
+    margin-bottom: 14px;
+    font-size: 0.94rem;
+    line-height: 1.45;
+  }
+
+  .admin-auth .admin-form {
+    max-width: none;
+    gap: 12px;
+  }
+
+  .admin-auth .admin-form label {
+    gap: 5px;
+    font-size: 0.9rem;
+  }
+
+  .admin-auth .admin-form input,
+  .admin-auth .btn {
+    min-height: 42px;
+  }
+
+  #auth-status {
+    margin-top: 10px;
+    font-size: 0.88rem;
   }
 
   .latest-news-header {
