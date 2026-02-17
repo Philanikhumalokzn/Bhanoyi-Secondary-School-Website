@@ -181,6 +181,14 @@ const findAiTarget = (root: Element): Element | null => {
 };
 
 const rewriteWithOllama = async (input: string) => {
+  const isRemoteSite = !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1');
+  const isLoopbackOllama = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(ollamaBaseUrl);
+  if (isRemoteSite && isLoopbackOllama) {
+    throw new Error(
+      'AI Update cannot run from the deployed site with local Ollama. Open the site locally (localhost) for AI Update, or use a hosted AI/proxy endpoint.'
+    );
+  }
+
   const prompt = [
     'Rewrite the text for a school website admin editor.',
     'Keep the original meaning and factual details.',
