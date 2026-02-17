@@ -76,6 +76,31 @@ const showStatus = (message: string) => {
 
 const currentPageKey = (): string => document.body.dataset.page || 'home';
 
+const setEditable = (element: Element | null, enabled: boolean) => {
+  if (!element) return;
+  const html = element as HTMLElement;
+  html.contentEditable = enabled ? 'true' : 'false';
+  html.spellcheck = enabled;
+  html.classList.toggle('inline-editable-field', enabled);
+};
+
+const createUrlEditor = (label: string, value: string) => {
+  const wrapper = document.createElement('label');
+  wrapper.className = 'inline-url-editor';
+
+  const span = document.createElement('span');
+  span.textContent = label;
+
+  const input = document.createElement('input');
+  input.type = 'url';
+  input.value = value;
+
+  wrapper.appendChild(span);
+  wrapper.appendChild(input);
+
+  return { wrapper, input };
+};
+
 const toRecord = (item: Element): AnnouncementRecord | null => {
   const id = (item as HTMLElement).dataset.announcementId;
   if (!id) return null;
@@ -121,33 +146,13 @@ const toDownloadRecord = (item: Element): DownloadRecord => {
   };
 };
 
-const toHeroNoticeRecord = (): HeroNoticeRecord | null => {
-  const notice = document.querySelector('.hero-notice');
-  if (!notice) return null;
-
-  return {
-    pageKey: (notice as HTMLElement).dataset.pageKey || currentPageKey(),
-    title: getText(notice, '.hero-notice-title'),
-    body: getText(notice, '.hero-notice-body'),
-    href: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.getAttribute('href') ?? '').trim(),
-    linkLabel: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.textContent ?? 'View notice').trim()
-  };
-};
-
-const editRecord = async (record: AnnouncementRecord) => {
-  const date = prompt('Announcement date', record.date);
-  if (date === null) return;
-  const tag = prompt('Announcement tag', record.tag);
-  if (tag === null) return;
-  const title = prompt('Announcement title', record.title);
-  if (title === null) return;
-  const body = prompt('Announcement body', record.body);
-  if (body === null) return;
-
-  await saveAnnouncement({ id: record.id, date, tag, title, body });
-  showStatus('Announcement updated. Refreshing...');
-  window.location.reload();
-};
+const toHeroNoticeRecord = (notice: Element): HeroNoticeRecord => ({
+  pageKey: (notice as HTMLElement).dataset.pageKey || currentPageKey(),
+  title: getText(notice, '.hero-notice-title'),
+  body: getText(notice, '.hero-notice-body'),
+  href: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.getAttribute('href') ?? '').trim(),
+  linkLabel: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.textContent ?? 'View notice').trim()
+});
 
 const addRecord = async () => {
   const date = prompt('New announcement date (e.g. 20 Feb 2026)', '');
@@ -160,35 +165,6 @@ const addRecord = async () => {
 
   await saveAnnouncement({ date, tag, title, body, sort_order: 0 });
   showStatus('Announcement added. Refreshing...');
-  window.location.reload();
-};
-
-const editCard = async (record: CardRecord) => {
-  const title = prompt('Card title', record.title);
-  if (title === null) return;
-  const body = prompt('Card body', record.body);
-  if (body === null) return;
-  let href = record.href;
-  if (record.clickable) {
-    const nextHref = prompt('Card link URL', record.href || '#');
-    if (nextHref === null) return;
-    href = nextHref;
-  }
-
-  if (!record.id) {
-    await saveCard({
-      page_key: currentPageKey(),
-      section_key: record.sectionKey,
-      title,
-      body,
-      href,
-      sort_order: record.sortOrder
-    });
-  } else {
-    await saveCard({ id: record.id, title, body, href });
-  }
-
-  showStatus('Card saved. Refreshing...');
   window.location.reload();
 };
 
@@ -211,30 +187,6 @@ const addCard = async () => {
   });
 
   showStatus('Card added. Refreshing...');
-  window.location.reload();
-};
-
-const editDownload = async (record: DownloadRecord) => {
-  const title = prompt('Download title', record.title);
-  if (title === null) return;
-  const body = prompt('Download description', record.body);
-  if (body === null) return;
-  const href = prompt('Download URL', record.href);
-  if (href === null) return;
-  const linkLabel = prompt('Button label', record.linkLabel);
-  if (linkLabel === null) return;
-
-  await saveDownload({
-    id: record.id,
-    section: record.section,
-    title,
-    body,
-    href,
-    link_label: linkLabel,
-    sort_order: record.sortOrder
-  });
-
-  showStatus('Download saved. Refreshing...');
   window.location.reload();
 };
 
@@ -266,105 +218,38 @@ const addDownload = async () => {
   window.location.reload();
 };
 
-const editHeroNotice = async () => {
-  const existing = toHeroNoticeRecord();
-  const pageKey = currentPageKey();
+const wireAnnouncementInline = (item: Element) => {
+  const record = toRecord(item);
+  if (!record) return;
 
-  const title = prompt('Important notice title', existing?.title ?? 'Important Notice');
-  if (title === null) return;
-  const body = prompt('Important notice body', existing?.body ?? '');
-  if (body === null) return;
-  const href = prompt('Notice link URL', existing?.href ?? '#');
-  if (href === null) return;
-  const linkLabel = prompt('Notice link label', existing?.linkLabel ?? 'View notice');
-  if (linkLabel === null) return;
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  item.appendChild(controls);
 
-  await saveHeroNotice({
-    page_key: pageKey,
-    title,
-    body,
-    href,
-    link_label: linkLabel,
-    is_active: true
-  });
+  const dateEl = item.querySelector('.notice-date');
+  const titleEl = item.querySelector('.notice-title');
+  const bodyEl = item.querySelector('.notice-body');
+  const metaEl = item.querySelector('.notice-meta');
 
-  showStatus('Important notice saved. Refreshing...');
-  window.location.reload();
-};
+  let tagEl = item.querySelector('.notice-tag');
+  let createdTag = false;
 
-const removeHeroNotice = async () => {
-  const ok = confirm('Remove the Important Notice from this page?');
-  if (!ok) return;
+  const readState = { ...record };
 
-  await deleteHeroNotice(currentPageKey());
-  showStatus('Important notice removed. Refreshing...');
-  window.location.reload();
-};
+  const exitEdit = () => {
+    setEditable(dateEl, false);
+    setEditable(tagEl, false);
+    setEditable(titleEl, false);
+    setEditable(bodyEl, false);
+  };
 
-const bindInlineActions = () => {
-  const heroNotice = document.querySelector('.hero-notice');
-  if (heroNotice) {
-    const controls = document.createElement('div');
-    controls.className = 'inline-admin-controls';
+  const renderReadControls = () => {
+    controls.innerHTML = '';
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', async () => {
-      try {
-        await editHeroNotice();
-      } catch (error) {
-        showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
-      }
-    });
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', async () => {
-      try {
-        await removeHeroNotice();
-      } catch (error) {
-        showStatus(error instanceof Error ? error.message : 'Failed to remove important notice.');
-      }
-    });
-
-    controls.appendChild(editBtn);
-    controls.appendChild(deleteBtn);
-    heroNotice.appendChild(controls);
-
-    const editableParts = heroNotice.querySelectorAll('.hero-notice-title, .hero-notice-body, .hero-notice-link');
-    editableParts.forEach((part) => {
-      part.addEventListener('click', async (event) => {
-        event.preventDefault();
-        try {
-          await editHeroNotice();
-        } catch (error) {
-          showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
-        }
-      });
-    });
-  }
-
-  const noticeItems = Array.from(document.querySelectorAll('.notice-item'));
-
-  noticeItems.forEach((item) => {
-    const record = toRecord(item);
-    if (!record) return;
-
-    const controls = document.createElement('div');
-    controls.className = 'inline-admin-controls';
-
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', async () => {
-      try {
-        await editRecord(record);
-      } catch (error) {
-        showStatus(error instanceof Error ? error.message : 'Failed to edit announcement.');
-      }
-    });
+    editBtn.addEventListener('click', enterEdit);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -384,36 +269,105 @@ const bindInlineActions = () => {
 
     controls.appendChild(editBtn);
     controls.appendChild(deleteBtn);
-    item.appendChild(controls);
+  };
 
-    const bodyEl = item.querySelector('.notice-body');
-    bodyEl?.addEventListener('click', async () => {
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
       try {
-        await editRecord(record);
+        await saveAnnouncement({
+          id: record.id,
+          date: (dateEl?.textContent ?? '').trim(),
+          tag: (tagEl?.textContent ?? '').trim(),
+          title: (titleEl?.textContent ?? '').trim(),
+          body: (bodyEl?.textContent ?? '').trim()
+        });
+        showStatus('Announcement updated. Refreshing...');
+        window.location.reload();
       } catch (error) {
-        showStatus(error instanceof Error ? error.message : 'Failed to edit announcement.');
+        showStatus(error instanceof Error ? error.message : 'Failed to update announcement.');
       }
     });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      if (dateEl) dateEl.textContent = readState.date;
+      if (tagEl) tagEl.textContent = readState.tag;
+      if (titleEl) titleEl.textContent = readState.title;
+      if (bodyEl) bodyEl.textContent = readState.body;
+      if (!readState.tag && createdTag && tagEl) {
+        tagEl.remove();
+        tagEl = null;
+        createdTag = false;
+      }
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    if (!tagEl && metaEl) {
+      const newTag = document.createElement('span');
+      newTag.className = 'notice-tag';
+      newTag.textContent = '';
+      metaEl.appendChild(newTag);
+      tagEl = newTag;
+      createdTag = true;
+    }
+
+    setEditable(dateEl, true);
+    setEditable(tagEl, true);
+    setEditable(titleEl, true);
+    setEditable(bodyEl, true);
+    renderEditControls();
+  };
+
+  renderReadControls();
+
+  bodyEl?.addEventListener('click', () => {
+    if (controls.querySelector('button')?.textContent === 'Save') return;
+    enterEdit();
   });
+};
 
-  const editableCards = Array.from(document.querySelectorAll('[data-editable-card="true"]'));
-  editableCards.forEach((item) => {
-    const record = toCardRecord(item);
+const wireCardInline = (item: Element) => {
+  const record = toCardRecord(item);
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  item.appendChild(controls);
 
-    const controls = document.createElement('div');
-    controls.className = 'inline-admin-controls';
+  const titleEl = item.querySelector('h3');
+  const bodyEl = item.querySelector('p');
+
+  let urlEditor: HTMLInputElement | null = null;
+
+  const readState = { ...record };
+
+  const exitEdit = () => {
+    setEditable(titleEl, false);
+    setEditable(bodyEl, false);
+    if (urlEditor) {
+      urlEditor.parentElement?.remove();
+      urlEditor = null;
+    }
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', async (event) => {
-      event.preventDefault();
-      try {
-        await editCard(record);
-      } catch (error) {
-        showStatus(error instanceof Error ? error.message : 'Failed to edit card.');
-      }
-    });
+    editBtn.addEventListener('click', enterEdit);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -439,31 +393,109 @@ const bindInlineActions = () => {
 
     controls.appendChild(editBtn);
     controls.appendChild(deleteBtn);
-    item.appendChild(controls);
+  };
 
-    item.addEventListener('click', (event) => {
-      if ((event.target as HTMLElement).closest('.inline-admin-controls')) return;
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async (event) => {
       event.preventDefault();
+      try {
+        const payload = {
+          id: record.id,
+          page_key: currentPageKey(),
+          section_key: record.sectionKey,
+          sort_order: record.sortOrder,
+          title: (titleEl?.textContent ?? '').trim(),
+          body: (bodyEl?.textContent ?? '').trim(),
+          href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
+        };
+
+        await saveCard(payload);
+        showStatus('Card saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save card.');
+      }
     });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (titleEl) titleEl.textContent = readState.title;
+      if (bodyEl) bodyEl.textContent = readState.body;
+      if (record.clickable && item instanceof HTMLAnchorElement) {
+        item.setAttribute('href', readState.href || '#');
+      }
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = (event?: Event) => {
+    event?.preventDefault();
+    setEditable(titleEl, true);
+    setEditable(bodyEl, true);
+
+    if (record.clickable && !urlEditor) {
+      const { wrapper, input } = createUrlEditor('Link URL', readState.href || '#');
+      item.appendChild(wrapper);
+      urlEditor = input;
+    }
+
+    renderEditControls();
+  };
+
+  renderReadControls();
+
+  item.addEventListener('click', (event) => {
+    if ((event.target as HTMLElement).closest('.inline-admin-controls')) return;
+    if ((event.target as HTMLElement).closest('.inline-url-editor')) return;
+    event.preventDefault();
   });
 
-  const editableDownloads = Array.from(document.querySelectorAll('[data-editable-download="true"]'));
-  editableDownloads.forEach((item) => {
-    const record = toDownloadRecord(item);
+  bodyEl?.addEventListener('click', enterEdit);
+};
 
-    const controls = document.createElement('div');
-    controls.className = 'inline-admin-controls';
+const wireDownloadInline = (item: Element) => {
+  const record = toDownloadRecord(item);
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  item.appendChild(controls);
+
+  const titleEl = item.querySelector('h3');
+  const bodyEl = item.querySelector('p');
+  const linkEl = item.querySelector('a.download-link') as HTMLAnchorElement | null;
+
+  let urlEditor: HTMLInputElement | null = null;
+
+  const readState = { ...record };
+
+  const exitEdit = () => {
+    setEditable(titleEl, false);
+    setEditable(bodyEl, false);
+    setEditable(linkEl, false);
+    if (urlEditor) {
+      urlEditor.parentElement?.remove();
+      urlEditor = null;
+    }
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', async () => {
-      try {
-        await editDownload(record);
-      } catch (error) {
-        showStatus(error instanceof Error ? error.message : 'Failed to edit download.');
-      }
-    });
+    editBtn.addEventListener('click', enterEdit);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -488,8 +520,236 @@ const bindInlineActions = () => {
 
     controls.appendChild(editBtn);
     controls.appendChild(deleteBtn);
-    item.appendChild(controls);
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        await saveDownload({
+          id: record.id,
+          section: record.section,
+          sort_order: record.sortOrder,
+          title: (titleEl?.textContent ?? '').trim(),
+          body: (bodyEl?.textContent ?? '').trim(),
+          href: (urlEditor?.value ?? '').trim(),
+          link_label: (linkEl?.textContent ?? 'Download File').trim()
+        });
+        showStatus('Download saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save download.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      if (titleEl) titleEl.textContent = readState.title;
+      if (bodyEl) bodyEl.textContent = readState.body;
+      if (linkEl) {
+        linkEl.textContent = readState.linkLabel;
+        linkEl.setAttribute('href', readState.href);
+      }
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    setEditable(titleEl, true);
+    setEditable(bodyEl, true);
+    setEditable(linkEl, true);
+
+    if (!urlEditor) {
+      const { wrapper, input } = createUrlEditor('Download URL', readState.href);
+      item.appendChild(wrapper);
+      urlEditor = input;
+    }
+
+    renderEditControls();
+  };
+
+  renderReadControls();
+  bodyEl?.addEventListener('click', enterEdit);
+};
+
+const createHeroNoticeElement = () => {
+  const heroGrid = document.querySelector('.hero .hero-grid');
+  if (!heroGrid) return null;
+
+  const notice = document.createElement('aside');
+  notice.className = 'alert-box hero-notice';
+  notice.setAttribute('aria-label', 'Important announcement');
+  (notice as HTMLElement).dataset.pageKey = currentPageKey();
+  notice.innerHTML = `
+    <h2 class="hero-notice-title">Important Notice</h2>
+    <p class="hero-notice-body">Write the notice details here.</p>
+    <a class="hero-notice-link" href="#">View notice</a>
+  `;
+
+  heroGrid.appendChild(notice);
+  return notice;
+};
+
+const wireHeroNoticeInline = (notice: Element, isNew = false) => {
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  notice.appendChild(controls);
+
+  const titleEl = notice.querySelector('.hero-notice-title');
+  const bodyEl = notice.querySelector('.hero-notice-body');
+  const linkEl = notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null;
+
+  let urlEditor: HTMLInputElement | null = null;
+  const readState = toHeroNoticeRecord(notice);
+
+  const exitEdit = () => {
+    setEditable(titleEl, false);
+    setEditable(bodyEl, false);
+    setEditable(linkEl, false);
+    if (urlEditor) {
+      urlEditor.parentElement?.remove();
+      urlEditor = null;
+    }
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', enterEdit);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      try {
+        await deleteHeroNotice(currentPageKey());
+        showStatus('Important notice removed. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to remove important notice.');
+      }
+    });
+
+    controls.appendChild(editBtn);
+    controls.appendChild(deleteBtn);
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        await saveHeroNotice({
+          page_key: currentPageKey(),
+          title: (titleEl?.textContent ?? '').trim(),
+          body: (bodyEl?.textContent ?? '').trim(),
+          href: (urlEditor?.value ?? '#').trim(),
+          link_label: (linkEl?.textContent ?? 'View notice').trim(),
+          is_active: true
+        });
+        showStatus('Important notice saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      if (isNew) {
+        notice.remove();
+        return;
+      }
+
+      if (titleEl) titleEl.textContent = readState.title;
+      if (bodyEl) bodyEl.textContent = readState.body;
+      if (linkEl) {
+        linkEl.textContent = readState.linkLabel;
+        linkEl.setAttribute('href', readState.href);
+      }
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    setEditable(titleEl, true);
+    setEditable(bodyEl, true);
+    setEditable(linkEl, true);
+
+    if (!urlEditor) {
+      const { wrapper, input } = createUrlEditor('Notice URL', readState.href || '#');
+      notice.appendChild(wrapper);
+      urlEditor = input;
+    }
+
+    renderEditControls();
+  };
+
+  renderReadControls();
+
+  notice.querySelectorAll('.hero-notice-title, .hero-notice-body, .hero-notice-link').forEach((part) => {
+    part.addEventListener('click', (event) => {
+      event.preventDefault();
+      enterEdit();
+    });
   });
+
+  if (isNew) {
+    enterEdit();
+  }
+};
+
+let openHeroNoticeEditor: (() => void) | null = null;
+
+const bindInlineActions = () => {
+  const heroNotice = document.querySelector('.hero-notice');
+  if (heroNotice) {
+    wireHeroNoticeInline(heroNotice);
+    openHeroNoticeEditor = () => {
+      const editBtn = heroNotice.querySelector('.inline-admin-controls button');
+      (editBtn as HTMLButtonElement | null)?.click();
+    };
+  } else {
+    openHeroNoticeEditor = () => {
+      const created = createHeroNoticeElement();
+      if (!created) {
+        showStatus('This page does not have a hero section for an Important Notice.');
+        return;
+      }
+      wireHeroNoticeInline(created, true);
+    };
+  }
+
+  const noticeItems = Array.from(document.querySelectorAll('.notice-item'));
+  noticeItems.forEach(wireAnnouncementInline);
+
+  const editableCards = Array.from(document.querySelectorAll('[data-editable-card="true"]'));
+  editableCards.forEach(wireCardInline);
+
+  const editableDownloads = Array.from(document.querySelectorAll('[data-editable-download="true"]'));
+  editableDownloads.forEach(wireDownloadInline);
 };
 
 const mountToolbar = () => {
@@ -515,12 +775,8 @@ const mountToolbar = () => {
   });
 
   const editNoticeBtn = document.getElementById('inline-edit-hero-notice') as HTMLButtonElement | null;
-  editNoticeBtn?.addEventListener('click', async () => {
-    try {
-      await editHeroNotice();
-    } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
-    }
+  editNoticeBtn?.addEventListener('click', () => {
+    openHeroNoticeEditor?.();
   });
 
   const addCardBtn = document.getElementById('inline-add-card') as HTMLButtonElement | null;
@@ -563,5 +819,5 @@ export const initInlinePublicAdmin = async () => {
   document.body.classList.add('inline-admin-active');
   mountToolbar();
   bindInlineActions();
-  showStatus('Admin mode active. Use the toolbar to edit content, including Important Notice.');
+  showStatus('Admin mode active. Click content and edit directly on the page.');
 };
