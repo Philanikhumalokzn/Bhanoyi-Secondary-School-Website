@@ -146,6 +146,9 @@ const createFileEditor = () => {
 };
 
 const ollamaModel = (import.meta.env.VITE_OLLAMA_MODEL as string | undefined) || 'llama3.2:3b';
+const ollamaBaseUrl =
+  (import.meta.env.VITE_OLLAMA_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
+  'http://127.0.0.1:11434';
 
 const getTargetText = (element: Element) => {
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
@@ -187,23 +190,36 @@ const rewriteWithOllama = async (input: string) => {
     input
   ].join('\n');
 
-  const response = await fetch('http://127.0.0.1:11434/api/generate', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: ollamaModel,
-      prompt,
-      stream: false,
-      options: {
-        temperature: 0.3
-      }
-    })
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${ollamaBaseUrl}/api/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: ollamaModel,
+        prompt,
+        stream: false,
+        options: {
+          temperature: 0.3
+        }
+      })
+    });
+  } catch {
+    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+      throw new Error(
+        'AI Update blocked: this deployed site cannot call local Ollama unless CORS is enabled. Set OLLAMA_ORIGINS to include this site, restart Ollama, or use the site locally.'
+      );
+    }
+    throw new Error('Could not reach local Ollama. Ensure Ollama is running on port 11434.');
+  }
 
   if (!response.ok) {
-    throw new Error('Could not reach local Ollama. Ensure Ollama is running on port 11434.');
+    if (response.status === 403 || response.status === 405) {
+      throw new Error('Ollama request was rejected. Check OLLAMA_ORIGINS and restart Ollama.');
+    }
+    throw new Error(`Ollama request failed (${response.status}). Ensure Ollama is running and CORS is configured.`);
   }
 
   const payload = (await response.json()) as { response?: string };

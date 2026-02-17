@@ -23,6 +23,21 @@ These steps must be done in your Supabase account because they need your private
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_ADMIN_EMAILS` (comma-separated admin emails)
+   - `VITE_OLLAMA_MODEL` (example: `qwen3:4b`)
+   - `VITE_OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`)
+
+## Local AI Update (Ollama) on deployed site
+If you open the Vercel site and use **AI Update**, browser CORS rules apply.
+
+On Windows, set Ollama to allow your site origin, then restart Ollama:
+
+1. Open **System Properties → Environment Variables**.
+2. Add user variable:
+   - Name: `OLLAMA_ORIGINS`
+   - Value: `https://bhanoyi-secondary-school-website.vercel.app`
+3. Close and reopen Ollama (or restart the Ollama service/app).
+
+You can also run the website locally (`http://127.0.0.1:5173`) to avoid cross-origin issues.
 
 ## Test locally
 1. `npm.cmd install`
