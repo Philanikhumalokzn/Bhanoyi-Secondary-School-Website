@@ -3,6 +3,7 @@ type SiteContent = {
 };
 
 type AnnouncementRow = {
+  id: string;
   date: string;
   tag: string;
   title: string;
@@ -38,7 +39,7 @@ const fetchAnnouncements = async (): Promise<AnnouncementRow[]> => {
   if (!url || !key) return [];
 
   const response = await fetch(
-    `${url}/rest/v1/site_announcements?select=date,tag,title,body&is_active=eq.true&order=sort_order.asc`,
+    `${url}/rest/v1/site_announcements?select=id,date,tag,title,body&is_active=eq.true&order=sort_order.asc`,
     { headers: restHeaders(key) }
   );
 

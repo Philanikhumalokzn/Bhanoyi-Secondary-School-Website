@@ -1,5 +1,6 @@
 import { getPageConfig } from './pages/index.js';
 import { loadSiteContent } from './content/content.loader.js';
+import { initInlinePublicAdmin } from './admin/inline-public.ts';
 import { renderSite } from './ui/layout.js';
 
 const bootstrap = async () => {
@@ -8,6 +9,7 @@ const bootstrap = async () => {
 	const pageConfig = getPageConfig(siteContent, pageKey);
 
 	renderSite(siteContent, pageConfig);
+	await initInlinePublicAdmin();
 };
 
 bootstrap();

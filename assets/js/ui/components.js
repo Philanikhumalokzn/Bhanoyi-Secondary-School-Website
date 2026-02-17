@@ -135,13 +135,13 @@ const renderSectionByType = (section) => {
             ${section.items
               .map(
                 (item) => `
-                  <article class="panel notice-item">
+                  <article class="panel notice-item" data-announcement-id="${item.id || ''}">
                     <div class="notice-meta">
                       <span class="notice-date">${item.date}</span>
                       ${item.tag ? `<span class="notice-tag">${item.tag}</span>` : ''}
                     </div>
-                    <h3>${item.title}</h3>
-                    <p>${item.body}</p>
+                    <h3 class="notice-title">${item.title}</h3>
+                    <p class="notice-body">${item.body}</p>
                   </article>
                 `
               )

@@ -22,6 +22,10 @@ const isAllowedAdmin = (email?: string | null) => {
   return configuredAdmins.includes(email.toLowerCase());
 };
 
+const redirectToInlineAdmin = () => {
+  window.location.href = 'index.html?admin=1';
+};
+
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const refs: AdminRefs = {
@@ -172,10 +176,8 @@ const bindForms = () => {
         return;
       }
 
-      refs.authPanel.hidden = true;
-      refs.adminPanel.hidden = false;
-      await loadData();
-      setStatus('Login successful.', 'auth');
+      setStatus('Login successful. Redirecting...', 'auth');
+      redirectToInlineAdmin();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Login failed.', 'auth');
     }
@@ -241,9 +243,7 @@ const init = async () => {
     const session = await getSession();
     const sessionEmail = session?.user?.email ?? null;
     if (session && isAllowedAdmin(sessionEmail)) {
-      refs.authPanel.hidden = true;
-      refs.adminPanel.hidden = false;
-      await loadData();
+      redirectToInlineAdmin();
       return;
     }
 
