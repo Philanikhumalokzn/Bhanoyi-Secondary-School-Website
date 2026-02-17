@@ -81,6 +81,25 @@ const showStatus = (message: string) => {
 
 const currentPageKey = (): string => document.body.dataset.page || 'home';
 
+const getSectionIndex = (section: Element): number => {
+  const raw = (section as HTMLElement).dataset.sectionIndex || '';
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? -1 : parsed;
+};
+
+const sectionOverrideKey = (sectionIndex: number) => `section_override:${currentPageKey()}:${sectionIndex}`;
+
+const saveSectionOverride = async (section: Element, payload: Record<string, unknown>) => {
+  const sectionIndex = getSectionIndex(section);
+  if (sectionIndex < 0) {
+    throw new Error('Could not resolve section index for this page.');
+  }
+
+  await saveSiteSettings({
+    [sectionOverrideKey(sectionIndex)]: JSON.stringify(payload)
+  });
+};
+
 const setEditable = (element: Element | null, enabled: boolean) => {
   if (!element) return;
   const html = element as HTMLElement;
@@ -1140,6 +1159,320 @@ const wireHeroNoticeInline = (notice: Element, isNew = false) => {
   }
 };
 
+const wireSplitSectionInline = (section: Element) => {
+  const container = section.querySelector('.container');
+  const leftCol = section.querySelector('.section-grid > div');
+  const panel = section.querySelector('.section-grid > aside.panel');
+  if (!container || !leftCol || !panel) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  container.appendChild(controls);
+
+  const titleEl = leftCol.querySelector('h2');
+  const bodyEl = leftCol.querySelector('p');
+  const listEl = leftCol.querySelector('.list');
+  const panelTitleEl = panel.querySelector('h3');
+  const panelBodyEl = panel.querySelector('p');
+  const panelLinkEl = panel.querySelector('a') as HTMLAnchorElement | null;
+
+  let linkUrlEditor: HTMLInputElement | null = null;
+  let addListItemBtn: HTMLButtonElement | null = null;
+
+  const readState = {
+    title: (titleEl?.textContent ?? '').trim(),
+    body: (bodyEl?.textContent ?? '').trim(),
+    list: listEl ? Array.from(listEl.querySelectorAll('li')).map((li) => (li.textContent ?? '').trim()) : [],
+    panelTitle: (panelTitleEl?.textContent ?? '').trim(),
+    panelBody: (panelBodyEl?.textContent ?? '').trim(),
+    panelLinkLabel: (panelLinkEl?.textContent ?? '').trim(),
+    panelLinkHref: panelLinkEl?.getAttribute('href') ?? ''
+  };
+
+  const removeListDeleteButtons = () => {
+    listEl?.querySelectorAll('.inline-item-remove').forEach((btn) => btn.remove());
+  };
+
+  const addListDeleteButtons = () => {
+    if (!listEl) return;
+    listEl.querySelectorAll('li').forEach((li) => {
+      if (li.querySelector('.inline-item-remove')) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'inline-item-remove';
+      btn.textContent = 'Remove';
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        li.remove();
+      });
+      li.appendChild(btn);
+    });
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', enterEdit);
+    controls.appendChild(editBtn);
+  };
+
+  const exitEdit = () => {
+    setEditable(titleEl, false);
+    setEditable(bodyEl, false);
+    setEditable(panelTitleEl, false);
+    setEditable(panelBodyEl, false);
+    setEditable(panelLinkEl, false);
+    listEl?.querySelectorAll('li').forEach((li) => setEditable(li, false));
+    removeListDeleteButtons();
+
+    if (linkUrlEditor) {
+      linkUrlEditor.parentElement?.remove();
+      linkUrlEditor = null;
+    }
+    if (addListItemBtn) {
+      addListItemBtn.remove();
+      addListItemBtn = null;
+    }
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+    attachAiButton(controls, section);
+
+    if (listEl) {
+      addListItemBtn = document.createElement('button');
+      addListItemBtn.type = 'button';
+      addListItemBtn.textContent = 'Add List Item';
+      addListItemBtn.addEventListener('click', () => {
+        const li = document.createElement('li');
+        li.textContent = 'New item';
+        listEl.appendChild(li);
+        setEditable(li, true);
+        addListDeleteButtons();
+      });
+      controls.appendChild(addListItemBtn);
+    }
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const payload: Record<string, unknown> = {
+          type: 'split',
+          title: (titleEl?.textContent ?? '').trim(),
+          body: (bodyEl?.textContent ?? '').trim(),
+          panel: {
+            title: (panelTitleEl?.textContent ?? '').trim(),
+            body: (panelBodyEl?.textContent ?? '').trim()
+          }
+        };
+
+        if (listEl) {
+          payload.list = Array.from(listEl.querySelectorAll('li'))
+            .map((li) => {
+              const copy = li.cloneNode(true) as HTMLElement;
+              copy.querySelectorAll('.inline-item-remove').forEach((btn) => btn.remove());
+              return (copy.textContent ?? '').trim();
+            })
+            .filter(Boolean);
+        }
+
+        if (panelLinkEl || linkUrlEditor) {
+          const href = (linkUrlEditor?.value ?? panelLinkEl?.getAttribute('href') ?? '#').trim() || '#';
+          const label = (panelLinkEl?.textContent ?? readState.panelLinkLabel).trim();
+          payload.panel = {
+            ...(payload.panel as Record<string, unknown>),
+            link: { href, label }
+          };
+        }
+
+        await saveSectionOverride(section, payload);
+        showStatus('Section saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save section.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      if (titleEl) titleEl.textContent = readState.title;
+      if (bodyEl) bodyEl.textContent = readState.body;
+      if (panelTitleEl) panelTitleEl.textContent = readState.panelTitle;
+      if (panelBodyEl) panelBodyEl.textContent = readState.panelBody;
+      if (panelLinkEl) {
+        panelLinkEl.textContent = readState.panelLinkLabel;
+        panelLinkEl.setAttribute('href', readState.panelLinkHref || '#');
+      }
+      if (listEl) {
+        listEl.innerHTML = readState.list.map((entry) => `<li>${entry}</li>`).join('');
+      }
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    setEditable(titleEl, true);
+    setEditable(bodyEl, true);
+    setEditable(panelTitleEl, true);
+    setEditable(panelBodyEl, true);
+    setEditable(panelLinkEl, true);
+    listEl?.querySelectorAll('li').forEach((li) => setEditable(li, true));
+    addListDeleteButtons();
+
+    if (panelLinkEl && !linkUrlEditor) {
+      const { wrapper, input } = createUrlEditor('Panel Link URL', panelLinkEl.getAttribute('href') || '#');
+      panel.appendChild(wrapper);
+      linkUrlEditor = input;
+    }
+
+    renderEditControls();
+  };
+
+  renderReadControls();
+};
+
+const wireContactCardsInline = (section: Element) => {
+  const container = section.querySelector('.container');
+  const titleEl = section.querySelector('h2');
+  const grid = section.querySelector('.contact-grid');
+  if (!container || !titleEl || !grid) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  container.appendChild(controls);
+
+  const readState = {
+    title: (titleEl.textContent ?? '').trim(),
+    items: Array.from(grid.querySelectorAll('.panel')).map((panel) => ({
+      title: (panel.querySelector('h3')?.textContent ?? '').trim(),
+      body: (panel.querySelector('p')?.textContent ?? '').trim()
+    }))
+  };
+
+  let addCardBtn: HTMLButtonElement | null = null;
+
+  const removeCardDeleteButtons = () => {
+    grid.querySelectorAll('.inline-item-remove').forEach((btn) => btn.remove());
+  };
+
+  const addCardDeleteButtons = () => {
+    grid.querySelectorAll('.panel').forEach((panel) => {
+      if (panel.querySelector('.inline-item-remove')) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'inline-item-remove';
+      btn.textContent = 'Remove';
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        panel.remove();
+      });
+      panel.appendChild(btn);
+    });
+  };
+
+  const setCardsEditable = (enabled: boolean) => {
+    setEditable(titleEl, enabled);
+    grid.querySelectorAll('.panel').forEach((panel) => {
+      setEditable(panel.querySelector('h3'), enabled);
+      setEditable(panel.querySelector('p'), enabled);
+    });
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', enterEdit);
+    controls.appendChild(editBtn);
+  };
+
+  const exitEdit = () => {
+    setCardsEditable(false);
+    removeCardDeleteButtons();
+    if (addCardBtn) {
+      addCardBtn.remove();
+      addCardBtn = null;
+    }
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+    attachAiButton(controls, section);
+
+    addCardBtn = document.createElement('button');
+    addCardBtn.type = 'button';
+    addCardBtn.textContent = 'Add Card';
+    addCardBtn.addEventListener('click', () => {
+      const card = document.createElement('article');
+      card.className = 'panel';
+      card.innerHTML = '<h3>New Contact Title</h3><p>New contact detail</p>';
+      grid.appendChild(card);
+      setEditable(card.querySelector('h3'), true);
+      setEditable(card.querySelector('p'), true);
+      addCardDeleteButtons();
+    });
+    controls.appendChild(addCardBtn);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const items = Array.from(grid.querySelectorAll('.panel'))
+          .map((panel) => ({
+            title: (panel.querySelector('h3')?.textContent ?? '').trim(),
+            body: (panel.querySelector('p')?.textContent ?? '').trim()
+          }))
+          .filter((entry) => entry.title || entry.body);
+
+        await saveSectionOverride(section, {
+          type: 'contact-cards',
+          title: (titleEl.textContent ?? '').trim(),
+          items
+        });
+        showStatus('Section saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save section.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      titleEl.textContent = readState.title;
+      grid.innerHTML = readState.items
+        .map((item) => `<article class="panel"><h3>${item.title}</h3><p>${item.body}</p></article>`)
+        .join('');
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    setCardsEditable(true);
+    addCardDeleteButtons();
+    renderEditControls();
+  };
+
+  renderReadControls();
+};
+
 const wireFooterInline = () => {
   const footer = document.querySelector('.site-footer');
   if (!footer) return;
@@ -1262,6 +1595,14 @@ const bindInlineActions = () => {
 
   const editableDownloads = Array.from(document.querySelectorAll('[data-editable-download="true"]'));
   editableDownloads.forEach(wireDownloadInline);
+
+  const editableSplitSections = Array.from(document.querySelectorAll('[data-editable-section="true"][data-section-type="split"]'));
+  editableSplitSections.forEach(wireSplitSectionInline);
+
+  const editableContactSections = Array.from(
+    document.querySelectorAll('[data-editable-section="true"][data-section-type="contact-cards"]')
+  );
+  editableContactSections.forEach(wireContactCardsInline);
 
   wireFooterInline();
 

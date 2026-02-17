@@ -1,6 +1,6 @@
 const renderCard = (item, clickable = false, context = {}) => {
   const attrs = [
-    context.editable ? 'data-editable-card="true"' : '',
+    'data-editable-card="true"',
     context.sectionKey ? `data-section-key="${context.sectionKey}"` : '',
     item.id ? `data-card-id="${item.id}"` : '',
     typeof context.sortOrder === 'number' ? `data-sort-order="${context.sortOrder}"` : '',
@@ -160,7 +160,9 @@ export const renderHero = (hero, pageKey) => {
   `;
 };
 
-const renderSectionByType = (section) => {
+const renderSectionByType = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+
   if (section.type === 'cards' && section.sectionKey === 'latest_news') {
     return renderLatestNewsSection(section);
   }
@@ -168,15 +170,14 @@ const renderSectionByType = (section) => {
   if (section.type === 'cards') {
     const className = section.columns === 3 ? 'three-col' : 'cards';
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}">
+      <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="cards" data-section-key="${fallbackSectionKey}">
         <div class="container">
           <h2>${section.title}</h2>
           <div class="${className}">
             ${section.items
               .map((item, index) =>
                 renderCard(item, section.clickable, {
-                  editable: Boolean(section.editable),
-                  sectionKey: section.sectionKey || '',
+                  sectionKey: fallbackSectionKey,
                   sortOrder: index
                 })
               )
@@ -189,7 +190,7 @@ const renderSectionByType = (section) => {
 
   if (section.type === 'split') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}">
+      <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="split">
         <div class="container section-grid">
           <div>
             <h2>${section.title}</h2>
@@ -208,13 +209,13 @@ const renderSectionByType = (section) => {
 
   if (section.type === 'contact-cards') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}">
+      <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="contact-cards">
         <div class="container">
           <h2>${section.title}</h2>
           <div class="contact-grid">
             ${section.items
               .map(
-                (item) => `<article class="panel"><h3>${item.title}</h3><p>${item.body}</p></article>`
+                (item, index) => `<article class="panel" data-contact-index="${index}"><h3>${item.title}</h3><p>${item.body}</p></article>`
               )
               .join('')}
           </div>
@@ -225,7 +226,7 @@ const renderSectionByType = (section) => {
 
   if (section.type === 'announcements') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}">
+      <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="announcements">
         <div class="container">
           <h2>${section.title}</h2>
           <div class="notice-grid">
@@ -251,7 +252,7 @@ const renderSectionByType = (section) => {
 
   if (section.type === 'downloads') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}">
+      <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="downloads">
         <div class="container">
           <h2>${section.title}</h2>
           <div class="download-grid">
@@ -275,7 +276,7 @@ const renderSectionByType = (section) => {
   return '';
 };
 
-export const renderSections = (sections) => sections.map(renderSectionByType).join('');
+export const renderSections = (sections) => sections.map((section, index) => renderSectionByType(section, index)).join('');
 
 export const initLatestNewsRotators = () => {
   const tracks = Array.from(document.querySelectorAll('[data-news-track]'));

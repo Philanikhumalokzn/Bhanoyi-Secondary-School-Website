@@ -190,9 +190,10 @@ const applyCards = (siteContent: SiteContent, rows: CardRow[]) => {
     const page = siteContent.pages[pageKey];
     if (!page) return;
 
-    page.sections = page.sections.map((section) => {
+    page.sections = page.sections.map((section, sectionIndex) => {
       if (section.type !== 'cards') return section;
-      if (!section.sectionKey || section.sectionKey !== sectionKey) return section;
+      const effectiveSectionKey = section.sectionKey || `section_${sectionIndex}`;
+      if (effectiveSectionKey !== sectionKey) return section;
 
       return {
         ...section,
@@ -207,6 +208,34 @@ const applyCards = (siteContent: SiteContent, rows: CardRow[]) => {
         }))
       };
     });
+  });
+};
+
+const applySectionOverrides = (siteContent: SiteContent, rows: SiteSettingRow[]) => {
+  if (rows.length === 0) return;
+
+  rows.forEach((row) => {
+    const match = /^section_override:([^:]+):(\d+)$/.exec(row.setting_key);
+    if (!match) return;
+
+    const [, pageKey, indexValue] = match;
+    const sectionIndex = Number(indexValue);
+    if (Number.isNaN(sectionIndex)) return;
+
+    const page = siteContent.pages[pageKey];
+    if (!page || !Array.isArray(page.sections)) return;
+    if (!page.sections[sectionIndex]) return;
+
+    try {
+      const override = JSON.parse(row.setting_value);
+      if (!override || typeof override !== 'object') return;
+      page.sections[sectionIndex] = {
+        ...page.sections[sectionIndex],
+        ...override
+      };
+    } catch {
+      return;
+    }
   });
 };
 
@@ -272,6 +301,7 @@ export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T
     applyCards(siteContent, cards);
     applyHeroNotices(siteContent, notices);
     applySiteSettings(siteContent, settings);
+    applySectionOverrides(siteContent, settings);
     return siteContent;
   } catch {
     return siteContent;

@@ -470,6 +470,19 @@ h1 {
   gap: 8px;
 }
 
+.inline-item-remove {
+  margin-left: 8px;
+  border: 1px solid #d8a7a7;
+  background: #fff4f4;
+  color: #7b1f1f;
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-height: 28px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
 .hero-notice {
   position: relative;
 }
