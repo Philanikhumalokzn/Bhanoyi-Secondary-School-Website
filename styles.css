@@ -25,6 +25,11 @@ select {
   cursor: pointer;
 }
 
+:where(button, [role="button"], .btn, a, input, select, textarea, [contenteditable="true"]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
 textarea,
 [contenteditable="true"] {
@@ -320,7 +325,8 @@ h1 {
   background: var(--surface);
   color: var(--primary);
   border-radius: 8px;
-  padding: 6px 10px;
+  min-height: 36px;
+  padding: 6px 12px;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -439,7 +445,9 @@ h1 {
   color: #0b3764;
   border-radius: 6px;
   padding: 5px 9px;
+  min-height: 36px;
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -566,6 +574,16 @@ h1 {
   gap: 8px;
 }
 
+.news-overlay-actions button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  font: inherit;
+  font-weight: 600;
+}
+
 .news-read-overlay {
   position: fixed;
   inset: 0;
@@ -593,8 +611,8 @@ h1 {
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 6px;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   font-size: 1.3rem;
   line-height: 1;
   cursor: pointer;
@@ -639,7 +657,8 @@ h1 {
   background: var(--surface-alt);
   color: var(--text);
   border-radius: 999px;
-  padding: 6px 12px;
+  min-height: 36px;
+  padding: 6px 14px;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
