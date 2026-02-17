@@ -40,6 +40,37 @@
       "sections": [
         {
           "type": "cards",
+          "title": "Latest News",
+          "sectionKey": "latest_news",
+          "editable": true,
+          "alt": true,
+          "columns": 3,
+          "items": [
+            {
+              "category": "Academics",
+              "title": "Grade 12 Exam Support Programme",
+              "body": "Saturday revision classes continue this term.",
+              "imageUrl": "/images/news/academics.svg",
+              "href": "academics.html"
+            },
+            {
+              "category": "Parents",
+              "title": "Parents Meeting",
+              "body": "Parent-teacher consultations scheduled for next week.",
+              "imageUrl": "/images/news/parents.svg",
+              "href": "contact.html"
+            },
+            {
+              "category": "Sports",
+              "title": "Sports Update",
+              "body": "Our teams performed strongly in the district fixtures.",
+              "imageUrl": "/images/news/sports.svg",
+              "href": "index.html"
+            }
+          ]
+        },
+        {
+          "type": "cards",
           "title": "Quick Links",
           "sectionKey": "quick_links",
           "editable": true,
@@ -64,28 +95,6 @@
               "title": "Policies & Documents",
               "body": "Code of conduct, uniform guide, and complaints process.",
               "href": "policies.html"
-            }
-          ]
-        },
-        {
-          "type": "cards",
-          "title": "Latest News",
-          "sectionKey": "latest_news",
-          "editable": true,
-          "alt": true,
-          "columns": 3,
-          "items": [
-            {
-              "title": "Grade 12 Exam Support Programme",
-              "body": "Saturday revision classes continue this term."
-            },
-            {
-              "title": "Parents Meeting",
-              "body": "Parent-teacher consultations scheduled for next week."
-            },
-            {
-              "title": "Sports Update",
-              "body": "Our teams performed strongly in the district fixtures."
             }
           ]
         },

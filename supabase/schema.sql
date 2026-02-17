@@ -27,13 +27,21 @@ create table if not exists public.site_cards (
   id uuid primary key default gen_random_uuid(),
   page_key text not null,
   section_key text not null,
+  category text not null default '',
   title text not null,
   body text not null,
+  image_url text not null default '',
   href text,
   sort_order int not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+alter table if exists public.site_cards
+  add column if not exists category text not null default '';
+
+alter table if exists public.site_cards
+  add column if not exists image_url text not null default '';
 
 create table if not exists public.site_hero_notice (
   id uuid primary key default gen_random_uuid(),

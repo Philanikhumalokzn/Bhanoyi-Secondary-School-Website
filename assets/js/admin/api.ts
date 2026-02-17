@@ -5,8 +5,10 @@ export type SiteCard = {
   id: string;
   page_key: string;
   section_key: string;
+  category: string;
   title: string;
   body: string;
+  image_url: string;
   href: string | null;
   sort_order: number;
   is_active: boolean;
@@ -139,7 +141,7 @@ export const deleteDownload = async (id: string) => {
 export const listCards = async (pageKey: string, sectionKey: string): Promise<SiteCard[]> => {
   const { data, error } = await supabase
     .from('site_cards')
-    .select('id,page_key,section_key,title,body,href,sort_order,is_active')
+    .select('id,page_key,section_key,category,title,body,image_url,href,sort_order,is_active')
     .eq('page_key', pageKey)
     .eq('section_key', sectionKey)
     .order('sort_order', { ascending: true });
@@ -151,8 +153,10 @@ export const listCards = async (pageKey: string, sectionKey: string): Promise<Si
 export const saveCard = async (entry: Partial<SiteCard>) => {
   if (entry.id) {
     const updatePayload: Partial<SiteCard> = {};
+    if (entry.category !== undefined) updatePayload.category = entry.category;
     if (entry.title !== undefined) updatePayload.title = entry.title;
     if (entry.body !== undefined) updatePayload.body = entry.body;
+    if (entry.image_url !== undefined) updatePayload.image_url = entry.image_url;
     if (entry.href !== undefined) updatePayload.href = entry.href;
     if (entry.sort_order !== undefined) updatePayload.sort_order = entry.sort_order;
     if (entry.is_active !== undefined) updatePayload.is_active = entry.is_active;
@@ -165,8 +169,10 @@ export const saveCard = async (entry: Partial<SiteCard>) => {
   const payload = {
     page_key: entry.page_key ?? 'home',
     section_key: entry.section_key ?? '',
+    category: entry.category ?? '',
     title: entry.title ?? '',
     body: entry.body ?? '',
+    image_url: entry.image_url ?? '',
     href: entry.href ?? null,
     sort_order: entry.sort_order ?? 0,
     is_active: true
@@ -179,6 +185,22 @@ export const saveCard = async (entry: Partial<SiteCard>) => {
 export const deleteCard = async (id: string) => {
   const { error } = await supabase.from('site_cards').delete().eq('id', id);
   if (error) throw toError(error, 'Card delete failed');
+};
+
+export const uploadNewsImage = async (file: File) => {
+  const extension = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
+  const safeExt = (extension || 'jpg').toLowerCase();
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`;
+
+  const { error } = await supabase.storage.from('news-images').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false
+  });
+
+  if (error) throw toError(error, 'Image upload failed');
+
+  const { data } = supabase.storage.from('news-images').getPublicUrl(path);
+  return data.publicUrl;
 };
 
 export const saveHeroNotice = async (entry: Partial<HeroNotice> & { page_key: string }) => {

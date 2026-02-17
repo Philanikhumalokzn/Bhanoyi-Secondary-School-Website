@@ -16,6 +16,69 @@ const renderCard = (item, clickable = false, context = {}) => {
   return `<article class="card" ${attrs}>${content}</article>`;
 };
 
+const renderLatestNewsSection = (section) => {
+  const grouped = (section.items || []).reduce((acc, item, index) => {
+    const category = (item.category || 'General').trim() || 'General';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push({ ...item, index });
+    return acc;
+  }, {});
+
+  const categories = Object.entries(grouped);
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''} latest-news-shell" id="latest-news">
+      <div class="container">
+        <h2>${section.title}</h2>
+        <div class="latest-news-grid">
+          ${categories
+            .map(([category, items]) => {
+              const slides = items
+                .map((item, idx) => {
+                  const attrs = [
+                    section.editable ? 'data-editable-card="true"' : '',
+                    section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
+                    item.id ? `data-card-id="${item.id}"` : '',
+                    `data-card-category="${category}"`,
+                    `data-card-image-url="${item.imageUrl || ''}"`,
+                    typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
+                    'data-card-clickable="true"'
+                  ]
+                    .filter(Boolean)
+                    .join(' ');
+
+                  return `
+                    <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
+                      <img class="latest-news-image" src="${item.imageUrl || '/images/news/news-default.svg'}" alt="${item.title}" loading="lazy" />
+                      <div class="latest-news-content">
+                        <span class="news-category">${category}</span>
+                        <h3>${item.title}</h3>
+                        <p>${item.body}</p>
+                      </div>
+                    </a>
+                  `;
+                })
+                .join('');
+
+              return `
+                <article class="panel latest-news-lane">
+                  <div class="latest-news-lane-head">
+                    <h3>${category}</h3>
+                    <span class="news-rotation-state" data-news-counter>1 / ${items.length}</span>
+                  </div>
+                  <div class="latest-news-track" data-news-track data-news-size="${items.length}">
+                    ${slides}
+                  </div>
+                </article>
+              `;
+            })
+            .join('')}
+        </div>
+      </div>
+    </section>
+  `;
+};
+
 export const renderHeader = (siteContent, pageKey) => {
   const links = siteContent.navigation.map((item) => {
     const current = item.key === pageKey ? ' aria-current="page"' : '';
@@ -86,6 +149,10 @@ export const renderHero = (hero, pageKey) => {
 };
 
 const renderSectionByType = (section) => {
+  if (section.type === 'cards' && section.sectionKey === 'latest_news') {
+    return renderLatestNewsSection(section);
+  }
+
   if (section.type === 'cards') {
     const className = section.columns === 3 ? 'three-col' : 'cards';
     return `
@@ -197,6 +264,26 @@ const renderSectionByType = (section) => {
 };
 
 export const renderSections = (sections) => sections.map(renderSectionByType).join('');
+
+export const initLatestNewsRotators = () => {
+  const tracks = Array.from(document.querySelectorAll('[data-news-track]'));
+
+  tracks.forEach((track) => {
+    const slides = Array.from(track.querySelectorAll('.latest-news-slide'));
+    const counter = track.parentElement?.querySelector('[data-news-counter]');
+    if (slides.length <= 1) return;
+
+    let index = 0;
+    window.setInterval(() => {
+      slides[index].classList.remove('is-active');
+      index = (index + 1) % slides.length;
+      slides[index].classList.add('is-active');
+      if (counter) {
+        counter.textContent = `${index + 1} / ${slides.length}`;
+      }
+    }, 2000);
+  });
+};
 
 export const renderFooter = (siteContent) => `
   <footer class="site-footer">

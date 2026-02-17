@@ -1,4 +1,4 @@
-import { renderFooter, renderHeader, renderHero, renderSections } from './components.js';
+import { initLatestNewsRotators, renderFooter, renderHeader, renderHero, renderSections } from './components.js';
 
 const upsertDescriptionMeta = (content) => {
   let element = document.querySelector('meta[name="description"]');
@@ -66,4 +66,5 @@ export const renderSite = (siteContent, page) => {
   `;
 
   bindMobileNav();
+  initLatestNewsRotators();
 };

@@ -23,8 +23,10 @@ type CardRow = {
   id: string;
   page_key: string;
   section_key: string;
+  category: string;
   title: string;
   body: string;
+  image_url: string;
   href: string | null;
   sort_order: number;
 };
@@ -86,7 +88,7 @@ const fetchCards = async (): Promise<CardRow[]> => {
   if (!url || !key) return [];
 
   const response = await fetch(
-    `${url}/rest/v1/site_cards?select=id,page_key,section_key,title,body,href,sort_order&is_active=eq.true&order=sort_order.asc`,
+    `${url}/rest/v1/site_cards?select=id,page_key,section_key,category,title,body,image_url,href,sort_order&is_active=eq.true&order=sort_order.asc`,
     { headers: restHeaders(key) }
   );
 
@@ -176,8 +178,10 @@ const applyCards = (siteContent: SiteContent, rows: CardRow[]) => {
         ...section,
         items: items.map((item) => ({
           id: item.id,
+          category: item.category || 'General',
           title: item.title,
           body: item.body,
+          imageUrl: item.image_url || '',
           href: item.href || '#'
         }))
       };

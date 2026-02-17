@@ -8,6 +8,7 @@ import {
   saveCard,
   saveDownload,
   saveHeroNotice,
+  uploadNewsImage,
   signOut
 } from './api';
 
@@ -24,8 +25,10 @@ type CardRecord = {
   sectionKey: string;
   sortOrder: number;
   clickable: boolean;
+  category: string;
   title: string;
   body: string;
+  imageUrl: string;
   href: string;
 };
 
@@ -101,6 +104,45 @@ const createUrlEditor = (label: string, value: string) => {
   return { wrapper, input };
 };
 
+const createTextEditor = (label: string, value: string) => {
+  const wrapper = document.createElement('label');
+  wrapper.className = 'inline-url-editor';
+
+  const span = document.createElement('span');
+  span.textContent = label;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value;
+
+  wrapper.appendChild(span);
+  wrapper.appendChild(input);
+
+  return { wrapper, input };
+};
+
+const createFileEditor = () => {
+  const wrapper = document.createElement('label');
+  wrapper.className = 'inline-file-editor';
+
+  const span = document.createElement('span');
+  span.textContent = 'Upload news image';
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = 'Upload';
+
+  wrapper.appendChild(span);
+  wrapper.appendChild(input);
+  wrapper.appendChild(button);
+
+  return { wrapper, input, button };
+};
+
 const toRecord = (item: Element): AnnouncementRecord | null => {
   const id = (item as HTMLElement).dataset.announcementId;
   if (!id) return null;
@@ -118,14 +160,21 @@ const toCardRecord = (item: Element): CardRecord => {
   const title = (item.querySelector('h3')?.textContent ?? '').trim();
   const body = (item.querySelector('p')?.textContent ?? '').trim();
   const href = (item as HTMLAnchorElement).getAttribute?.('href') ?? '';
+  const category = ((item as HTMLElement).dataset.cardCategory || getText(item, '.news-category') || 'General').trim();
+  const imageUrl = ((item as HTMLElement).dataset.cardImageUrl ||
+    (item.querySelector('.latest-news-image') as HTMLImageElement | null)?.getAttribute('src') ||
+    '')
+    .trim();
 
   return {
     id: (item as HTMLElement).dataset.cardId || undefined,
     sectionKey: (item as HTMLElement).dataset.sectionKey || '',
     sortOrder: Number((item as HTMLElement).dataset.sortOrder || '0'),
     clickable: (item as HTMLElement).dataset.cardClickable === 'true',
+    category,
     title,
     body,
+    imageUrl,
     href
   };
 };
@@ -177,11 +226,24 @@ const addCard = async () => {
   if (!body) return;
   const href = prompt('Link URL (use # if not clickable)', '#') ?? '#';
 
+  let category = '';
+  let imageUrl = '';
+  if (sectionKey === 'latest_news') {
+    category = (prompt('News category (e.g. Sports, Academics, Culture)', 'General') ?? 'General').trim() || 'General';
+    imageUrl = (prompt('Image URL (required for Latest News)', '') ?? '').trim();
+    if (!imageUrl) {
+      showStatus('Latest News requires an image URL.');
+      return;
+    }
+  }
+
   await saveCard({
     page_key: currentPageKey(),
     section_key: sectionKey,
+    category,
     title,
     body,
+    image_url: imageUrl,
     href,
     sort_order: 0
   });
@@ -341,20 +403,40 @@ const wireAnnouncementInline = (item: Element) => {
 
 const wireCardInline = (item: Element) => {
   const record = toCardRecord(item);
+  const isLatestNews = record.sectionKey === 'latest_news';
   const controls = document.createElement('div');
   controls.className = 'inline-admin-controls';
   item.appendChild(controls);
 
   const titleEl = item.querySelector('h3');
   const bodyEl = item.querySelector('p');
+  const categoryEl = item.querySelector('.news-category');
+  const imageEl = item.querySelector('.latest-news-image') as HTMLImageElement | null;
 
   let urlEditor: HTMLInputElement | null = null;
+  let categoryEditor: HTMLInputElement | null = null;
+  let imageUrlEditor: HTMLInputElement | null = null;
+  let imageFileInput: HTMLInputElement | null = null;
+  let imageUploadButton: HTMLButtonElement | null = null;
 
   const readState = { ...record };
 
   const exitEdit = () => {
     setEditable(titleEl, false);
     setEditable(bodyEl, false);
+    if (categoryEditor) {
+      categoryEditor.parentElement?.remove();
+      categoryEditor = null;
+    }
+    if (imageUrlEditor) {
+      imageUrlEditor.parentElement?.remove();
+      imageUrlEditor = null;
+    }
+    if (imageFileInput?.parentElement) {
+      imageFileInput.parentElement.remove();
+      imageFileInput = null;
+      imageUploadButton = null;
+    }
     if (urlEditor) {
       urlEditor.parentElement?.remove();
       urlEditor = null;
@@ -409,10 +491,17 @@ const wireCardInline = (item: Element) => {
           page_key: currentPageKey(),
           section_key: record.sectionKey,
           sort_order: record.sortOrder,
+          category: isLatestNews ? (categoryEditor?.value ?? readState.category).trim() : '',
           title: (titleEl?.textContent ?? '').trim(),
           body: (bodyEl?.textContent ?? '').trim(),
+          image_url: isLatestNews ? (imageUrlEditor?.value ?? readState.imageUrl).trim() : '',
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
+
+        if (isLatestNews && !payload.image_url) {
+          showStatus('Latest News cards require an image. Upload or paste an image URL before saving.');
+          return;
+        }
 
         await saveCard(payload);
         showStatus('Card saved. Refreshing...');
@@ -429,6 +518,8 @@ const wireCardInline = (item: Element) => {
       event.preventDefault();
       if (titleEl) titleEl.textContent = readState.title;
       if (bodyEl) bodyEl.textContent = readState.body;
+      if (categoryEl) categoryEl.textContent = readState.category;
+      if (imageEl) imageEl.src = readState.imageUrl || '/images/news/news-default.svg';
       if (record.clickable && item instanceof HTMLAnchorElement) {
         item.setAttribute('href', readState.href || '#');
       }
@@ -446,9 +537,61 @@ const wireCardInline = (item: Element) => {
     setEditable(bodyEl, true);
 
     if (record.clickable && !urlEditor) {
-      const { wrapper, input } = createUrlEditor('Link URL', readState.href || '#');
+      const { wrapper, input } = createUrlEditor(isLatestNews ? 'News link URL' : 'Link URL', readState.href || '#');
       item.appendChild(wrapper);
       urlEditor = input;
+    }
+
+    if (isLatestNews && !categoryEditor) {
+      const { wrapper, input } = createTextEditor('Category', readState.category || 'General');
+      item.appendChild(wrapper);
+      categoryEditor = input;
+    }
+
+    if (isLatestNews && !imageUrlEditor) {
+      const { wrapper, input } = createUrlEditor('Image URL', readState.imageUrl || '');
+      item.appendChild(wrapper);
+      imageUrlEditor = input;
+
+      imageUrlEditor.addEventListener('input', () => {
+        if (imageEl) imageEl.src = imageUrlEditor?.value || '/images/news/news-default.svg';
+      });
+    }
+
+    if (isLatestNews && !imageFileInput) {
+      const { wrapper, input, button } = createFileEditor();
+      item.appendChild(wrapper);
+      imageFileInput = input;
+      imageUploadButton = button;
+
+      imageUploadButton.addEventListener('click', async (eventUpload) => {
+        eventUpload.preventDefault();
+        const uploadBtn = imageUploadButton;
+        if (!uploadBtn) return;
+        const file = imageFileInput?.files?.[0];
+        if (!file) {
+          showStatus('Choose an image file first.');
+          return;
+        }
+
+        try {
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Uploading...';
+          const url = await uploadNewsImage(file);
+          if (imageUrlEditor) imageUrlEditor.value = url;
+          if (imageEl) imageEl.src = url;
+          showStatus('Image uploaded. Save the card to publish changes.');
+        } catch (error) {
+          showStatus(
+            error instanceof Error
+              ? `${error.message}. Ensure a public storage bucket named news-images exists.`
+              : 'Image upload failed.'
+          );
+        } finally {
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Upload';
+        }
+      });
     }
 
     renderEditControls();
@@ -459,6 +602,7 @@ const wireCardInline = (item: Element) => {
   item.addEventListener('click', (event) => {
     if ((event.target as HTMLElement).closest('.inline-admin-controls')) return;
     if ((event.target as HTMLElement).closest('.inline-url-editor')) return;
+    if ((event.target as HTMLElement).closest('.inline-file-editor')) return;
     event.preventDefault();
   });
 
