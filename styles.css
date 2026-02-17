@@ -509,8 +509,15 @@ h1 {
   outline-offset: 2px;
   border-radius: 6px;
   background: #f8fbff;
+  color: var(--text);
   min-height: 1.4em;
   padding: 2px 4px;
+}
+
+.site-footer .inline-editable-field {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  outline-color: rgba(173, 216, 255, 0.95);
 }
 
 .inline-url-editor {
