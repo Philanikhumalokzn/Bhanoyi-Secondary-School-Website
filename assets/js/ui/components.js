@@ -69,7 +69,6 @@ const renderLatestNewsSection = (section) => {
                 <article class="panel latest-news-lane">
                   <div class="latest-news-lane-head">
                     <h3>${category}</h3>
-                    <span class="news-rotation-state" data-news-counter>1 / ${items.length}</span>
                   </div>
                   <div class="latest-news-track" data-news-track data-news-size="${items.length}">
                     ${slides}
