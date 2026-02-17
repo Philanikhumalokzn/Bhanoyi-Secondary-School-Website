@@ -16,6 +16,26 @@ const renderCard = (item, clickable = false, context = {}) => {
   return `<article class="card" ${attrs}>${content}</article>`;
 };
 
+const withAdminQuery = (href) => {
+  if (!href) return href;
+  if (typeof window === 'undefined') return href;
+
+  const adminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  if (!adminMode) return href;
+
+  if (/^(https?:|mailto:|tel:|#)/i.test(href)) {
+    return href;
+  }
+
+  try {
+    const url = new URL(href, window.location.origin);
+    url.searchParams.set('admin', '1');
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return href;
+  }
+};
+
 const renderLatestNewsSection = (section) => {
   const grouped = (section.items || []).reduce((acc, item, index) => {
     const category = (item.category || 'General').trim() || 'General';
@@ -94,7 +114,7 @@ const renderLatestNewsSection = (section) => {
 export const renderHeader = (siteContent, pageKey) => {
   const links = siteContent.navigation.map((item) => {
     const current = item.key === pageKey ? ' aria-current="page"' : '';
-    return `<li><a href="${item.href}"${current}>${item.label}</a></li>`;
+    return `<li><a href="${withAdminQuery(item.href)}"${current}>${item.label}</a></li>`;
   }).join('');
 
   const brandVisual = siteContent.school.logoPath
@@ -104,7 +124,7 @@ export const renderHeader = (siteContent, pageKey) => {
   return `
     <header class="site-header">
       <div class="container header-inner">
-        <a class="brand" href="index.html" aria-label="${siteContent.school.name} home">
+        <a class="brand" href="${withAdminQuery('index.html')}" aria-label="${siteContent.school.name} home">
           ${brandVisual}
           <span>${siteContent.school.name}</span>
         </a>
