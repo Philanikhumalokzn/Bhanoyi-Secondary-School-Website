@@ -39,6 +39,7 @@ const renderLatestNewsSection = (section) => {
               const slides = items
                 .map((item, idx) => {
                   const hasImage = Boolean((item.imageUrl || '').trim());
+                  const fallbackHeading = (item.subtitle || '').trim() || item.title;
                   const attrs = [
                     section.editable ? 'data-editable-card="true"' : '',
                     section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
@@ -56,14 +57,14 @@ const renderLatestNewsSection = (section) => {
                     <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
                       <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? item.imageUrl : ''}" alt="${item.title}" loading="lazy" />
                       <div class="latest-news-image-fallback ${hasImage ? 'is-hidden' : ''}">
-                        <h4 class="latest-news-fallback-title">${item.title}</h4>
+                        <h4 class="latest-news-fallback-title">${fallbackHeading}</h4>
                         <p class="latest-news-fallback-body">${item.body}</p>
                       </div>
                       <div class="latest-news-content">
                         <span class="news-category">${category}</span>
+                        <h3 class="latest-news-title">${item.title}</h3>
                         ${item.subtitle ? `<p class="latest-news-subtitle">${item.subtitle}</p>` : ''}
-                        <h3>${item.title}</h3>
-                        <p>${item.body}</p>
+                        <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
                       </div>
                     </a>
                   `;

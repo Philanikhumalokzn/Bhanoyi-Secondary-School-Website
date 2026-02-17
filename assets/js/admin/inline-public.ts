@@ -159,9 +159,17 @@ const toRecord = (item: Element): AnnouncementRecord | null => {
 };
 
 const toCardRecord = (item: Element): CardRecord => {
-  const title = (item.querySelector('h3')?.textContent ?? '').trim();
-  const body = (item.querySelector('p')?.textContent ?? '').trim();
   const href = (item as HTMLAnchorElement).getAttribute?.('href') ?? '';
+  const sectionKey = (item as HTMLElement).dataset.sectionKey || '';
+  const isLatestNews = sectionKey === 'latest_news';
+  const title = (
+    isLatestNews ? item.querySelector('.latest-news-title')?.textContent : item.querySelector('h3')?.textContent
+  )?.trim() || '';
+  const body = (
+    isLatestNews
+      ? item.querySelector('.latest-news-body')?.textContent || item.querySelector('.latest-news-fallback-body')?.textContent
+      : item.querySelector('p')?.textContent
+  )?.trim() || '';
   const category = ((item as HTMLElement).dataset.cardCategory || getText(item, '.news-category') || 'General').trim();
   const subtitle = ((item as HTMLElement).dataset.cardSubtitle || getText(item, '.latest-news-subtitle') || '').trim();
   const imageUrl = ((item as HTMLElement).dataset.cardImageUrl ||
@@ -171,7 +179,7 @@ const toCardRecord = (item: Element): CardRecord => {
 
   return {
     id: (item as HTMLElement).dataset.cardId || undefined,
-    sectionKey: (item as HTMLElement).dataset.sectionKey || '',
+    sectionKey,
     sortOrder: Number((item as HTMLElement).dataset.sortOrder || '0'),
     clickable: (item as HTMLElement).dataset.cardClickable === 'true',
     category,
@@ -482,10 +490,13 @@ const wireCardInline = (item: Element) => {
   }
   item.appendChild(controls);
 
-  const titleEl = item.querySelector('h3');
-  const bodyEl = item.querySelector('p');
+  const titleEl = isLatestNews ? item.querySelector('.latest-news-title') : item.querySelector('h3');
+  const bodyEl = isLatestNews
+    ? item.querySelector('.latest-news-body') || item.querySelector('.latest-news-fallback-body')
+    : item.querySelector('p');
   const categoryEl = item.querySelector('.news-category');
   const subtitleEl = item.querySelector('.latest-news-subtitle');
+  const visibleBodyEl = item.querySelector('.latest-news-body') as HTMLElement | null;
   const imageEl = item.querySelector('.latest-news-image') as HTMLImageElement | null;
   const fallbackEl = item.querySelector('.latest-news-image-fallback') as HTMLElement | null;
   const fallbackTitleEl = item.querySelector('.latest-news-fallback-title') as HTMLElement | null;
@@ -499,7 +510,7 @@ const wireCardInline = (item: Element) => {
 
   const readState = { ...record };
 
-  const syncLatestNewsMedia = (imageUrl: string, title: string, body: string) => {
+  const syncLatestNewsMedia = (imageUrl: string, title: string, subtitle: string, body: string) => {
     if (!isLatestNews) return;
     const hasImage = Boolean((imageUrl || '').trim());
 
@@ -512,7 +523,11 @@ const wireCardInline = (item: Element) => {
       fallbackEl.classList.toggle('is-hidden', hasImage);
     }
 
-    if (fallbackTitleEl) fallbackTitleEl.textContent = title;
+    if (visibleBodyEl) {
+      visibleBodyEl.classList.toggle('is-hidden', !hasImage);
+    }
+
+    if (fallbackTitleEl) fallbackTitleEl.textContent = subtitle.trim() || title;
     if (fallbackBodyEl) fallbackBodyEl.textContent = body;
   };
 
@@ -612,7 +627,7 @@ const wireCardInline = (item: Element) => {
       if (subtitleEl) subtitleEl.textContent = readState.subtitle;
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
-      syncLatestNewsMedia(readState.imageUrl, readState.title, readState.body);
+      syncLatestNewsMedia(readState.imageUrl, readState.title, readState.subtitle, readState.body);
       if (record.clickable && item instanceof HTMLAnchorElement) {
         item.setAttribute('href', readState.href || '#');
       }
@@ -651,6 +666,7 @@ const wireCardInline = (item: Element) => {
         syncLatestNewsMedia(
           imageUrlEditor?.value || '',
           (titleEl?.textContent ?? readState.title).trim(),
+          (subtitleEl?.textContent ?? readState.subtitle).trim(),
           (bodyEl?.textContent ?? readState.body).trim()
         );
       });
@@ -680,6 +696,7 @@ const wireCardInline = (item: Element) => {
           syncLatestNewsMedia(
             url,
             (titleEl?.textContent ?? readState.title).trim(),
+            (subtitleEl?.textContent ?? readState.subtitle).trim(),
             (bodyEl?.textContent ?? readState.body).trim()
           );
           showStatus('Image uploaded. Save the card to publish changes.');
@@ -701,7 +718,7 @@ const wireCardInline = (item: Element) => {
 
   renderReadControls();
 
-  syncLatestNewsMedia(readState.imageUrl, readState.title, readState.body);
+  syncLatestNewsMedia(readState.imageUrl, readState.title, readState.subtitle, readState.body);
 
   item.addEventListener('click', (event) => {
     if ((event.target as HTMLElement).closest('.inline-admin-controls')) return;
