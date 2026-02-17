@@ -302,6 +302,50 @@ const removeHeroNotice = async () => {
 };
 
 const bindInlineActions = () => {
+  const heroNotice = document.querySelector('.hero-notice');
+  if (heroNotice) {
+    const controls = document.createElement('div');
+    controls.className = 'inline-admin-controls';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', async () => {
+      try {
+        await editHeroNotice();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
+      }
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      try {
+        await removeHeroNotice();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to remove important notice.');
+      }
+    });
+
+    controls.appendChild(editBtn);
+    controls.appendChild(deleteBtn);
+    heroNotice.appendChild(controls);
+
+    const editableParts = heroNotice.querySelectorAll('.hero-notice-title, .hero-notice-body, .hero-notice-link');
+    editableParts.forEach((part) => {
+      part.addEventListener('click', async (event) => {
+        event.preventDefault();
+        try {
+          await editHeroNotice();
+        } catch (error) {
+          showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
+        }
+      });
+    });
+  }
+
   const noticeItems = Array.from(document.querySelectorAll('.notice-item'));
 
   noticeItems.forEach((item) => {
@@ -455,7 +499,6 @@ const mountToolbar = () => {
     <strong>Admin Mode</strong>
     <button type="button" id="inline-add-announcement">Add Announcement</button>
     <button type="button" id="inline-edit-hero-notice">Edit Important Notice</button>
-    <button type="button" id="inline-remove-hero-notice">Remove Important Notice</button>
     <button type="button" id="inline-add-card">Add Card</button>
     <button type="button" id="inline-add-download">Add Download</button>
     <button type="button" id="inline-admin-logout">Logout</button>
@@ -477,15 +520,6 @@ const mountToolbar = () => {
       await editHeroNotice();
     } catch (error) {
       showStatus(error instanceof Error ? error.message : 'Failed to save important notice.');
-    }
-  });
-
-  const removeNoticeBtn = document.getElementById('inline-remove-hero-notice') as HTMLButtonElement | null;
-  removeNoticeBtn?.addEventListener('click', async () => {
-    try {
-      await removeHeroNotice();
-    } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Failed to remove important notice.');
     }
   });
 
