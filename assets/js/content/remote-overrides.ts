@@ -11,11 +11,22 @@ type AnnouncementRow = {
 };
 
 type DownloadRow = {
+  id: string;
   section: 'admissions' | 'policies';
   title: string;
   body: string;
   href: string;
   link_label: string;
+};
+
+type CardRow = {
+  id: string;
+  page_key: string;
+  section_key: string;
+  title: string;
+  body: string;
+  href: string | null;
+  sort_order: number;
 };
 
 const getConfig = () => {
@@ -52,12 +63,25 @@ const fetchDownloads = async (): Promise<DownloadRow[]> => {
   if (!url || !key) return [];
 
   const response = await fetch(
-    `${url}/rest/v1/site_downloads?select=section,title,body,href,link_label&is_active=eq.true&order=sort_order.asc`,
+    `${url}/rest/v1/site_downloads?select=id,section,title,body,href,link_label&is_active=eq.true&order=sort_order.asc`,
     { headers: restHeaders(key) }
   );
 
   if (!response.ok) return [];
   return (await response.json()) as DownloadRow[];
+};
+
+const fetchCards = async (): Promise<CardRow[]> => {
+  const { url, key } = getConfig();
+  if (!url || !key) return [];
+
+  const response = await fetch(
+    `${url}/rest/v1/site_cards?select=id,page_key,section_key,title,body,href,sort_order&is_active=eq.true&order=sort_order.asc`,
+    { headers: restHeaders(key) }
+  );
+
+  if (!response.ok) return [];
+  return (await response.json()) as CardRow[];
 };
 
 const applyAnnouncements = (siteContent: SiteContent, rows: AnnouncementRow[]) => {
@@ -92,6 +116,7 @@ const applyDownloads = (siteContent: SiteContent, rows: DownloadRow[]) => {
       return {
         ...section,
         items: items.map((row) => ({
+          id: row.id,
           title: row.title,
           body: row.body,
           href: row.href,
@@ -105,15 +130,52 @@ const applyDownloads = (siteContent: SiteContent, rows: DownloadRow[]) => {
   rewrite('policies', bySection.policies);
 };
 
+const applyCards = (siteContent: SiteContent, rows: CardRow[]) => {
+  if (rows.length === 0) return;
+
+  const grouped = rows.reduce<Record<string, CardRow[]>>((acc, row) => {
+    const key = `${row.page_key}::${row.section_key}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+
+  Object.entries(grouped).forEach(([groupKey, items]) => {
+    const [pageKey, sectionKey] = groupKey.split('::');
+    const page = siteContent.pages[pageKey];
+    if (!page) return;
+
+    page.sections = page.sections.map((section) => {
+      if (section.type !== 'cards') return section;
+      if (!section.sectionKey || section.sectionKey !== sectionKey) return section;
+
+      return {
+        ...section,
+        items: items.map((item) => ({
+          id: item.id,
+          title: item.title,
+          body: item.body,
+          href: item.href || '#'
+        }))
+      };
+    });
+  });
+};
+
 export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T): Promise<T> => {
   if (!hasConfig()) {
     return siteContent;
   }
 
   try {
-    const [announcements, downloads] = await Promise.all([fetchAnnouncements(), fetchDownloads()]);
+    const [announcements, downloads, cards] = await Promise.all([
+      fetchAnnouncements(),
+      fetchDownloads(),
+      fetchCards()
+    ]);
     applyAnnouncements(siteContent, announcements);
     applyDownloads(siteContent, downloads);
+    applyCards(siteContent, cards);
     return siteContent;
   } catch {
     return siteContent;

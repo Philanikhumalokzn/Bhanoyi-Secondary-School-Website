@@ -1,5 +1,6 @@
 alter table public.site_announcements enable row level security;
 alter table public.site_downloads enable row level security;
+alter table public.site_cards enable row level security;
 alter table public.admin_users enable row level security;
 
 -- Public read for website visitors
@@ -12,6 +13,12 @@ using (is_active = true);
 drop policy if exists "Public read downloads" on public.site_downloads;
 create policy "Public read downloads"
 on public.site_downloads
+for select
+using (is_active = true);
+
+drop policy if exists "Public read cards" on public.site_cards;
+create policy "Public read cards"
+on public.site_cards
 for select
 using (is_active = true);
 
@@ -47,6 +54,26 @@ with check (
 drop policy if exists "Allowlisted admins manage downloads" on public.site_downloads;
 create policy "Allowlisted admins manage downloads"
 on public.site_downloads
+for all
+to authenticated
+using (
+  exists (
+    select 1 from public.admin_users au
+    where lower(au.email) = lower(auth.jwt() ->> 'email')
+      and au.is_active = true
+  )
+)
+with check (
+  exists (
+    select 1 from public.admin_users au
+    where lower(au.email) = lower(auth.jwt() ->> 'email')
+      and au.is_active = true
+  )
+);
+
+drop policy if exists "Allowlisted admins manage cards" on public.site_cards;
+create policy "Allowlisted admins manage cards"
+on public.site_cards
 for all
 to authenticated
 using (

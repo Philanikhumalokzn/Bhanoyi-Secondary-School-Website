@@ -23,6 +23,18 @@ create table if not exists public.site_downloads (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.site_cards (
+  id uuid primary key default gen_random_uuid(),
+  page_key text not null,
+  section_key text not null,
+  title text not null,
+  body text not null,
+  href text,
+  sort_order int not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.admin_users (
   email text primary key,
   is_active boolean not null default true,

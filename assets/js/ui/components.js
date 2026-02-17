@@ -1,9 +1,19 @@
-const renderCard = (item, clickable = false) => {
+const renderCard = (item, clickable = false, context = {}) => {
+  const attrs = [
+    context.editable ? 'data-editable-card="true"' : '',
+    context.sectionKey ? `data-section-key="${context.sectionKey}"` : '',
+    item.id ? `data-card-id="${item.id}"` : '',
+    typeof context.sortOrder === 'number' ? `data-sort-order="${context.sortOrder}"` : '',
+    clickable ? 'data-card-clickable="true"' : 'data-card-clickable="false"'
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   const content = `<h3>${item.title}</h3><p>${item.body}</p>`;
   if (clickable) {
-    return `<a class="card" href="${item.href}">${content}</a>`;
+    return `<a class="card" href="${item.href || '#'}" ${attrs}>${content}</a>`;
   }
-  return `<article class="card">${content}</article>`;
+  return `<article class="card" ${attrs}>${content}</article>`;
 };
 
 export const renderHeader = (siteContent, pageKey) => {
@@ -83,7 +93,15 @@ const renderSectionByType = (section) => {
         <div class="container">
           <h2>${section.title}</h2>
           <div class="${className}">
-            ${section.items.map((item) => renderCard(item, section.clickable)).join('')}
+            ${section.items
+              .map((item, index) =>
+                renderCard(item, section.clickable, {
+                  editable: Boolean(section.editable),
+                  sectionKey: section.sectionKey || '',
+                  sortOrder: index
+                })
+              )
+              .join('')}
           </div>
         </div>
       </section>
@@ -159,9 +177,9 @@ const renderSectionByType = (section) => {
           <h2>${section.title}</h2>
           <div class="download-grid">
             ${section.items
-              .map(
-                (item) => `
-                  <article class="panel download-item">
+              .map((item, index) =>
+                `
+                  <article class="panel download-item" data-editable-download="true" data-download-id="${item.id || ''}" data-sort-order="${index}">
                     <h3>${item.title}</h3>
                     <p>${item.body}</p>
                     <a class="btn btn-secondary download-link" href="${item.href}">${item.linkLabel || 'Download'}</a>

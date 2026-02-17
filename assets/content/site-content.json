@@ -41,6 +41,8 @@
         {
           "type": "cards",
           "title": "Quick Links",
+          "sectionKey": "quick_links",
+          "editable": true,
           "clickable": true,
           "items": [
             {
@@ -68,6 +70,8 @@
         {
           "type": "cards",
           "title": "Latest News",
+          "sectionKey": "latest_news",
+          "editable": true,
           "alt": true,
           "columns": 3,
           "items": [
@@ -112,6 +116,8 @@
         {
           "type": "cards",
           "title": "Upcoming Events",
+          "sectionKey": "upcoming_events",
+          "editable": true,
           "columns": 3,
           "items": [
             { "title": "Open Day", "body": "Date: 09 March 2026" },
@@ -144,6 +150,8 @@
         {
           "type": "cards",
           "title": "School Culture",
+          "sectionKey": "school_culture",
+          "editable": true,
           "alt": true,
           "columns": 3,
           "items": [
@@ -177,6 +185,8 @@
         {
           "type": "cards",
           "title": "Academic Programme",
+          "sectionKey": "academic_programme",
+          "editable": true,
           "columns": 3,
           "items": [
             {
@@ -237,6 +247,8 @@
           "type": "cards",
           "alt": true,
           "title": "Admission Support",
+          "sectionKey": "admission_support",
+          "editable": true,
           "columns": 3,
           "items": [
             {
@@ -293,6 +305,8 @@
         {
           "type": "cards",
           "title": "Policy Categories",
+          "sectionKey": "policy_categories",
+          "editable": true,
           "items": [
             {
               "title": "Code of Conduct",
@@ -316,6 +330,8 @@
           "type": "cards",
           "alt": true,
           "title": "Public Information Areas",
+          "sectionKey": "public_information_areas",
+          "editable": true,
           "columns": 3,
           "items": [
             { "title": "School Hours", "body": "Official start and end times for the school day." },
