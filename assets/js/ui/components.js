@@ -287,6 +287,9 @@ export const initLatestNewsRotators = () => {
 
     let index = 0;
     window.setInterval(() => {
+      if (track.dataset.adminPaused === 'true') {
+        return;
+      }
       slides[index].classList.remove('is-active');
       index = (index + 1) % slides.length;
       slides[index].classList.add('is-active');

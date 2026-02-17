@@ -639,6 +639,10 @@ const wireCardInline = (item: Element) => {
   if (isLatestNews) {
     controls.classList.add('latest-news-inline-controls');
   }
+  controls.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
   item.appendChild(controls);
 
   const titleEl = isLatestNews ? item.querySelector('.latest-news-title') : item.querySelector('h3');
@@ -652,6 +656,7 @@ const wireCardInline = (item: Element) => {
   const fallbackEl = item.querySelector('.latest-news-image-fallback') as HTMLElement | null;
   const fallbackTitleEl = item.querySelector('.latest-news-fallback-title') as HTMLElement | null;
   const fallbackBodyEl = item.querySelector('.latest-news-fallback-body') as HTMLElement | null;
+  const latestNewsTrack = item.closest('[data-news-track]') as HTMLElement | null;
 
   let urlEditor: HTMLInputElement | null = null;
   let categoryEditor: HTMLInputElement | null = null;
@@ -682,10 +687,22 @@ const wireCardInline = (item: Element) => {
     if (fallbackBodyEl) fallbackBodyEl.textContent = body;
   };
 
+  const setLatestNewsEditingState = (editing: boolean) => {
+    if (!isLatestNews || !latestNewsTrack) return;
+    latestNewsTrack.dataset.adminPaused = editing ? 'true' : 'false';
+    if (!editing) return;
+
+    const slides = Array.from(latestNewsTrack.querySelectorAll('.latest-news-slide'));
+    slides.forEach((slide) => {
+      slide.classList.toggle('is-active', slide === item);
+    });
+  };
+
   const exitEdit = () => {
     setEditable(titleEl, false);
     setEditable(subtitleEl, false);
     setEditable(bodyEl, false);
+    setLatestNewsEditingState(false);
     if (categoryEditor) {
       categoryEditor.parentElement?.remove();
       categoryEditor = null;
@@ -793,6 +810,7 @@ const wireCardInline = (item: Element) => {
 
   const enterEdit = (event?: Event) => {
     event?.preventDefault();
+    setLatestNewsEditingState(true);
     setEditable(titleEl, true);
     setEditable(subtitleEl, true);
     setEditable(bodyEl, true);
