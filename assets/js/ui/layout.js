@@ -4,7 +4,7 @@ import {
   renderFooter,
   renderHeader,
   renderHero,
-  renderSections
+  renderSectionsWithContext
 } from './components.js';
 
 const upsertDescriptionMeta = (content) => {
@@ -69,7 +69,7 @@ export const renderSite = (siteContent, page) => {
     ${renderHeader(siteContent, page.key)}
     <main id="main-content" class="${themeBackgroundImage ? 'has-theme-bg' : ''}" data-theme-bg-url="${themeBackgroundAttr}">
       ${renderHero(page.hero, page.key)}
-      ${renderSections(page.sections)}
+      ${renderSectionsWithContext(page.sections, { pageKey: page.key, siteContent })}
     </main>
     ${renderFooter(siteContent)}
   `;

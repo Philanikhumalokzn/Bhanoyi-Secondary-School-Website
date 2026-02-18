@@ -207,23 +207,51 @@ export const renderHero = (hero, pageKey) => {
   `;
 };
 
-const renderSectionByType = (section, sectionIndex) => {
-  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
-
-  if (section.type === 'cards' && section.sectionKey === 'latest_news') {
-    return renderLatestNewsSection(section, sectionIndex);
+const resolveHomePrincipalSidePanel = (section, context = {}) => {
+  const pageKey = context.pageKey || '';
+  const siteContent = context.siteContent || null;
+  if (pageKey !== 'home' || section.sectionKey !== 'latest_news' || !siteContent?.pages?.about?.sections) {
+    return section;
   }
 
-  if (section.type === 'cards') {
-    const className = section.columns === 3 ? 'three-col' : 'cards';
+  const aboutPrincipalSection = siteContent.pages.about.sections.find(
+    (entry) => entry?.type === 'split' && entry?.panel && typeof entry.panel === 'object'
+  );
+
+  const aboutPanel = aboutPrincipalSection?.panel || {};
+  const existing = section.sidePanel || {};
+
+  return {
+    ...section,
+    sidePanel: {
+      ...existing,
+      title: aboutPanel.title || existing.title || 'Principal’s Welcome',
+      body: aboutPanel.body || existing.body || '',
+      principalName: aboutPanel.principalName || existing.principalName || 'Dr. G.K.S. Memela',
+      imageUrl: aboutPanel.imageUrl || existing.imageUrl || '',
+      link: aboutPanel.link || existing.link || { href: 'about.html', label: 'Read full message' }
+    }
+  };
+};
+
+const renderSectionByType = (section, sectionIndex, context = {}) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const effectiveSection = resolveHomePrincipalSidePanel(section, context);
+
+  if (effectiveSection.type === 'cards' && effectiveSection.sectionKey === 'latest_news') {
+    return renderLatestNewsSection(effectiveSection, sectionIndex);
+  }
+
+  if (effectiveSection.type === 'cards') {
+    const className = effectiveSection.columns === 3 ? 'three-col' : 'cards';
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="cards" data-section-key="${fallbackSectionKey}">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="cards" data-section-key="${fallbackSectionKey}">
         <div class="container">
-          <h2>${section.title}</h2>
+          <h2>${effectiveSection.title}</h2>
           <div class="${className}">
-            ${section.items
+            ${effectiveSection.items
               .map((item, index) =>
-                renderCard(item, section.clickable, {
+                renderCard(item, effectiveSection.clickable, {
                   sectionKey: fallbackSectionKey,
                   sortOrder: index
                 })
@@ -235,35 +263,35 @@ const renderSectionByType = (section, sectionIndex) => {
     `;
   }
 
-  if (section.type === 'split') {
-    const panelImageUrl = section.panel?.imageUrl || '';
+  if (effectiveSection.type === 'split') {
+    const panelImageUrl = effectiveSection.panel?.imageUrl || '';
     const hasPanelImage = Boolean(panelImageUrl.trim());
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="split">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="split">
         <div class="container section-grid">
           <div>
-            <h2>${section.title}</h2>
-            <p>${section.body}</p>
-            ${section.list ? `<ul class="list">${section.list.map((entry) => `<li>${entry}</li>`).join('')}</ul>` : ''}
+            <h2>${effectiveSection.title}</h2>
+            <p>${effectiveSection.body}</p>
+            ${effectiveSection.list ? `<ul class="list">${effectiveSection.list.map((entry) => `<li>${entry}</li>`).join('')}</ul>` : ''}
           </div>
           <aside class="panel">
-            <img class="split-panel-image ${hasPanelImage ? '' : 'is-hidden'}" src="${hasPanelImage ? panelImageUrl : ''}" alt="${section.panel.title}" loading="lazy" />
-            <h3>${section.panel.title}</h3>
-            <p>${section.panel.body}</p>
-            ${section.panel.link ? `<a href="${section.panel.link.href}">${section.panel.link.label}</a>` : ''}
+            <img class="split-panel-image ${hasPanelImage ? '' : 'is-hidden'}" src="${hasPanelImage ? panelImageUrl : ''}" alt="${effectiveSection.panel.title}" loading="lazy" />
+            <h3>${effectiveSection.panel.title}</h3>
+            <p>${effectiveSection.panel.body}</p>
+            ${effectiveSection.panel.link ? `<a href="${effectiveSection.panel.link.href}">${effectiveSection.panel.link.label}</a>` : ''}
           </aside>
         </div>
       </section>
     `;
   }
 
-  if (section.type === 'contact-cards') {
+  if (effectiveSection.type === 'contact-cards') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="contact-cards">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="contact-cards">
         <div class="container">
-          <h2>${section.title}</h2>
+          <h2>${effectiveSection.title}</h2>
           <div class="contact-grid">
-            ${section.items
+            ${effectiveSection.items
               .map(
                 (item, index) => `<article class="panel" data-contact-index="${index}"><h3>${item.title}</h3><p>${item.body}</p></article>`
               )
@@ -274,13 +302,13 @@ const renderSectionByType = (section, sectionIndex) => {
     `;
   }
 
-  if (section.type === 'announcements') {
+  if (effectiveSection.type === 'announcements') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="announcements">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="announcements">
         <div class="container">
-          <h2>${section.title}</h2>
+          <h2>${effectiveSection.title}</h2>
           <div class="notice-grid">
-            ${section.items
+            ${effectiveSection.items
               .map(
                 (item) => `
                   <article class="panel notice-item" data-announcement-id="${item.id || ''}">
@@ -300,13 +328,13 @@ const renderSectionByType = (section, sectionIndex) => {
     `;
   }
 
-  if (section.type === 'downloads') {
+  if (effectiveSection.type === 'downloads') {
     return `
-      <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="downloads">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="downloads">
         <div class="container">
-          <h2>${section.title}</h2>
+          <h2>${effectiveSection.title}</h2>
           <div class="download-grid">
-            ${section.items
+            ${effectiveSection.items
               .map((item, index) =>
                 `
                   <article class="panel download-item" data-editable-download="true" data-download-id="${item.id || ''}" data-sort-order="${index}">
@@ -327,6 +355,8 @@ const renderSectionByType = (section, sectionIndex) => {
 };
 
 export const renderSections = (sections) => sections.map((section, index) => renderSectionByType(section, index)).join('');
+export const renderSectionsWithContext = (sections, context) =>
+  sections.map((section, index) => renderSectionByType(section, index, context)).join('');
 
 export const initLatestNewsRotators = () => {
   const tracks = Array.from(document.querySelectorAll('[data-news-track]'));
