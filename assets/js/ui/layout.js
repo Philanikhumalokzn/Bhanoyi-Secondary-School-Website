@@ -3,6 +3,7 @@ import {
   initLatestNewsRotators,
   renderFooter,
   renderHeader,
+  renderPageEmailForms,
   renderHero,
   renderSectionsWithContext
 } from './components.js';
@@ -70,6 +71,7 @@ export const renderSite = (siteContent, page) => {
     <main id="main-content" class="${themeBackgroundImage ? 'has-theme-bg' : ''}" data-theme-bg-url="${themeBackgroundAttr}">
       ${renderHero(page.hero, page.key)}
       ${renderSectionsWithContext(page.sections, { pageKey: page.key, siteContent })}
+      ${renderPageEmailForms(page.key)}
     </main>
     ${renderFooter(siteContent)}
   `;

@@ -429,6 +429,94 @@ export const renderSections = (sections) => sections.map((section, index) => ren
 export const renderSectionsWithContext = (sections, context) =>
   sections.map((section, index) => renderSectionByType(section, index, context)).join('');
 
+export const renderPageEmailForms = (pageKey) => {
+  if (pageKey === 'contact') {
+    return `
+      <section class="section section-alt">
+        <div class="container">
+          <article class="panel email-form-panel">
+            <h2>Send Us a Message</h2>
+            <p class="email-form-lead">Use this form to contact the school office. We will respond as soon as possible.</p>
+            <form class="email-form" data-email-form="true" data-endpoint="/api/contact-email" novalidate>
+              <label>
+                Full Name
+                <input type="text" name="fullName" required maxlength="120" autocomplete="name" />
+              </label>
+              <label>
+                Email Address
+                <input type="email" name="email" required maxlength="200" autocomplete="email" />
+              </label>
+              <label>
+                Phone Number (optional)
+                <input type="tel" name="phone" maxlength="80" autocomplete="tel" />
+              </label>
+              <label>
+                Subject
+                <input type="text" name="subject" required maxlength="180" />
+              </label>
+              <label>
+                Message
+                <textarea name="message" rows="5" required maxlength="4000"></textarea>
+              </label>
+              <input class="email-form-honeypot" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" />
+              <div class="email-form-actions">
+                <button type="submit" class="btn btn-primary">Send Message</button>
+                <p class="email-form-status" data-form-status data-tone="muted" aria-live="polite"></p>
+              </div>
+            </form>
+          </article>
+        </div>
+      </section>
+    `;
+  }
+
+  if (pageKey === 'admissions') {
+    return `
+      <section class="section section-alt">
+        <div class="container">
+          <article class="panel email-form-panel">
+            <h2>Admissions Enquiry</h2>
+            <p class="email-form-lead">Submit your details and the admissions office will contact you with the next steps.</p>
+            <form class="email-form" data-email-form="true" data-endpoint="/api/admissions-email" novalidate>
+              <label>
+                Parent / Guardian Name
+                <input type="text" name="guardianName" required maxlength="120" autocomplete="name" />
+              </label>
+              <label>
+                Student Name
+                <input type="text" name="studentName" required maxlength="120" />
+              </label>
+              <label>
+                Applying Grade
+                <input type="text" name="applyingGrade" required maxlength="40" placeholder="e.g. Grade 8" />
+              </label>
+              <label>
+                Email Address
+                <input type="email" name="email" required maxlength="200" autocomplete="email" />
+              </label>
+              <label>
+                Phone Number
+                <input type="tel" name="phone" required maxlength="80" autocomplete="tel" />
+              </label>
+              <label>
+                Additional Notes (optional)
+                <textarea name="message" rows="4" maxlength="4000"></textarea>
+              </label>
+              <input class="email-form-honeypot" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" />
+              <div class="email-form-actions">
+                <button type="submit" class="btn btn-primary">Send Enquiry</button>
+                <p class="email-form-status" data-form-status data-tone="muted" aria-live="polite"></p>
+              </div>
+            </form>
+          </article>
+        </div>
+      </section>
+    `;
+  }
+
+  return '';
+};
+
 export const initLatestNewsRotators = () => {
   const tracks = Array.from(document.querySelectorAll('[data-news-track]'));
 

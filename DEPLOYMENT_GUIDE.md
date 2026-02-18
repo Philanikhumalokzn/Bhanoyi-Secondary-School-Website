@@ -24,11 +24,19 @@ This project is ready to deploy as a static frontend with Supabase as backend.
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_ADMIN_EMAILS`
+   - `RESEND_API_KEY`
+   - `RESEND_FROM` (verified sender, e.g. `Bhanoyi School <noreply@your-domain>`)
+   - `RESEND_DEFAULT_TO` (fallback office mailbox)
+   - `RESEND_CONTACT_TO` (optional, contact-form destination)
+   - `RESEND_ADMISSIONS_TO` (optional, admissions-form destination)
+   - `SCHOOL_NAME` (optional, defaults to Bhanoyi Secondary School)
 6. Click **Deploy**.
 7. After deploy finishes:
    - open your site URL
    - test `/admin.html`
    - log in and create one announcement
+   - submit one message on `/contact.html`
+   - submit one enquiry on `/admissions.html`
 
 ### Vercel build settings (if asked)
 - Build command: `npm.cmd run build` (or `npm run build`)
@@ -50,6 +58,8 @@ This project is ready to deploy as a static frontend with Supabase as backend.
    - `VITE_ADMIN_EMAILS`
 6. Deploy site.
 7. Test `/admin.html` and create a test announcement.
+
+Note: Contact and Admissions email endpoints are currently implemented under `/api/*` for Vercel serverless runtime. If you deploy on Netlify, these two forms will need Netlify Functions equivalents before live use.
 
 ---
 

@@ -21,8 +21,10 @@ Use this before launching the site publicly.
 
 ## 4) Hosting checks
 - [ ] Add env values in hosting platform (same as `.env.local`).
+- [ ] Add server env values: `RESEND_API_KEY`, `RESEND_FROM`, and destination mailbox vars.
 - [ ] Deploy latest build.
 - [ ] Test public pages and `/admin.html` on live URL.
+- [ ] Submit test forms on `/contact.html` and `/admissions.html` and confirm both office + user confirmation emails arrive.
 
 ## 5) Final safety
 - [ ] Keep at least 2 admin accounts (backup access).
