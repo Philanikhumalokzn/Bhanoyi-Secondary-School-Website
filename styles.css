@@ -123,6 +123,10 @@ body {
   white-space: nowrap;
 }
 
+.brand-visual-desktop {
+  display: none;
+}
+
 .brand-name-mobile {
   display: inline-grid;
   justify-items: center;
@@ -1118,6 +1122,11 @@ h1 {
 
   .brand-name {
     display: inline;
+  }
+
+  .brand-visual-desktop {
+    display: inline-grid;
+    place-items: center;
   }
 
   .brand-name-mobile {

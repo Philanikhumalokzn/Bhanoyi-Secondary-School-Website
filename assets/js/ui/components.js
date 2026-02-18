@@ -140,6 +140,7 @@ export const renderHeader = (siteContent, pageKey) => {
     <header class="site-header ${headerBackgroundImage ? 'has-header-bg' : ''}" data-header-bg-url="${headerBackgroundAttr}">
       <div class="container header-inner">
         <a class="brand" href="${withAdminQuery('index.html')}" aria-label="${siteContent.school.name} home">
+          <span class="brand-visual-desktop" aria-hidden="true">${brandVisual}</span>
           <span class="brand-name-mobile" aria-hidden="true">
             <span class="brand-name-mobile-top">
               <span class="brand-name-mobile-left">${mobileLeftName}</span>
