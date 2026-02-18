@@ -1809,6 +1809,125 @@ const wireContactCardsInline = (section: Element) => {
   renderReadControls();
 };
 
+const wireLatestNewsSidePanelInline = (section: Element) => {
+  const panel = section.querySelector('.latest-news-side-panel');
+  if (!panel) return;
+
+  const titleEl = panel.querySelector('h3');
+  const bodyEl = panel.querySelector('p');
+  let linkEl = panel.querySelector('a') as HTMLAnchorElement | null;
+  if (!titleEl || !bodyEl) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  panel.appendChild(controls);
+
+  const readState = {
+    title: (titleEl.textContent ?? '').trim(),
+    body: (bodyEl.textContent ?? '').trim(),
+    linkLabel: (linkEl?.textContent ?? '').trim(),
+    linkHref: (linkEl?.getAttribute('href') ?? '').trim()
+  };
+
+  let linkUrlEditor: HTMLInputElement | null = null;
+
+  const ensureLink = () => {
+    if (linkEl) return linkEl;
+    const anchor = document.createElement('a');
+    anchor.href = '#';
+    anchor.textContent = 'Read more';
+    panel.appendChild(anchor);
+    linkEl = anchor;
+    return anchor;
+  };
+
+  const exitEdit = () => {
+    setEditable(titleEl, false);
+    setEditable(bodyEl, false);
+    setEditable(linkEl, false);
+    if (linkUrlEditor) {
+      linkUrlEditor.parentElement?.remove();
+      linkUrlEditor = null;
+    }
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', enterEdit);
+
+    controls.appendChild(editBtn);
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+    attachAiButton(controls, panel);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const activeLink = ensureLink();
+        const href = (linkUrlEditor?.value ?? activeLink.getAttribute('href') ?? '#').trim() || '#';
+        const label = (activeLink.textContent ?? '').trim() || 'Read more';
+
+        await saveSectionOverride(section, {
+          sidePanel: {
+            title: (titleEl.textContent ?? '').trim(),
+            body: (bodyEl.textContent ?? '').trim(),
+            link: {
+              href,
+              label
+            }
+          }
+        });
+
+        showStatus('Section saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save section.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      titleEl.textContent = readState.title;
+      bodyEl.textContent = readState.body;
+      const activeLink = ensureLink();
+      activeLink.textContent = readState.linkLabel || 'Read more';
+      activeLink.setAttribute('href', readState.linkHref || '#');
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    const activeLink = ensureLink();
+    setEditable(titleEl, true);
+    setEditable(bodyEl, true);
+    setEditable(activeLink, true);
+
+    if (!linkUrlEditor) {
+      const { wrapper, input } = createUrlEditor('Link URL', activeLink.getAttribute('href') || '#');
+      panel.appendChild(wrapper);
+      linkUrlEditor = input;
+    }
+
+    renderEditControls();
+  };
+
+  renderReadControls();
+};
+
 const wireFooterInline = () => {
   const footer = document.querySelector('.site-footer');
   if (!footer) return;
@@ -2176,6 +2295,13 @@ const bindInlineActions = () => {
     document.querySelectorAll('[data-editable-section="true"][data-section-type="contact-cards"]')
   );
   editableContactSections.forEach(wireContactCardsInline);
+
+  const latestNewsSection = document.querySelector(
+    '[data-editable-section="true"][data-section-key="latest_news"]'
+  );
+  if (latestNewsSection) {
+    wireLatestNewsSidePanelInline(latestNewsSection);
+  }
 
   wireHeaderInline();
   wireHomeThemeBackgroundUpload();

@@ -42,7 +42,7 @@ const withAdminQuery = (href) => {
   }
 };
 
-const renderLatestNewsSection = (section) => {
+const renderLatestNewsSection = (section, sectionIndex) => {
   const grouped = (section.items || []).reduce((acc, item, index) => {
     const category = (item.category || 'General').trim() || 'General';
     if (!acc[category]) acc[category] = [];
@@ -54,8 +54,10 @@ const renderLatestNewsSection = (section) => {
   const sidePanel = section.sidePanel;
   const hasSidePanel = Boolean(sidePanel && typeof sidePanel === 'object');
 
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+
   return `
-    <section class="section ${section.alt ? 'section-alt' : ''} latest-news-shell" id="latest-news">
+    <section class="section ${section.alt ? 'section-alt' : ''} latest-news-shell" id="latest-news" data-section-index="${sectionIndex}" data-section-type="cards" data-section-key="${fallbackSectionKey}" ${section.editable ? 'data-editable-section="true"' : ''}>
       <div class="container">
         <div class="latest-news-header">
           <h2>${section.title}</h2>
@@ -203,7 +205,7 @@ const renderSectionByType = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
 
   if (section.type === 'cards' && section.sectionKey === 'latest_news') {
-    return renderLatestNewsSection(section);
+    return renderLatestNewsSection(section, sectionIndex);
   }
 
   if (section.type === 'cards') {
