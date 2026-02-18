@@ -661,10 +661,6 @@ const openLatestNewsComposer = () => {
           <input type="url" name="href" value="#" />
         </label>
         <label>
-          Image URL (optional)
-          <input type="url" name="imageUrl" />
-        </label>
-        <label>
           Upload image (optional)
           <input type="file" name="imageFile" accept="image/*" />
         </label>
@@ -708,7 +704,6 @@ const openLatestNewsComposer = () => {
     const subtitle = String(formData.get('subtitle') || '').trim();
     const body = String(formData.get('body') || '').trim();
     const href = String(formData.get('href') || '#').trim() || '#';
-    const imageUrlInput = String(formData.get('imageUrl') || '').trim();
     const selectedCategory = String(formData.get('category') || '').trim();
     const newCategory = String(formData.get('newCategory') || '').trim();
     const imageFile = formData.get('imageFile') as File | null;
@@ -723,7 +718,7 @@ const openLatestNewsComposer = () => {
       saveBtn.disabled = true;
       saveBtn.textContent = 'Posting...';
 
-      let imageUrl = imageUrlInput;
+      let imageUrl = '';
       if (imageFile && imageFile.size > 0) {
         const preparedFile = await prepareUploadImage(imageFile, { title: 'Adjust article image' });
         if (!preparedFile) {
@@ -915,9 +910,9 @@ const wireCardInline = (item: Element) => {
 
   let urlEditor: HTMLInputElement | null = null;
   let categoryEditor: HTMLInputElement | null = null;
-  let imageUrlEditor: HTMLInputElement | null = null;
   let imageFileInput: HTMLInputElement | null = null;
   let imageUploadButton: HTMLButtonElement | null = null;
+  let currentImageUrl = record.imageUrl;
 
   const readState = { ...record };
 
@@ -993,10 +988,6 @@ const wireCardInline = (item: Element) => {
       categoryEditor.parentElement?.remove();
       categoryEditor = null;
     }
-    if (imageUrlEditor) {
-      imageUrlEditor.parentElement?.remove();
-      imageUrlEditor = null;
-    }
     if (imageFileInput?.parentElement) {
       imageFileInput.parentElement.remove();
       imageFileInput = null;
@@ -1061,7 +1052,7 @@ const wireCardInline = (item: Element) => {
           subtitle: isLatestNews ? (subtitleEl?.textContent ?? readState.subtitle).trim() : '',
           title: isLatestNews ? getLatestNewsTitleText() : (titleEl?.textContent ?? '').trim(),
           body: isLatestNews ? getLatestNewsBodyText() : (bodyEl?.textContent ?? '').trim(),
-          image_url: (imageUrlEditor?.value ?? readState.imageUrl).trim(),
+          image_url: currentImageUrl.trim(),
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
 
@@ -1083,6 +1074,7 @@ const wireCardInline = (item: Element) => {
       if (subtitleEl) subtitleEl.textContent = readState.subtitle;
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
+      currentImageUrl = readState.imageUrl;
       syncLatestNewsMedia(readState.imageUrl, readState.title, readState.subtitle, readState.body);
       syncStandardCardMedia(readState.imageUrl, readState.title);
       if (record.clickable && item instanceof HTMLAnchorElement) {
@@ -1121,24 +1113,6 @@ const wireCardInline = (item: Element) => {
       categoryEditor = input;
     }
 
-    if (!imageUrlEditor) {
-      const { wrapper, input } = createUrlEditor('Image URL', readState.imageUrl || '');
-      item.appendChild(wrapper);
-      imageUrlEditor = input;
-
-      imageUrlEditor.addEventListener('input', () => {
-        const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
-        const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
-        syncLatestNewsMedia(
-          imageUrlEditor?.value || '',
-          liveTitle,
-          (subtitleEl?.textContent ?? readState.subtitle).trim(),
-          liveBody
-        );
-        syncStandardCardMedia(imageUrlEditor?.value || '', liveTitle);
-      });
-    }
-
     if (!imageFileInput) {
       const { wrapper, input, button } = createFileEditor();
       item.appendChild(wrapper);
@@ -1164,7 +1138,7 @@ const wireCardInline = (item: Element) => {
             return;
           }
           const url = await uploadNewsImage(preparedFile);
-          if (imageUrlEditor) imageUrlEditor.value = url;
+          currentImageUrl = url;
           const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
           const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
           syncLatestNewsMedia(
@@ -1477,10 +1451,10 @@ const wireSplitSectionInline = (section: Element) => {
   const panelImageEl = panel.querySelector('.split-panel-image') as HTMLImageElement | null;
 
   let linkUrlEditor: HTMLInputElement | null = null;
-  let panelImageUrlEditor: HTMLInputElement | null = null;
   let panelImageFileInput: HTMLInputElement | null = null;
   let panelImageUploadButton: HTMLButtonElement | null = null;
   let addListItemBtn: HTMLButtonElement | null = null;
+  let currentPanelImageUrl = (panelImageEl?.getAttribute('src') ?? '').trim();
 
   const readState = {
     title: (titleEl?.textContent ?? '').trim(),
@@ -1543,10 +1517,6 @@ const wireSplitSectionInline = (section: Element) => {
       linkUrlEditor.parentElement?.remove();
       linkUrlEditor = null;
     }
-    if (panelImageUrlEditor) {
-      panelImageUrlEditor.parentElement?.remove();
-      panelImageUrlEditor = null;
-    }
     if (panelImageFileInput?.parentElement) {
       panelImageFileInput.parentElement.remove();
       panelImageFileInput = null;
@@ -1588,7 +1558,7 @@ const wireSplitSectionInline = (section: Element) => {
           panel: {
             title: (panelTitleEl?.textContent ?? '').trim(),
             body: (panelBodyEl?.textContent ?? '').trim(),
-            imageUrl: (panelImageUrlEditor?.value ?? readState.panelImageUrl).trim()
+            imageUrl: currentPanelImageUrl.trim()
           }
         };
 
@@ -1631,6 +1601,7 @@ const wireSplitSectionInline = (section: Element) => {
         panelLinkEl.textContent = readState.panelLinkLabel;
         panelLinkEl.setAttribute('href', readState.panelLinkHref || '#');
       }
+      currentPanelImageUrl = readState.panelImageUrl;
       syncSplitPanelImage(readState.panelImageUrl, readState.panelTitle);
       if (listEl) {
         listEl.innerHTML = readState.list.map((entry) => `<li>${entry}</li>`).join('');
@@ -1658,15 +1629,6 @@ const wireSplitSectionInline = (section: Element) => {
       linkUrlEditor = input;
     }
 
-    if (!panelImageUrlEditor) {
-      const { wrapper, input } = createUrlEditor('Panel Image URL', readState.panelImageUrl || '');
-      panel.appendChild(wrapper);
-      panelImageUrlEditor = input;
-      panelImageUrlEditor.addEventListener('input', () => {
-        syncSplitPanelImage(panelImageUrlEditor?.value || '', (panelTitleEl?.textContent ?? readState.panelTitle).trim());
-      });
-    }
-
     if (!panelImageFileInput) {
       const { wrapper, input, button } = createFileEditor();
       panel.appendChild(wrapper);
@@ -1692,7 +1654,7 @@ const wireSplitSectionInline = (section: Element) => {
             return;
           }
           const url = await uploadNewsImage(preparedFile);
-          if (panelImageUrlEditor) panelImageUrlEditor.value = url;
+          currentPanelImageUrl = url;
           syncSplitPanelImage(url, (panelTitleEl?.textContent ?? readState.panelTitle).trim());
           showStatus('Image uploaded. Save the section to publish changes.');
         } catch (error) {
@@ -1970,9 +1932,9 @@ const wireHeaderInline = () => {
     headerBgImage: (header.dataset.headerBgUrl || '').trim()
   };
 
-  let imageUrlEditor: HTMLInputElement | null = null;
   let imageFileInput: HTMLInputElement | null = null;
   let imageUploadButton: HTMLButtonElement | null = null;
+  let currentHeaderBgImage = readState.headerBgImage;
 
   const applyHeaderBackground = (url: string) => {
     const normalized = (url || '').trim();
@@ -1990,9 +1952,7 @@ const wireHeaderInline = () => {
   };
 
   const removeEditors = () => {
-    imageUrlEditor?.closest('.inline-url-editor')?.remove();
     imageFileInput?.closest('.inline-file-editor')?.remove();
-    imageUrlEditor = null;
     imageFileInput = null;
     imageUploadButton = null;
   };
@@ -2015,9 +1975,8 @@ const wireHeaderInline = () => {
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', async () => {
       try {
-        const url = (imageUrlEditor?.value ?? '').trim();
         await saveSiteSettings({
-          school_header_bg_image: url
+          school_header_bg_image: currentHeaderBgImage.trim()
         });
         showStatus('Header updated. Refreshing...');
         window.location.reload();
@@ -2030,6 +1989,7 @@ const wireHeaderInline = () => {
     cancelBtn.type = 'button';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.addEventListener('click', () => {
+      currentHeaderBgImage = readState.headerBgImage;
       applyHeaderBackground(readState.headerBgImage);
       removeEditors();
       renderReadControls();
@@ -2041,16 +2001,6 @@ const wireHeaderInline = () => {
 
   const enterEdit = () => {
     renderEditControls();
-
-    if (!imageUrlEditor) {
-      const { wrapper, input } = createUrlEditor('Header Background Image URL', readState.headerBgImage || '');
-      controls.appendChild(wrapper);
-      imageUrlEditor = input;
-
-      imageUrlEditor.addEventListener('input', () => {
-        applyHeaderBackground(imageUrlEditor?.value || '');
-      });
-    }
 
     if (!imageFileInput) {
       const { wrapper, input, button } = createFileEditor('Upload header background image');
@@ -2082,7 +2032,7 @@ const wireHeaderInline = () => {
             return;
           }
           const url = await uploadNewsImage(preparedFile);
-          if (imageUrlEditor) imageUrlEditor.value = url;
+          currentHeaderBgImage = url;
           applyHeaderBackground(url);
           showStatus('Header background uploaded. Save to publish changes.');
         } catch (error) {
