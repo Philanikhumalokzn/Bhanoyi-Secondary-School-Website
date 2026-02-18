@@ -44,6 +44,14 @@
           "sectionKey": "latest_news",
           "editable": true,
           "alt": true,
+          "sidePanel": {
+            "title": "Principal’s Welcome",
+            "body": "We are committed to helping every learner grow in knowledge, character, and confidence through disciplined teaching and strong community support.",
+            "link": {
+              "href": "about.html",
+              "label": "Read full message"
+            }
+          },
           "columns": 3,
           "items": [
             {

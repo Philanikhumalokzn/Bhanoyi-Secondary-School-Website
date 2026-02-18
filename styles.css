@@ -400,6 +400,20 @@ h1 {
   grid-template-columns: 1fr;
 }
 
+.latest-news-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+.latest-news-side-panel {
+  align-self: start;
+}
+
+.latest-news-side-panel h3 {
+  margin-top: 0;
+}
+
 .latest-news-header {
   display: flex;
   align-items: center;
@@ -1265,6 +1279,11 @@ h1 {
 
   .latest-news-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .latest-news-layout.has-side-panel {
+    grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
+    align-items: start;
   }
 
   .section-grid {

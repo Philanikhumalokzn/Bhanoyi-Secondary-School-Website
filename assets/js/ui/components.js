@@ -51,6 +51,8 @@ const renderLatestNewsSection = (section) => {
   }, {});
 
   const categories = Object.entries(grouped);
+  const sidePanel = section.sidePanel;
+  const hasSidePanel = Boolean(sidePanel && typeof sidePanel === 'object');
 
   return `
     <section class="section ${section.alt ? 'section-alt' : ''} latest-news-shell" id="latest-news">
@@ -59,9 +61,10 @@ const renderLatestNewsSection = (section) => {
           <h2>${section.title}</h2>
           <button type="button" class="latest-news-post-btn" data-post-news>Post new article</button>
         </div>
-        <div class="latest-news-grid">
-          ${categories
-            .map(([category, items]) => {
+        <div class="latest-news-layout ${hasSidePanel ? 'has-side-panel' : ''}">
+          <div class="latest-news-grid">
+            ${categories
+              .map(([category, items]) => {
               const slides = items
                 .map((item, idx) => {
                   const hasImage = Boolean((item.imageUrl || '').trim());
@@ -99,18 +102,26 @@ const renderLatestNewsSection = (section) => {
                 })
                 .join('');
 
-              return `
-                <article class="panel latest-news-lane">
-                  <div class="latest-news-lane-head">
-                    <h3>${category}</h3>
-                  </div>
-                  <div class="latest-news-track" data-news-track data-news-size="${items.length}">
-                    ${slides}
-                  </div>
-                </article>
-              `;
-            })
-            .join('')}
+                return `
+                  <article class="panel latest-news-lane">
+                    <div class="latest-news-lane-head">
+                      <h3>${category}</h3>
+                    </div>
+                    <div class="latest-news-track" data-news-track data-news-size="${items.length}">
+                      ${slides}
+                    </div>
+                  </article>
+                `;
+              })
+              .join('')}
+          </div>
+          ${hasSidePanel ? `
+            <aside class="panel latest-news-side-panel">
+              <h3>${sidePanel.title || 'Principal’s Welcome'}</h3>
+              <p>${sidePanel.body || ''}</p>
+              ${sidePanel.link ? `<a href="${sidePanel.link.href || '#'}">${sidePanel.link.label || 'Read more'}</a>` : ''}
+            </aside>
+          ` : ''}
         </div>
       </div>
     </section>
