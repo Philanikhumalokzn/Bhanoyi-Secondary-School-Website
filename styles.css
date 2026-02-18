@@ -96,6 +96,13 @@ body {
   background: rgba(13, 34, 56, 0.72);
 }
 
+#main-content.has-theme-bg {
+  background-image: var(--site-theme-bg-image);
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center center;
+}
+
 .header-inner {
   display: flex;
   align-items: center;
@@ -672,6 +679,74 @@ h1 {
   font: inherit;
 }
 
+.image-crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: rgba(13, 34, 56, 0.74);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.image-crop-panel {
+  width: min(840px, 96vw);
+  max-height: 94vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.image-crop-panel h3 {
+  margin: 0 0 6px;
+}
+
+.image-crop-help {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.image-crop-canvas-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0f1b2a;
+}
+
+.image-crop-canvas {
+  display: block;
+  width: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.image-crop-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.image-crop-controls {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.image-crop-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.image-crop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .news-overlay {
   position: fixed;
   inset: 0;
@@ -824,6 +899,40 @@ h1 {
   color: #fff;
   padding: 10px 12px;
   border-radius: 10px;
+}
+
+.inline-admin-theme-hint {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 61;
+  max-width: min(420px, calc(100vw - 28px));
+  background: rgba(13, 34, 56, 0.96);
+  color: #fff;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.inline-admin-theme-hint p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.inline-admin-theme-hint button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  color: #fff;
+  border-radius: 6px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
 }
 
 .inline-admin-active .latest-news-slide .inline-admin-controls,
@@ -1013,6 +1122,13 @@ h1 {
   .admin-auth .admin-form input,
   .admin-auth .btn {
     min-height: 42px;
+  }
+
+  .inline-admin-theme-hint {
+    right: 10px;
+    left: 10px;
+    bottom: 62px;
+    max-width: none;
   }
 
   #auth-status {

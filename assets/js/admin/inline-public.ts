@@ -164,6 +164,234 @@ const createFileEditor = (label = 'Upload news image') => {
   return { wrapper, input, button };
 };
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const loadImageElement = (file: File) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Could not load selected image.'));
+    };
+    image.src = objectUrl;
+  });
+
+type CropPanOptions = {
+  title?: string;
+  aspectRatio?: number;
+  outputWidth?: number;
+  outputHeight?: number;
+};
+
+const openCropPanDialog = async (file: File, options: CropPanOptions = {}) => {
+  const image = await loadImageElement(file);
+  const sourceRatio = image.naturalWidth / image.naturalHeight;
+  const aspectRatio = options.aspectRatio && options.aspectRatio > 0 ? options.aspectRatio : sourceRatio;
+
+  let viewWidth = Math.min(760, Math.max(300, Math.floor(window.innerWidth * 0.86)));
+  let viewHeight = Math.floor(viewWidth / aspectRatio);
+  if (viewHeight > 420) {
+    viewHeight = 420;
+    viewWidth = Math.floor(viewHeight * aspectRatio);
+  }
+
+  const outputWidth = options.outputWidth ?? (aspectRatio >= 1 ? 1920 : Math.round(1920 * aspectRatio));
+  const outputHeight = options.outputHeight ?? (aspectRatio >= 1 ? Math.round(1920 / aspectRatio) : 1920);
+
+  return new Promise<File>((resolve, reject) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'image-crop-overlay';
+    overlay.innerHTML = `
+      <div class="image-crop-panel" role="dialog" aria-modal="true" aria-label="Image crop and pan editor">
+        <h3>${options.title || 'Adjust image'}</h3>
+        <p class="image-crop-help">Drag to pan, use the slider to zoom, then apply.</p>
+        <div class="image-crop-canvas-wrap">
+          <canvas class="image-crop-canvas" width="${viewWidth}" height="${viewHeight}"></canvas>
+        </div>
+        <div class="image-crop-controls">
+          <label>
+            Zoom
+            <input type="range" min="1" max="4" step="0.01" value="1" />
+          </label>
+        </div>
+        <div class="image-crop-actions">
+          <button type="button" data-crop-reset>Reset</button>
+          <button type="button" data-crop-cancel>Cancel</button>
+          <button type="button" data-crop-apply>Apply</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const panel = overlay.querySelector('.image-crop-panel') as HTMLElement | null;
+    const canvas = overlay.querySelector('.image-crop-canvas') as HTMLCanvasElement | null;
+    const zoomInput = overlay.querySelector('input[type="range"]') as HTMLInputElement | null;
+    const resetBtn = overlay.querySelector('[data-crop-reset]') as HTMLButtonElement | null;
+    const cancelBtn = overlay.querySelector('[data-crop-cancel]') as HTMLButtonElement | null;
+    const applyBtn = overlay.querySelector('[data-crop-apply]') as HTMLButtonElement | null;
+    if (!panel || !canvas || !zoomInput || !resetBtn || !cancelBtn || !applyBtn) {
+      overlay.remove();
+      reject(new Error('Image editor could not be initialized.'));
+      return;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      overlay.remove();
+      reject(new Error('Image editor is unavailable in this browser.'));
+      return;
+    }
+
+    let zoom = 1;
+    let panX = 0;
+    let panY = 0;
+    let pointerId: number | null = null;
+    let dragStartX = 0;
+    let dragStartY = 0;
+
+    const getDrawMetrics = (width: number, height: number) => {
+      const baseScale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+      const scaledWidth = image.naturalWidth * baseScale * zoom;
+      const scaledHeight = image.naturalHeight * baseScale * zoom;
+      const maxPanX = Math.max(0, (scaledWidth - width) / 2);
+      const maxPanY = Math.max(0, (scaledHeight - height) / 2);
+      panX = clamp(panX, -maxPanX, maxPanX);
+      panY = clamp(panY, -maxPanY, maxPanY);
+
+      return {
+        scaledWidth,
+        scaledHeight,
+        drawX: (width - scaledWidth) / 2 + panX,
+        drawY: (height - scaledHeight) / 2 + panY,
+        maxPanX,
+        maxPanY
+      };
+    };
+
+    const drawPreview = () => {
+      const { scaledWidth, scaledHeight, drawX, drawY } = getDrawMetrics(canvas.width, canvas.height);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, drawX, drawY, scaledWidth, scaledHeight);
+    };
+
+    const closeDialog = () => {
+      overlay.remove();
+    };
+
+    const cancelDialog = () => {
+      closeDialog();
+      reject(new Error('Image edit canceled.'));
+    };
+
+    zoomInput.addEventListener('input', () => {
+      zoom = clamp(Number(zoomInput.value || '1'), 1, 4);
+      drawPreview();
+    });
+
+    canvas.addEventListener('pointerdown', (event) => {
+      pointerId = event.pointerId;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      canvas.classList.add('is-dragging');
+      canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', (event) => {
+      if (pointerId === null || event.pointerId !== pointerId) return;
+      const diffX = event.clientX - dragStartX;
+      const diffY = event.clientY - dragStartY;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      panX += diffX;
+      panY += diffY;
+      drawPreview();
+    });
+
+    const endDrag = (event?: PointerEvent) => {
+      if (event && pointerId !== null && event.pointerId !== pointerId) return;
+      pointerId = null;
+      canvas.classList.remove('is-dragging');
+    };
+
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+
+    resetBtn.addEventListener('click', () => {
+      zoom = 1;
+      panX = 0;
+      panY = 0;
+      zoomInput.value = '1';
+      drawPreview();
+    });
+
+    cancelBtn.addEventListener('click', cancelDialog);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) cancelDialog();
+    });
+
+    applyBtn.addEventListener('click', () => {
+      const outputCanvas = document.createElement('canvas');
+      outputCanvas.width = outputWidth;
+      outputCanvas.height = outputHeight;
+
+      const outContext = outputCanvas.getContext('2d');
+      if (!outContext) {
+        reject(new Error('Could not process image output.'));
+        closeDialog();
+        return;
+      }
+
+      const outputScaleX = outputWidth / canvas.width;
+      const outputScaleY = outputHeight / canvas.height;
+      const baseScaleOut = Math.max(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight);
+      const scaledWidthOut = image.naturalWidth * baseScaleOut * zoom;
+      const scaledHeightOut = image.naturalHeight * baseScaleOut * zoom;
+      const drawXOut = (outputWidth - scaledWidthOut) / 2 + panX * outputScaleX;
+      const drawYOut = (outputHeight - scaledHeightOut) / 2 + panY * outputScaleY;
+
+      outContext.drawImage(image, drawXOut, drawYOut, scaledWidthOut, scaledHeightOut);
+
+      const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      outputCanvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('Could not export edited image.'));
+            closeDialog();
+            return;
+          }
+
+          const editedFile = new File([blob], file.name.replace(/\.[a-zA-Z0-9]+$/, '') + (outputType === 'image/png' ? '.png' : '.jpg'), {
+            type: outputType
+          });
+          closeDialog();
+          resolve(editedFile);
+        },
+        outputType,
+        0.92
+      );
+    });
+
+    drawPreview();
+  });
+};
+
+const prepareUploadImage = async (file: File, options: CropPanOptions = {}) => {
+  try {
+    return await openCropPanDialog(file, options);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Image edit canceled.') {
+      return null;
+    }
+    throw error;
+  }
+};
+
 const ollamaModel = (import.meta.env.VITE_OLLAMA_MODEL as string | undefined) || 'llama3.2:3b';
 const ollamaBaseUrl =
   (import.meta.env.VITE_OLLAMA_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
@@ -497,7 +725,14 @@ const openLatestNewsComposer = () => {
 
       let imageUrl = imageUrlInput;
       if (imageFile && imageFile.size > 0) {
-        imageUrl = await uploadNewsImage(imageFile);
+        const preparedFile = await prepareUploadImage(imageFile, { title: 'Adjust article image' });
+        if (!preparedFile) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Post article';
+          showStatus('Image upload canceled.');
+          return;
+        }
+        imageUrl = await uploadNewsImage(preparedFile);
       }
 
       const currentOrders = Array.from(document.querySelectorAll('.latest-news-slide'))
@@ -923,7 +1158,12 @@ const wireCardInline = (item: Element) => {
         try {
           uploadBtn.disabled = true;
           uploadBtn.textContent = 'Uploading...';
-          const url = await uploadNewsImage(file);
+          const preparedFile = await prepareUploadImage(file, { title: 'Adjust image before upload' });
+          if (!preparedFile) {
+            showStatus('Image upload canceled.');
+            return;
+          }
+          const url = await uploadNewsImage(preparedFile);
           if (imageUrlEditor) imageUrlEditor.value = url;
           const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
           const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
@@ -1446,7 +1686,12 @@ const wireSplitSectionInline = (section: Element) => {
         try {
           uploadBtn.disabled = true;
           uploadBtn.textContent = 'Uploading...';
-          const url = await uploadNewsImage(file);
+          const preparedFile = await prepareUploadImage(file, { title: 'Adjust panel image' });
+          if (!preparedFile) {
+            showStatus('Image upload canceled.');
+            return;
+          }
+          const url = await uploadNewsImage(preparedFile);
           if (panelImageUrlEditor) panelImageUrlEditor.value = url;
           syncSplitPanelImage(url, (panelTitleEl?.textContent ?? readState.panelTitle).trim());
           showStatus('Image uploaded. Save the section to publish changes.');
@@ -1826,7 +2071,17 @@ const wireHeaderInline = () => {
         try {
           uploadBtn.disabled = true;
           uploadBtn.textContent = 'Uploading...';
-          const url = await uploadNewsImage(file);
+          const preparedFile = await prepareUploadImage(file, {
+            title: 'Adjust header background image',
+            aspectRatio: 3.2,
+            outputWidth: 1920,
+            outputHeight: 600
+          });
+          if (!preparedFile) {
+            showStatus('Image upload canceled.');
+            return;
+          }
+          const url = await uploadNewsImage(preparedFile);
           if (imageUrlEditor) imageUrlEditor.value = url;
           applyHeaderBackground(url);
           showStatus('Header background uploaded. Save to publish changes.');
@@ -1845,6 +2100,108 @@ const wireHeaderInline = () => {
   };
 
   renderReadControls();
+};
+
+const showHomeThemeUploadHint = () => {
+  if (currentPageKey() !== 'home') return;
+  if (document.getElementById('inline-admin-theme-hint')) return;
+  if (sessionStorage.getItem('theme-upload-hint-dismissed') === '1') return;
+
+  const hint = document.createElement('div');
+  hint.id = 'inline-admin-theme-hint';
+  hint.className = 'inline-admin-theme-hint';
+  hint.innerHTML = `
+    <p>Tip: click any blank area on this Home page to upload and position a theme background image.</p>
+    <button type="button" aria-label="Dismiss theme upload hint">×</button>
+  `;
+
+  const closeBtn = hint.querySelector('button');
+  closeBtn?.addEventListener('click', () => {
+    sessionStorage.setItem('theme-upload-hint-dismissed', '1');
+    hint.remove();
+  });
+
+  document.body.appendChild(hint);
+};
+
+const wireHomeThemeBackgroundUpload = () => {
+  if (currentPageKey() !== 'home') return;
+
+  const main = document.getElementById('main-content') as HTMLElement | null;
+  if (!main) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+  showHomeThemeUploadHint();
+
+  let uploadInProgress = false;
+
+  const applyThemeBackground = (url: string) => {
+    const normalized = (url || '').trim();
+    main.dataset.themeBgUrl = normalized;
+
+    if (!normalized) {
+      main.classList.remove('has-theme-bg');
+      main.style.removeProperty('--site-theme-bg-image');
+      return;
+    }
+
+    const safeThemeBgUrl = normalized.replace(/"/g, '\\"');
+    main.classList.add('has-theme-bg');
+    main.style.setProperty('--site-theme-bg-image', `url("${safeThemeBgUrl}")`);
+  };
+
+  const isInteractiveTarget = (target: HTMLElement) =>
+    Boolean(
+      target.closest(
+        'a, button, input, textarea, select, [contenteditable="true"], .inline-admin-controls, .site-header, .site-footer, .news-overlay, .news-read-overlay, .image-crop-overlay, .panel, .card, .latest-news-slide, .hero-notice'
+      )
+    );
+
+  document.addEventListener('click', (event) => {
+    if (uploadInProgress) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (!main.contains(target)) return;
+    if (isInteractiveTarget(target)) return;
+
+    fileInput.value = '';
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    try {
+      uploadInProgress = true;
+      const preparedFile = await prepareUploadImage(file, {
+        title: 'Adjust site theme background',
+        aspectRatio: 16 / 9,
+        outputWidth: 1920,
+        outputHeight: 1080
+      });
+      if (!preparedFile) {
+        showStatus('Theme image upload canceled.');
+        return;
+      }
+
+      showStatus('Uploading theme image...');
+      const url = await uploadNewsImage(preparedFile);
+      applyThemeBackground(url);
+      await saveSiteSettings({
+        school_theme_bg_image: url
+      });
+      showStatus('Home theme background updated.');
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to update theme background.');
+    } finally {
+      uploadInProgress = false;
+    }
+  });
 };
 
 const bindInlineActions = () => {
@@ -1871,6 +2228,7 @@ const bindInlineActions = () => {
   editableContactSections.forEach(wireContactCardsInline);
 
   wireHeaderInline();
+  wireHomeThemeBackgroundUpload();
   wireFooterInline();
 
   const postNewsButton = document.querySelector('[data-post-news]') as HTMLButtonElement | null;

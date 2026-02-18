@@ -272,6 +272,7 @@ const applySiteSettings = (siteContent: SiteContent, rows: SiteSettingRow[]) => 
   if (map.school_email !== undefined) siteContent.school.email = map.school_email;
   if (map.school_address !== undefined) siteContent.school.address = map.school_address;
   if (map.school_header_bg_image !== undefined) siteContent.school.headerBackgroundImage = map.school_header_bg_image;
+  if (map.school_theme_bg_image !== undefined) siteContent.school.themeBackgroundImage = map.school_theme_bg_image;
 
   const hours1 = map.school_hours_1;
   const hours2 = map.school_hours_2;

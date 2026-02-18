@@ -61,11 +61,13 @@ export const renderSite = (siteContent, page) => {
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
   upsertFavicon(siteContent.school.logoPath);
+  const themeBackgroundImage = (siteContent.school?.themeBackgroundImage || '').trim();
+  const themeBackgroundAttr = themeBackgroundImage.replace(/"/g, '&quot;');
 
   const app = document.getElementById('app');
   app.innerHTML = `
     ${renderHeader(siteContent, page.key)}
-    <main id="main-content">
+    <main id="main-content" class="${themeBackgroundImage ? 'has-theme-bg' : ''}" data-theme-bg-url="${themeBackgroundAttr}">
       ${renderHero(page.hero, page.key)}
       ${renderSections(page.sections)}
     </main>
@@ -77,6 +79,13 @@ export const renderSite = (siteContent, page) => {
   if (header && headerBgUrl) {
     const safeHeaderBgUrl = headerBgUrl.replace(/"/g, '\\"');
     header.style.setProperty('--header-bg-image', `url("${safeHeaderBgUrl}")`);
+  }
+
+  const main = app.querySelector('#main-content');
+  const themeBgUrl = main?.dataset?.themeBgUrl?.trim();
+  if (main && themeBgUrl) {
+    const safeThemeBgUrl = themeBgUrl.replace(/"/g, '\\"');
+    main.style.setProperty('--site-theme-bg-image', `url("${safeThemeBgUrl}")`);
   }
 
   bindMobileNav();
