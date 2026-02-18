@@ -99,6 +99,10 @@ body {
   line-height: 1.1;
 }
 
+.brand-name {
+  white-space: nowrap;
+}
+
 .brand-mark {
   display: inline-grid;
   place-items: center;

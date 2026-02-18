@@ -132,7 +132,7 @@ export const renderHeader = (siteContent, pageKey) => {
       <div class="container header-inner">
         <a class="brand" href="${withAdminQuery('index.html')}" aria-label="${siteContent.school.name} home">
           ${brandVisual}
-          <span>${siteContent.school.name}</span>
+          <span class="brand-name">${siteContent.school.name}</span>
         </a>
         <button
           id="menu-toggle"
