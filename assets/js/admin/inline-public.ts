@@ -142,12 +142,12 @@ const createTextEditor = (label: string, value: string) => {
   return { wrapper, input };
 };
 
-const createFileEditor = () => {
+const createFileEditor = (label = 'Upload news image') => {
   const wrapper = document.createElement('label');
   wrapper.className = 'inline-file-editor';
 
   const span = document.createElement('span');
-  span.textContent = 'Upload news image';
+  span.textContent = label;
 
   const input = document.createElement('input');
   input.type = 'file';
@@ -1710,6 +1710,143 @@ const wireFooterInline = () => {
   renderReadControls();
 };
 
+const wireHeaderInline = () => {
+  const header = document.querySelector('.site-header') as HTMLElement | null;
+  if (!header) return;
+
+  const headerInner = header.querySelector('.header-inner');
+  if (!headerInner) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls header-inline-controls';
+  headerInner.appendChild(controls);
+
+  const readState = {
+    headerBgImage: (header.dataset.headerBgUrl || '').trim()
+  };
+
+  let imageUrlEditor: HTMLInputElement | null = null;
+  let imageFileInput: HTMLInputElement | null = null;
+  let imageUploadButton: HTMLButtonElement | null = null;
+
+  const applyHeaderBackground = (url: string) => {
+    const normalized = (url || '').trim();
+    header.dataset.headerBgUrl = normalized;
+
+    if (!normalized) {
+      header.classList.remove('has-header-bg');
+      header.style.removeProperty('--header-bg-image');
+      return;
+    }
+
+    const safeHeaderBgUrl = normalized.replace(/"/g, '\\"');
+    header.classList.add('has-header-bg');
+    header.style.setProperty('--header-bg-image', `url("${safeHeaderBgUrl}")`);
+  };
+
+  const removeEditors = () => {
+    imageUrlEditor?.closest('.inline-url-editor')?.remove();
+    imageFileInput?.closest('.inline-file-editor')?.remove();
+    imageUrlEditor = null;
+    imageFileInput = null;
+    imageUploadButton = null;
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit Header';
+    editBtn.addEventListener('click', enterEdit);
+    controls.appendChild(editBtn);
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const url = (imageUrlEditor?.value ?? '').trim();
+        await saveSiteSettings({
+          school_header_bg_image: url
+        });
+        showStatus('Header updated. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to update header.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      applyHeaderBackground(readState.headerBgImage);
+      removeEditors();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    renderEditControls();
+
+    if (!imageUrlEditor) {
+      const { wrapper, input } = createUrlEditor('Header Background Image URL', readState.headerBgImage || '');
+      controls.appendChild(wrapper);
+      imageUrlEditor = input;
+
+      imageUrlEditor.addEventListener('input', () => {
+        applyHeaderBackground(imageUrlEditor?.value || '');
+      });
+    }
+
+    if (!imageFileInput) {
+      const { wrapper, input, button } = createFileEditor('Upload header background image');
+      controls.appendChild(wrapper);
+      imageFileInput = input;
+      imageUploadButton = button;
+
+      imageUploadButton.addEventListener('click', async (eventUpload) => {
+        eventUpload.preventDefault();
+        const uploadBtn = imageUploadButton;
+        if (!uploadBtn) return;
+        const file = imageFileInput?.files?.[0];
+        if (!file) {
+          showStatus('Choose an image file first.');
+          return;
+        }
+
+        try {
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Uploading...';
+          const url = await uploadNewsImage(file);
+          if (imageUrlEditor) imageUrlEditor.value = url;
+          applyHeaderBackground(url);
+          showStatus('Header background uploaded. Save to publish changes.');
+        } catch (error) {
+          showStatus(
+            error instanceof Error
+              ? `${error.message}. Ensure a public storage bucket named news-images exists.`
+              : 'Image upload failed.'
+          );
+        } finally {
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Upload';
+        }
+      });
+    }
+  };
+
+  renderReadControls();
+};
+
 const bindInlineActions = () => {
   const heroNotice = document.querySelector('.hero-notice');
   if (heroNotice) {
@@ -1733,6 +1870,7 @@ const bindInlineActions = () => {
   );
   editableContactSections.forEach(wireContactCardsInline);
 
+  wireHeaderInline();
   wireFooterInline();
 
   const postNewsButton = document.querySelector('[data-post-news]') as HTMLButtonElement | null;

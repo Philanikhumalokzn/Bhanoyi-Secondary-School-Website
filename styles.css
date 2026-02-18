@@ -78,6 +78,22 @@ body {
   z-index: 30;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.site-header.has-header-bg {
+  background-image: linear-gradient(rgba(13, 34, 56, 0.68), rgba(13, 34, 56, 0.68)), var(--header-bg-image);
+}
+
+.site-header.has-header-bg .brand,
+.site-header.has-header-bg .primary-nav a {
+  color: #f0f6ff;
+}
+
+.site-header.has-header-bg .primary-nav {
+  background: rgba(13, 34, 56, 0.72);
 }
 
 .header-inner {
@@ -538,6 +554,27 @@ h1 {
   margin-top: 10px;
   display: flex;
   gap: 8px;
+}
+
+.inline-admin-active .header-inline-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  margin-top: 0;
+  z-index: 4;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.inline-admin-active .header-inline-controls .inline-url-editor,
+.inline-admin-active .header-inline-controls .inline-file-editor {
+  width: min(360px, 88vw);
+  margin-top: 0;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
 }
 
 .inline-item-remove {

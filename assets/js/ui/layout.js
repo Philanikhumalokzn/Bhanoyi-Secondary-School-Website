@@ -72,6 +72,13 @@ export const renderSite = (siteContent, page) => {
     ${renderFooter(siteContent)}
   `;
 
+  const header = app.querySelector('.site-header');
+  const headerBgUrl = header?.dataset?.headerBgUrl?.trim();
+  if (header && headerBgUrl) {
+    const safeHeaderBgUrl = headerBgUrl.replace(/"/g, '\\"');
+    header.style.setProperty('--header-bg-image', `url("${safeHeaderBgUrl}")`);
+  }
+
   bindMobileNav();
   initLatestNewsRotators();
   initLatestNewsReaders();

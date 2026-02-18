@@ -122,6 +122,8 @@ export const renderHeader = (siteContent, pageKey) => {
     const current = item.key === pageKey ? ' aria-current="page"' : '';
     return `<li><a href="${withAdminQuery(item.href)}"${current}>${item.label}</a></li>`;
   }).join('');
+  const headerBackgroundImage = (siteContent.school?.headerBackgroundImage || '').trim();
+  const headerBackgroundAttr = headerBackgroundImage.replace(/"/g, '&quot;');
 
   const schoolNameParts = (siteContent.school.name || '').trim().split(/\s+/).filter(Boolean);
   const mobileLeftName = schoolNameParts[0] || siteContent.school.name;
@@ -135,7 +137,7 @@ export const renderHeader = (siteContent, pageKey) => {
     : `<span class="brand-mark" aria-hidden="true">${siteContent.school.shortName}</span>`;
 
   return `
-    <header class="site-header">
+    <header class="site-header ${headerBackgroundImage ? 'has-header-bg' : ''}" data-header-bg-url="${headerBackgroundAttr}">
       <div class="container header-inner">
         <a class="brand" href="${withAdminQuery('index.html')}" aria-label="${siteContent.school.name} home">
           <span class="brand-name-mobile" aria-hidden="true">
