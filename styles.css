@@ -414,6 +414,12 @@ h1 {
   margin-top: 0;
 }
 
+.latest-news-side-panel-name {
+  margin: 12px 0 10px;
+  font-weight: 700;
+  color: var(--text);
+}
+
 .latest-news-header {
   display: flex;
   align-items: center;
@@ -1285,8 +1291,19 @@ h1 {
   }
 
   .latest-news-layout.has-side-panel {
-    grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     align-items: start;
+  }
+
+  .latest-news-layout.has-side-panel .latest-news-grid {
+    grid-column: 1 / span 3;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .latest-news-layout.has-side-panel .latest-news-side-panel {
+    grid-column: 4;
+    justify-self: stretch;
+    align-self: start;
   }
 
   .section-grid {

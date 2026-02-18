@@ -47,6 +47,7 @@
           "sidePanel": {
             "title": "Principal’s Welcome",
             "body": "We are committed to helping every learner grow in knowledge, character, and confidence through disciplined teaching and strong community support.",
+            "principalName": "Dr. G.K.S. Memela",
             "link": {
               "href": "about.html",
               "label": "Read full message"

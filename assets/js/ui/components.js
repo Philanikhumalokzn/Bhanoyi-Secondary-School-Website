@@ -121,6 +121,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
             <aside class="panel latest-news-side-panel">
               <h3>${sidePanel.title || 'Principal’s Welcome'}</h3>
               <p>${sidePanel.body || ''}</p>
+              <p class="latest-news-side-panel-name">${sidePanel.principalName || 'Dr. G.K.S. Memela'}</p>
               ${sidePanel.link ? `<a href="${sidePanel.link.href || '#'}">${sidePanel.link.label || 'Read more'}</a>` : ''}
             </aside>
           ` : ''}

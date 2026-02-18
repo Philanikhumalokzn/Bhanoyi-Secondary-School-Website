@@ -1815,6 +1815,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
 
   const titleEl = panel.querySelector('h3');
   const bodyEl = panel.querySelector('p');
+  let nameEl = panel.querySelector('.latest-news-side-panel-name') as HTMLElement | null;
   let linkEl = panel.querySelector('a') as HTMLAnchorElement | null;
   if (!titleEl || !bodyEl) return;
 
@@ -1825,11 +1826,26 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
   const readState = {
     title: (titleEl.textContent ?? '').trim(),
     body: (bodyEl.textContent ?? '').trim(),
+    principalName: (nameEl?.textContent ?? 'Dr. G.K.S. Memela').trim(),
     linkLabel: (linkEl?.textContent ?? '').trim(),
     linkHref: (linkEl?.getAttribute('href') ?? '').trim()
   };
 
   let linkUrlEditor: HTMLInputElement | null = null;
+
+  const ensureName = () => {
+    if (nameEl) return nameEl;
+    const element = document.createElement('p');
+    element.className = 'latest-news-side-panel-name';
+    element.textContent = 'Dr. G.K.S. Memela';
+    if (linkEl) {
+      linkEl.before(element);
+    } else {
+      panel.appendChild(element);
+    }
+    nameEl = element;
+    return element;
+  };
 
   const ensureLink = () => {
     if (linkEl) return linkEl;
@@ -1844,6 +1860,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
   const exitEdit = () => {
     setEditable(titleEl, false);
     setEditable(bodyEl, false);
+    setEditable(nameEl, false);
     setEditable(linkEl, false);
     if (linkUrlEditor) {
       linkUrlEditor.parentElement?.remove();
@@ -1879,6 +1896,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
           sidePanel: {
             title: (titleEl.textContent ?? '').trim(),
             body: (bodyEl.textContent ?? '').trim(),
+            principalName: (ensureName().textContent ?? '').trim() || 'Dr. G.K.S. Memela',
             link: {
               href,
               label
@@ -1899,6 +1917,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
     cancelBtn.addEventListener('click', () => {
       titleEl.textContent = readState.title;
       bodyEl.textContent = readState.body;
+      ensureName().textContent = readState.principalName || 'Dr. G.K.S. Memela';
       const activeLink = ensureLink();
       activeLink.textContent = readState.linkLabel || 'Read more';
       activeLink.setAttribute('href', readState.linkHref || '#');
@@ -1911,9 +1930,11 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
   };
 
   const enterEdit = () => {
+    const activeName = ensureName();
     const activeLink = ensureLink();
     setEditable(titleEl, true);
     setEditable(bodyEl, true);
+    setEditable(activeName, true);
     setEditable(activeLink, true);
 
     if (!linkUrlEditor) {
