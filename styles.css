@@ -78,63 +78,43 @@ body {
   z-index: 30;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  overflow: visible;
 }
 
 .header-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 74px;
+  min-height: 108px;
   gap: 16px;
 }
 
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 15px;
   text-decoration: none;
   color: var(--text);
   font-weight: 700;
-}
-
-.brand-name-stack {
-  display: inline-flex;
-  flex-direction: column;
-  justify-content: center;
-  line-height: 1;
-}
-
-.brand-name-primary,
-.brand-name-echo {
-  display: block;
-  font-size: clamp(1.05rem, 1.7vw, 1.85rem);
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.brand-name-echo {
-  margin-top: 1px;
+  font-size: 1.5rem;
+  line-height: 1.1;
 }
 
 .brand-mark {
   display: inline-grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 54px;
+  height: 54px;
   border-radius: 999px;
   background: var(--primary);
   color: #fff;
-  font-size: 0.8rem;
+  font-size: 1.2rem;
 }
 
 .brand-logo {
-  width: 92px;
-  height: 92px;
+  width: 60px;
+  height: 60px;
   object-fit: contain;
   border-radius: 8px;
-  transform: translateY(16px);
-  margin-bottom: -16px;
 }
 
 .menu-toggle {
@@ -148,7 +128,7 @@ body {
 .primary-nav {
   display: none;
   position: absolute;
-  top: 72px;
+  top: 108px;
   left: 0;
   right: 0;
   background: var(--surface);
@@ -958,26 +938,6 @@ h1 {
 }
 
 @media (max-width: 640px) {
-  .header-inner {
-    min-height: 68px;
-  }
-
-  .brand {
-    gap: 8px;
-  }
-
-  .brand-logo {
-    width: 62px;
-    height: 62px;
-    transform: translateY(10px);
-    margin-bottom: -10px;
-  }
-
-  .brand-name-primary,
-  .brand-name-echo {
-    font-size: clamp(0.9rem, 3.6vw, 1.06rem);
-  }
-
   .admin-shell {
     width: min(100%, 94%);
     margin-top: 20px;
@@ -1113,22 +1073,6 @@ h1 {
 }
 
 @media (min-width: 860px) {
-  .brand {
-    gap: 14px;
-  }
-
-  .brand-logo {
-    width: 106px;
-    height: 106px;
-    transform: translateY(18px);
-    margin-bottom: -18px;
-  }
-
-  .brand-name-primary,
-  .brand-name-echo {
-    font-size: clamp(1.2rem, 1.6vw, 1.9rem);
-  }
-
   .menu-toggle {
     display: none;
   }
