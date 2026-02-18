@@ -16,7 +16,6 @@
     "vite": "^5.4.14"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.1",
-    "resend": "^3.0.0"
+    "@supabase/supabase-js": "^2.49.1"
   }
 }

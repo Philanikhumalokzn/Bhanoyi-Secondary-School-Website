@@ -1,5 +1,3 @@
-import { Resend } from 'resend';
-
 const json = (status, body) =>
   new Response(JSON.stringify(body), {
     status,
@@ -22,6 +20,25 @@ const escapeHtml = (value) =>
 
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+const sendEmail = async ({ apiKey, payload }) => {
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const reason = normalize(data?.message) || normalize(data?.error?.message) || 'Email provider request failed.';
+    throw new Error(reason);
+  }
+
+  return data;
+};
+
 export default async function handler(request) {
   if (request.method !== 'POST') {
     return json(405, { error: 'Method not allowed.' });
@@ -35,8 +52,6 @@ export default async function handler(request) {
   if (!apiKey || !from || !to) {
     return json(500, { error: 'Server email configuration is incomplete.' });
   }
-
-  const resendClient = new Resend(apiKey);
 
   let body;
   try {
@@ -68,34 +83,37 @@ export default async function handler(request) {
   const safeSubject = escapeHtml(subject);
 
   try {
-    const response = await resendClient.emails.send({
-      from,
-      to,
-      reply_to: email,
-      subject: `Contact form: ${subject}`,
-      html: `
-        <h2>New contact message</h2>
-        <p><strong>Name:</strong> ${escapeHtml(fullName)}</p>
-        <p><strong>Email:</strong> ${escapeHtml(email)}</p>
-        <p><strong>Phone:</strong> ${escapeHtml(phone || 'Not provided')}</p>
-        <p><strong>Subject:</strong> ${safeSubject}</p>
-        <p><strong>Submitted:</strong> ${escapeHtml(submittedAt)}</p>
-        <hr />
-        <p>${escapeHtml(message).replace(/\n/g, '<br />')}</p>
-      `,
-      text: [
-        'New contact message',
-        `Name: ${fullName}`,
-        `Email: ${email}`,
-        `Phone: ${phone || 'Not provided'}`,
-        `Subject: ${subject}`,
-        `Submitted: ${submittedAt}`,
-        '',
-        message
-      ].join('\n')
+    const response = await sendEmail({
+      apiKey,
+      payload: {
+        from,
+        to,
+        reply_to: email,
+        subject: `Contact form: ${subject}`,
+        html: `
+          <h2>New contact message</h2>
+          <p><strong>Name:</strong> ${escapeHtml(fullName)}</p>
+          <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+          <p><strong>Phone:</strong> ${escapeHtml(phone || 'Not provided')}</p>
+          <p><strong>Subject:</strong> ${safeSubject}</p>
+          <p><strong>Submitted:</strong> ${escapeHtml(submittedAt)}</p>
+          <hr />
+          <p>${escapeHtml(message).replace(/\n/g, '<br />')}</p>
+        `,
+        text: [
+          'New contact message',
+          `Name: ${fullName}`,
+          `Email: ${email}`,
+          `Phone: ${phone || 'Not provided'}`,
+          `Subject: ${subject}`,
+          `Submitted: ${submittedAt}`,
+          '',
+          message
+        ].join('\n')
+      }
     });
 
-    return json(200, { ok: true, id: response?.data?.id || null });
+    return json(200, { ok: true, id: response?.id || null });
   } catch (error) {
     const reason = normalize(error?.message) || 'Unable to send email right now.';
     return json(502, { error: reason });
