@@ -123,6 +123,13 @@ export const renderHeader = (siteContent, pageKey) => {
     return `<li><a href="${withAdminQuery(item.href)}"${current}>${item.label}</a></li>`;
   }).join('');
 
+  const schoolNameParts = (siteContent.school.name || '').trim().split(/\s+/).filter(Boolean);
+  const mobileLeftName = schoolNameParts[0] || siteContent.school.name;
+  const mobileRightName = schoolNameParts[1] || '';
+  const mobileBottomName = schoolNameParts.length > 2
+    ? schoolNameParts.slice(2).join(' ')
+    : (schoolNameParts[1] || schoolNameParts[0] || siteContent.school.name);
+
   const brandVisual = siteContent.school.logoPath
     ? `<img class="brand-logo" src="${siteContent.school.logoPath}" alt="${siteContent.school.name} logo" />`
     : `<span class="brand-mark" aria-hidden="true">${siteContent.school.shortName}</span>`;
@@ -131,7 +138,14 @@ export const renderHeader = (siteContent, pageKey) => {
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="${withAdminQuery('index.html')}" aria-label="${siteContent.school.name} home">
-          ${brandVisual}
+          <span class="brand-name-mobile" aria-hidden="true">
+            <span class="brand-name-mobile-top">
+              <span class="brand-name-mobile-left">${mobileLeftName}</span>
+              ${brandVisual}
+              <span class="brand-name-mobile-right">${mobileRightName}</span>
+            </span>
+            <span class="brand-name-mobile-bottom">${mobileBottomName}</span>
+          </span>
           <span class="brand-name">${siteContent.school.name}</span>
         </a>
         <button

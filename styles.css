@@ -83,24 +83,57 @@ body {
 .header-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 108px;
+  justify-content: center;
+  min-height: 148px;
   gap: 16px;
+  position: relative;
+  padding-top: 8px;
 }
 
 .brand {
-  display: inline-flex;
+  display: inline-grid;
   align-items: center;
-  gap: 15px;
+  justify-items: center;
+  gap: 2px;
   text-decoration: none;
   color: var(--text);
   font-weight: 700;
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   line-height: 1.1;
 }
 
 .brand-name {
+  display: none;
   white-space: nowrap;
+}
+
+.brand-name-mobile {
+  display: inline-grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.brand-name-mobile-top {
+  display: inline-grid;
+  grid-template-columns: auto auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.brand-name-mobile-left,
+.brand-name-mobile-right,
+.brand-name-mobile-bottom {
+  white-space: nowrap;
+}
+
+.brand-name-mobile-left,
+.brand-name-mobile-right {
+  font-size: 1.15rem;
+}
+
+.brand-name-mobile-bottom {
+  font-size: 1.25rem;
+  font-weight: 700;
 }
 
 .brand-mark {
@@ -115,14 +148,15 @@ body {
 }
 
 .brand-logo {
-  width: 78px;
-  height: 78px;
+  width: 96px;
+  height: 96px;
   object-fit: contain;
   border-radius: 8px;
-  margin-bottom: -14px;
+  margin-bottom: -18px;
 }
 
 .menu-toggle {
+  display: none;
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 8px;
@@ -131,9 +165,9 @@ body {
 }
 
 .primary-nav {
-  display: none;
+  display: block;
   position: absolute;
-  top: 108px;
+  top: 130px;
   left: 0;
   right: 0;
   background: var(--surface);
@@ -147,16 +181,24 @@ body {
 .primary-nav ul {
   list-style: none;
   margin: 0;
-  padding: 10px 4%;
+  padding: 6px 4%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
 }
 
 .primary-nav a {
-  display: block;
-  padding: 10px;
+  display: inline-block;
+  padding: 8px 10px;
   color: var(--text);
   text-decoration: none;
   border-radius: 8px;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 
 .primary-nav a:hover,
@@ -1078,6 +1120,33 @@ h1 {
 }
 
 @media (min-width: 860px) {
+  .header-inner {
+    justify-content: space-between;
+    min-height: 108px;
+    padding-top: 0;
+  }
+
+  .brand {
+    display: inline-flex;
+    justify-items: unset;
+    gap: 15px;
+    font-size: 1.5rem;
+  }
+
+  .brand-name {
+    display: inline;
+  }
+
+  .brand-name-mobile {
+    display: none;
+  }
+
+  .brand-logo {
+    width: 78px;
+    height: 78px;
+    margin-bottom: -14px;
+  }
+
   .menu-toggle {
     display: none;
   }
@@ -1089,10 +1158,11 @@ h1 {
   }
 
   .primary-nav ul {
-    display: flex;
-    align-items: center;
+    overflow-x: visible;
+    white-space: normal;
     gap: 2px;
     padding: 0;
+    justify-content: flex-start;
   }
 
   .hero-grid {
