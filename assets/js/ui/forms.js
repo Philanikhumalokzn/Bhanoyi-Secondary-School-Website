@@ -17,7 +17,7 @@ const setSubmittingState = (form, isSubmitting) => {
   submitButton.textContent = isSubmitting ? 'Sending…' : submitButton.dataset.defaultText;
 };
 
-const FORM_TIMEOUT_MS = 18000;
+const FORM_TIMEOUT_MS = 25000;
 
 const collectFormData = (form) => {
   const fields = Array.from(form.querySelectorAll('[name]'));
