@@ -10,6 +10,7 @@ import {
   saveDownload,
   saveHeroNotice,
   saveSiteSettings,
+  uploadSectionFile,
   uploadNewsImage,
   signOut
 } from './api';
@@ -348,7 +349,7 @@ const createSectionAssetsEditor = (section: Element) => {
             }
           }
 
-          const url = await uploadNewsImage(fileToUpload);
+          const url = await uploadSectionFile(fileToUpload);
           const kind = asAttachmentKind(rawFile);
           workingAssets.push({
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,

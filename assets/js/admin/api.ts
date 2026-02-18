@@ -222,6 +222,23 @@ export const uploadNewsImage = async (file: File) => {
   return data.publicUrl;
 };
 
+export const uploadSectionFile = async (file: File) => {
+  const extension = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
+  const safeExt = (extension || 'bin').toLowerCase();
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${safeExt}`;
+
+  const { error } = await supabase.storage.from('section-files').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || undefined
+  });
+
+  if (error) throw toError(error, 'Section file upload failed');
+
+  const { data } = supabase.storage.from('section-files').getPublicUrl(path);
+  return data.publicUrl;
+};
+
 export const saveHeroNotice = async (entry: Partial<HeroNotice> & { page_key: string }) => {
   const payload = {
     page_key: entry.page_key,
