@@ -3,6 +3,7 @@ import {
   deleteCard,
   deleteDownload,
   deleteHeroNotice,
+  getSiteSetting,
   getSession,
   saveAnnouncement,
   saveCard,
@@ -89,14 +90,49 @@ const getSectionIndex = (section: Element): number => {
 
 const sectionOverrideKey = (sectionIndex: number) => `section_override:${currentPageKey()}:${sectionIndex}`;
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const deepMerge = (base: Record<string, unknown>, updates: Record<string, unknown>): Record<string, unknown> => {
+  const result: Record<string, unknown> = { ...base };
+
+  Object.entries(updates).forEach(([key, value]) => {
+    const baseValue = result[key];
+    if (isPlainObject(baseValue) && isPlainObject(value)) {
+      result[key] = deepMerge(baseValue, value);
+      return;
+    }
+    result[key] = value;
+  });
+
+  return result;
+};
+
 const saveSectionOverride = async (section: Element, payload: Record<string, unknown>) => {
   const sectionIndex = getSectionIndex(section);
   if (sectionIndex < 0) {
     throw new Error('Could not resolve section index for this page.');
   }
 
+  const key = sectionOverrideKey(sectionIndex);
+  const existingRaw = await getSiteSetting(key);
+  let existingValue: Record<string, unknown> = {};
+
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw);
+      if (isPlainObject(parsed)) {
+        existingValue = parsed;
+      }
+    } catch {
+      existingValue = {};
+    }
+  }
+
+  const merged = deepMerge(existingValue, payload);
+
   await saveSiteSettings({
-    [sectionOverrideKey(sectionIndex)]: JSON.stringify(payload)
+    [key]: JSON.stringify(merged)
   });
 };
 
@@ -162,6 +198,225 @@ const createFileEditor = (label = 'Upload news image') => {
   wrapper.appendChild(button);
 
   return { wrapper, input, button };
+};
+
+type SectionAttachment = {
+  id: string;
+  url: string;
+  title: string;
+  fileName: string;
+  kind: 'image' | 'document';
+};
+
+const asAttachmentKind = (file: File): 'image' | 'document' => (file.type.startsWith('image/') ? 'image' : 'document');
+
+const fileNameFromUrl = (url: string) => {
+  try {
+    const pathname = new URL(url, window.location.origin).pathname;
+    const parts = pathname.split('/').filter(Boolean);
+    return parts[parts.length - 1] || 'file';
+  } catch {
+    const parts = url.split('/').filter(Boolean);
+    return parts[parts.length - 1] || 'file';
+  }
+};
+
+const createSectionAssetsEditor = (section: Element) => {
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls section-assets-inline-controls';
+
+  const existingCards = Array.from(section.querySelectorAll('.section-asset-item'));
+  const readState: SectionAttachment[] = existingCards.map((item) => {
+    const html = item as HTMLElement;
+    const url = (html.dataset.assetUrl || (item.getAttribute('href') ?? '')).trim();
+    const title = (html.dataset.assetTitle || item.querySelector('.section-asset-title')?.textContent || '').trim();
+    const fileName = (html.dataset.assetFilename || item.querySelector('.section-asset-name')?.textContent || fileNameFromUrl(url)).trim();
+    const kind = ((html.dataset.assetKind || '').trim() === 'image' ? 'image' : 'document') as 'image' | 'document';
+    return {
+      id: html.dataset.assetId || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      url,
+      title,
+      fileName,
+      kind
+    };
+  });
+
+  let workingAssets: SectionAttachment[] = readState.map((entry) => ({ ...entry }));
+  let assetsList: HTMLElement | null = null;
+  let fileInput: HTMLInputElement | null = null;
+  let uploadBtn: HTMLButtonElement | null = null;
+
+  const buildAssetsMarkup = (assets: SectionAttachment[]) =>
+    assets
+      .map((asset) =>
+        `<a class="section-asset-item" href="${asset.url}" target="_blank" rel="noopener" data-asset-id="${asset.id}" data-asset-url="${asset.url}" data-asset-title="${asset.title}" data-asset-filename="${asset.fileName}" data-asset-kind="${asset.kind}">
+          ${asset.kind === 'image' ? `<img class="section-asset-thumb" src="${asset.url}" alt="${asset.title || asset.fileName}" loading="lazy" />` : ''}
+          <span class="section-asset-title">${asset.title || (asset.kind === 'image' ? 'Image' : 'Document')}</span>
+          <span class="section-asset-name">${asset.fileName}</span>
+        </a>`
+      )
+      .join('');
+
+  const syncSectionAssetsView = (assets: SectionAttachment[]) => {
+    const wrapper = section.querySelector('.section-assets');
+    const list = section.querySelector('.section-assets-grid');
+    if (!list || !wrapper) return;
+
+    list.innerHTML = buildAssetsMarkup(assets);
+    wrapper.classList.toggle('is-hidden', assets.length === 0);
+  };
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit Files';
+    editBtn.addEventListener('click', enterEdit);
+    controls.appendChild(editBtn);
+  };
+
+  const renderAssetRows = () => {
+    if (!assetsList) return;
+    assetsList.innerHTML = '';
+
+    if (workingAssets.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'section-assets-empty';
+      empty.textContent = 'No files uploaded for this section yet.';
+      assetsList.appendChild(empty);
+      return;
+    }
+
+    workingAssets.forEach((asset) => {
+      const row = document.createElement('div');
+      row.className = 'section-asset-edit-row';
+      row.innerHTML = `
+        <span>${asset.kind === 'image' ? 'Image' : 'Document'}: ${asset.fileName}</span>
+      `;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'inline-item-remove';
+      removeBtn.textContent = 'Delete';
+      removeBtn.addEventListener('click', () => {
+        workingAssets = workingAssets.filter((entry) => entry.id !== asset.id);
+        renderAssetRows();
+      });
+
+      row.appendChild(removeBtn);
+      assetsList?.appendChild(row);
+    });
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const uploadWrap = document.createElement('label');
+    uploadWrap.className = 'inline-file-editor';
+    uploadWrap.innerHTML = `
+      <span>Upload section files (images, PDF, DOCX, etc.)</span>
+    `;
+
+    fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt';
+    fileInput.multiple = true;
+
+    uploadBtn = document.createElement('button');
+    uploadBtn.type = 'button';
+    uploadBtn.textContent = 'Upload Selected';
+    uploadBtn.addEventListener('click', async () => {
+      const selected = Array.from(fileInput?.files || []);
+      if (!selected.length) {
+        showStatus('Choose one or more files first.');
+        return;
+      }
+
+      const button = uploadBtn;
+      if (!button) return;
+
+      try {
+        button.disabled = true;
+        button.textContent = 'Uploading...';
+
+        for (const rawFile of selected) {
+          let fileToUpload: File | null = rawFile;
+          if (rawFile.type.startsWith('image/')) {
+            fileToUpload = await prepareUploadImage(rawFile, { title: 'Adjust image before upload' });
+            if (!fileToUpload) {
+              continue;
+            }
+          }
+
+          const url = await uploadNewsImage(fileToUpload);
+          const kind = asAttachmentKind(rawFile);
+          workingAssets.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            url,
+            title: kind === 'image' ? 'Image' : 'Document',
+            fileName: fileToUpload.name,
+            kind
+          });
+        }
+
+        renderAssetRows();
+        showStatus('Files uploaded. Save section to publish changes.');
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'File upload failed.');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = 'Upload Selected';
+        }
+      }
+    });
+
+    uploadWrap.appendChild(fileInput);
+    uploadWrap.appendChild(uploadBtn);
+
+    assetsList = document.createElement('div');
+    assetsList.className = 'section-assets-edit-list';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save Files';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const payloadAssets = workingAssets.map(({ id: _id, ...asset }) => asset);
+        await saveSectionOverride(section, {
+          attachments: payloadAssets
+        });
+        syncSectionAssetsView(workingAssets);
+        showStatus('Section files updated.');
+        renderReadControls();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save section files.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      workingAssets = readState.map((entry) => ({ ...entry }));
+      syncSectionAssetsView(readState);
+      renderReadControls();
+    });
+
+    controls.appendChild(uploadWrap);
+    controls.appendChild(assetsList);
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+
+    renderAssetRows();
+  };
+
+  const enterEdit = () => {
+    renderEditControls();
+  };
+
+  renderReadControls();
+  return controls;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -2297,6 +2552,15 @@ const wireHomeThemeBackgroundUpload = () => {
   });
 };
 
+const wireSectionAssetsInline = (section: Element) => {
+  const container = section.querySelector('.container');
+  if (!container) return;
+  if (container.querySelector('.section-assets-inline-controls')) return;
+
+  const controls = createSectionAssetsEditor(section);
+  container.appendChild(controls);
+};
+
 const bindInlineActions = () => {
   const heroNotice = document.querySelector('.hero-notice');
   if (heroNotice) {
@@ -2326,6 +2590,9 @@ const bindInlineActions = () => {
   if (latestNewsSection) {
     wireLatestNewsSidePanelInline(latestNewsSection);
   }
+
+  const editableSections = Array.from(document.querySelectorAll('[data-editable-section="true"]'));
+  editableSections.forEach(wireSectionAssetsInline);
 
   wireHeaderInline();
   wireHomeThemeBackgroundUpload();

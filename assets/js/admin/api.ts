@@ -30,6 +30,17 @@ export type SiteSetting = {
   setting_value: string;
 };
 
+export const getSiteSetting = async (settingKey: string): Promise<string | null> => {
+  const { data, error } = await supabase
+    .from('site_settings')
+    .select('setting_value')
+    .eq('setting_key', settingKey)
+    .maybeSingle();
+
+  if (error) throw toError(error, 'Site setting load failed');
+  return (data?.setting_value as string | undefined) ?? null;
+};
+
 const toMessage = (error: unknown) => {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error) {

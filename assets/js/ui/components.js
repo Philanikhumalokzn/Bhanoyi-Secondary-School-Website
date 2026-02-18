@@ -42,6 +42,39 @@ const withAdminQuery = (href) => {
   }
 };
 
+const renderSectionAttachments = (section) => {
+  const attachments = Array.isArray(section.attachments) ? section.attachments : [];
+  if (!attachments.length) {
+    return `<div class="section-assets is-hidden"><h3>Files & Resources</h3><div class="section-assets-grid"></div></div>`;
+  }
+
+  const items = attachments
+    .map((item) => {
+      const url = (item?.url || '').trim();
+      if (!url) return '';
+
+      const kind = item.kind === 'image' ? 'image' : 'document';
+      const title = (item.title || (kind === 'image' ? 'Image' : 'Document')).trim();
+      const fileName = (item.fileName || url.split('/').pop() || 'file').trim();
+
+      return `
+        <a class="section-asset-item" href="${url}" target="_blank" rel="noopener" data-asset-url="${url}" data-asset-title="${title}" data-asset-filename="${fileName}" data-asset-kind="${kind}">
+          ${kind === 'image' ? `<img class="section-asset-thumb" src="${url}" alt="${title}" loading="lazy" />` : ''}
+          <span class="section-asset-title">${title}</span>
+          <span class="section-asset-name">${fileName}</span>
+        </a>
+      `;
+    })
+    .join('');
+
+  return `
+    <div class="section-assets">
+      <h3>Files & Resources</h3>
+      <div class="section-assets-grid">${items}</div>
+    </div>
+  `;
+};
+
 const renderLatestNewsSection = (section, sectionIndex) => {
   const grouped = (section.items || []).reduce((acc, item, index) => {
     const category = (item.category || 'General').trim() || 'General';
@@ -275,8 +308,9 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
 
   if (effectiveSection.type === 'cards') {
     const className = effectiveSection.columns === 3 ? 'three-col' : 'cards';
+    const editableAttr = effectiveSection.editable ? 'data-editable-section="true"' : '';
     return `
-      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="cards" data-section-key="${fallbackSectionKey}">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" ${editableAttr} data-section-index="${sectionIndex}" data-section-type="cards" data-section-key="${fallbackSectionKey}">
         <div class="container">
           <h2>${effectiveSection.title}</h2>
           <div class="${className}">
@@ -289,6 +323,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
               )
               .join('')}
           </div>
+          ${renderSectionAttachments(effectiveSection)}
         </div>
       </section>
     `;
@@ -312,6 +347,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
             ${effectiveSection.panel.link ? `<a href="${effectiveSection.panel.link.href}">${effectiveSection.panel.link.label}</a>` : ''}
           </aside>
         </div>
+        ${renderSectionAttachments(effectiveSection)}
       </section>
     `;
   }
@@ -329,6 +365,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
               )
               .join('')}
           </div>
+          ${renderSectionAttachments(effectiveSection)}
         </div>
       </section>
     `;
@@ -336,7 +373,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
 
   if (effectiveSection.type === 'announcements') {
     return `
-      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="announcements">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="announcements">
         <div class="container">
           <h2>${effectiveSection.title}</h2>
           <div class="notice-grid">
@@ -355,6 +392,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
               )
               .join('')}
           </div>
+          ${renderSectionAttachments(effectiveSection)}
         </div>
       </section>
     `;
@@ -362,7 +400,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
 
   if (effectiveSection.type === 'downloads') {
     return `
-      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="downloads">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="downloads">
         <div class="container">
           <h2>${effectiveSection.title}</h2>
           <div class="download-grid">
@@ -378,6 +416,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
               )
               .join('')}
           </div>
+          ${renderSectionAttachments(effectiveSection)}
         </div>
       </section>
     `;

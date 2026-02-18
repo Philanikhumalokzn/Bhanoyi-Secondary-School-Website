@@ -608,6 +608,73 @@ h1 {
   gap: 8px;
 }
 
+.section-assets {
+  margin-top: 14px;
+}
+
+.section-assets h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.section-assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.section-asset-item {
+  display: grid;
+  gap: 6px;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.section-asset-thumb {
+  width: 100%;
+  height: 100px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.section-asset-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.section-asset-name {
+  color: var(--muted);
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
+.section-assets-edit-list {
+  display: grid;
+  gap: 8px;
+  width: min(560px, 100%);
+}
+
+.section-assets-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.section-asset-edit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface);
+}
+
 .inline-admin-active .header-inline-controls {
   position: absolute;
   top: 8px;
