@@ -40,10 +40,10 @@ const fetchJsonContent = async () => {
 export const loadSiteContent = async () => {
   try {
     const content = await fetchJsonContent();
-    const resolved = resolvePlaceholders(content);
-    return applyRemoteOverrides(resolved);
+    const withOverrides = await applyRemoteOverrides(content);
+    return resolvePlaceholders(withOverrides);
   } catch {
-    const resolved = resolvePlaceholders(fallbackSiteContent);
-    return applyRemoteOverrides(resolved);
+    const withOverrides = await applyRemoteOverrides(fallbackSiteContent);
+    return resolvePlaceholders(withOverrides);
   }
 };

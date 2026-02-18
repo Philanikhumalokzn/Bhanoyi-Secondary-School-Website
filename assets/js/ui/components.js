@@ -234,9 +234,40 @@ const resolveHomePrincipalSidePanel = (section, context = {}) => {
   };
 };
 
+const resolveContactInformationSection = (section, context = {}) => {
+  const pageKey = context.pageKey || '';
+  const school = context.siteContent?.school;
+  if (pageKey !== 'contact' || section.type !== 'contact-cards' || !school) {
+    return section;
+  }
+
+  const title = (section.title || '').trim().toLowerCase();
+  if (title !== 'contact information') {
+    return section;
+  }
+
+  return {
+    ...section,
+    editable: false,
+    items: (section.items || []).map((item) => {
+      const itemTitle = (item.title || '').trim().toLowerCase();
+      if (itemTitle === 'phone') {
+        return { ...item, body: school.phone || '' };
+      }
+      if (itemTitle === 'email') {
+        return { ...item, body: school.email || '' };
+      }
+      if (itemTitle === 'address') {
+        return { ...item, body: school.address || '' };
+      }
+      return item;
+    })
+  };
+};
+
 const renderSectionByType = (section, sectionIndex, context = {}) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
-  const effectiveSection = resolveHomePrincipalSidePanel(section, context);
+  const effectiveSection = resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context);
 
   if (effectiveSection.type === 'cards' && effectiveSection.sectionKey === 'latest_news') {
     return renderLatestNewsSection(effectiveSection, sectionIndex);
@@ -286,8 +317,9 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   }
 
   if (effectiveSection.type === 'contact-cards') {
+    const editableAttr = effectiveSection.editable === false ? '' : 'data-editable-section="true"';
     return `
-      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="contact-cards">
+      <section class="section ${effectiveSection.alt ? 'section-alt' : ''}" ${editableAttr} data-section-index="${sectionIndex}" data-section-type="contact-cards">
         <div class="container">
           <h2>${effectiveSection.title}</h2>
           <div class="contact-grid">
