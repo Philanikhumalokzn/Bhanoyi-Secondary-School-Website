@@ -1816,6 +1816,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
   const titleEl = panel.querySelector('h3');
   const bodyEl = panel.querySelector('p');
   let nameEl = panel.querySelector('.latest-news-side-panel-name') as HTMLElement | null;
+  const imageEl = panel.querySelector('.latest-news-side-image') as HTMLImageElement | null;
   let linkEl = panel.querySelector('a') as HTMLAnchorElement | null;
   if (!titleEl || !bodyEl) return;
 
@@ -1827,6 +1828,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
     title: (titleEl.textContent ?? '').trim(),
     body: (bodyEl.textContent ?? '').trim(),
     principalName: (nameEl?.textContent ?? 'Dr. G.K.S. Memela').trim(),
+    imageUrl: (imageEl?.getAttribute('src') ?? '').trim(),
     linkLabel: (linkEl?.textContent ?? '').trim(),
     linkHref: (linkEl?.getAttribute('href') ?? '').trim()
   };
@@ -1897,6 +1899,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
             title: (titleEl.textContent ?? '').trim(),
             body: (bodyEl.textContent ?? '').trim(),
             principalName: (ensureName().textContent ?? '').trim() || 'Dr. G.K.S. Memela',
+            imageUrl: readState.imageUrl,
             link: {
               href,
               label

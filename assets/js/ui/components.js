@@ -53,6 +53,8 @@ const renderLatestNewsSection = (section, sectionIndex) => {
   const categories = Object.entries(grouped);
   const sidePanel = section.sidePanel;
   const hasSidePanel = Boolean(sidePanel && typeof sidePanel === 'object');
+  const sidePanelImageUrl = (sidePanel?.imageUrl || '').trim();
+  const hasSidePanelImage = Boolean(sidePanelImageUrl);
 
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
 
@@ -119,9 +121,12 @@ const renderLatestNewsSection = (section, sectionIndex) => {
           </div>
           ${hasSidePanel ? `
             <aside class="panel latest-news-side-panel">
+              <div class="latest-news-side-media ${hasSidePanelImage ? '' : 'is-hidden'}">
+                <img class="latest-news-side-image ${hasSidePanelImage ? '' : 'is-hidden'}" src="${hasSidePanelImage ? sidePanelImageUrl : ''}" alt="${sidePanel.title || 'Principal photo'}" loading="lazy" />
+                <p class="latest-news-side-panel-name">${sidePanel.principalName || 'Dr. G.K.S. Memela'}</p>
+              </div>
               <h3>${sidePanel.title || 'Principal’s Welcome'}</h3>
               <p>${sidePanel.body || ''}</p>
-              <p class="latest-news-side-panel-name">${sidePanel.principalName || 'Dr. G.K.S. Memela'}</p>
               ${sidePanel.link ? `<a href="${sidePanel.link.href || '#'}">${sidePanel.link.label || 'Read more'}</a>` : ''}
             </aside>
           ` : ''}
