@@ -88,3 +88,22 @@ Note: Contact and Admissions email endpoints are currently implemented under `/a
 ## Important
 
 I cannot deploy to your Vercel/Netlify account directly from here because it requires your account login and permissions. I can guide every click and troubleshoot instantly.
+
+---
+
+## Isolated Resend Tester Module
+
+This repo now includes an isolated tester page deployed with the site:
+
+- Page: `/email-tester.html`
+- API route: `/api/tester-send-email`
+
+It uses the same tester env variable set (read from Vercel runtime):
+
+- `RESEND_API_KEY`
+- `MAIL_FROM`
+- `MAIL_TO`
+
+Notes:
+- `to` field on the tester page overrides `MAIL_TO` when provided.
+- Keep this URL private; it can send real emails.
