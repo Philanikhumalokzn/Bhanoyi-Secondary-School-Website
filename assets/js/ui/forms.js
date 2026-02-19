@@ -17,8 +17,6 @@ const setSubmittingState = (form, isSubmitting) => {
   submitButton.textContent = isSubmitting ? 'Sending…' : submitButton.dataset.defaultText;
 };
 
-const FORM_TIMEOUT_MS = 25000;
-
 const collectFormData = (form) => {
   const fields = Array.from(form.querySelectorAll('[name]'));
   return fields.reduce((acc, field) => {
@@ -30,27 +28,13 @@ const collectFormData = (form) => {
 };
 
 const postJson = async (url, body) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FORM_TIMEOUT_MS);
-  let response;
-
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Request timed out. Please try again.');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
