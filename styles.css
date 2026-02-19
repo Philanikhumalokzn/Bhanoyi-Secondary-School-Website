@@ -1137,6 +1137,17 @@ h1 {
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.2);
   font-size: 0.95rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.footer-utility-link {
+  color: #dbeafe;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .admin-shell {

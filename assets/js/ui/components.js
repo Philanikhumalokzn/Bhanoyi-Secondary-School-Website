@@ -691,6 +691,7 @@ export const renderFooter = (siteContent) => `
     </div>
     <div class="container footer-bottom">
       <p>© 2026 ${siteContent.school.name}. All rights reserved.</p>
+      <p><a class="footer-utility-link" href="${withAdminQuery('email-tester.html')}">Email Tester</a></p>
     </div>
   </footer>
 `;
