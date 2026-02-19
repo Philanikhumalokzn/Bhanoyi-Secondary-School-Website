@@ -20,30 +20,46 @@ const escapeHtml = (value) =>
 
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+const HANDLER_TIMEOUT_MS = 15000;
 const RESEND_TIMEOUT_MS = 12000;
+
+const withTimeout = (promise, timeoutMs, message) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timeoutId = setTimeout(() => {
+        clearTimeout(timeoutId);
+        reject(new Error(message));
+      }, timeoutMs);
+    })
+  ]);
 
 const sendEmail = async ({ apiKey, payload }) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
+  const abortTimeout = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
   let response;
 
   try {
-    response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
+    response = await withTimeout(
+      fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      }),
+      RESEND_TIMEOUT_MS,
+      'Email provider timed out. Please try again.'
+    );
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw new Error('Email provider timed out. Please try again.');
     }
     throw error;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(abortTimeout);
   }
 
   const data = await response.json().catch(() => ({}));
@@ -56,84 +72,90 @@ const sendEmail = async ({ apiKey, payload }) => {
 };
 
 export default async function handler(request) {
-  if (request.method !== 'POST') {
-    return json(405, { error: 'Method not allowed.' });
-  }
-
-  const apiKey = normalize(process.env.RESEND_API_KEY);
-  const from = normalize(process.env.RESEND_FROM);
-  const defaultTo = normalize(process.env.RESEND_DEFAULT_TO);
-  const to = normalize(process.env.RESEND_ADMISSIONS_TO) || defaultTo;
-
-  if (!apiKey || !from || !to) {
-    return json(500, { error: 'Server email configuration is incomplete.' });
-  }
-
-  let body;
   try {
-    body = await request.json();
-  } catch {
-    return json(400, { error: 'Invalid JSON body.' });
-  }
+    return await withTimeout(
+      (async () => {
+        if (request.method !== 'POST') {
+          return json(405, { error: 'Method not allowed.' });
+        }
 
-  const guardianName = cleanText(body?.guardianName, 120);
-  const studentName = cleanText(body?.studentName, 120);
-  const applyingGrade = cleanText(body?.applyingGrade, 40);
-  const email = cleanText(body?.email, 200);
-  const phone = cleanText(body?.phone, 80);
-  const message = cleanText(body?.message, 4000);
-  const website = cleanText(body?.website, 120);
+        const apiKey = normalize(process.env.RESEND_API_KEY);
+        const from = normalize(process.env.RESEND_FROM);
+        const defaultTo = normalize(process.env.RESEND_DEFAULT_TO);
+        const to = normalize(process.env.RESEND_ADMISSIONS_TO) || defaultTo;
 
-  if (website) {
-    return json(200, { ok: true });
-  }
+        if (!apiKey || !from || !to) {
+          return json(500, { error: 'Server email configuration is incomplete.' });
+        }
 
-  if (!guardianName || !studentName || !applyingGrade || !email || !phone) {
-    return json(400, { error: 'Guardian name, student name, grade, email, and phone are required.' });
-  }
+        let body;
+        try {
+          body = await withTimeout(request.json(), 3000, 'Request body read timed out.');
+        } catch {
+          return json(400, { error: 'Invalid JSON body.' });
+        }
 
-  if (!isValidEmail(email)) {
-    return json(400, { error: 'Please provide a valid email address.' });
-  }
+        const guardianName = cleanText(body?.guardianName, 120);
+        const studentName = cleanText(body?.studentName, 120);
+        const applyingGrade = cleanText(body?.applyingGrade, 40);
+        const email = cleanText(body?.email, 200);
+        const phone = cleanText(body?.phone, 80);
+        const message = cleanText(body?.message, 4000);
+        const website = cleanText(body?.website, 120);
 
-  const submittedAt = new Date().toISOString();
+        if (website) {
+          return json(200, { ok: true });
+        }
 
-  try {
-    const response = await sendEmail({
-      apiKey,
-      payload: {
-        from,
-        to,
-        reply_to: email,
-        subject: `Admissions enquiry: ${studentName} (Grade ${applyingGrade})`,
-        html: `
-          <h2>New admissions enquiry</h2>
-          <p><strong>Guardian:</strong> ${escapeHtml(guardianName)}</p>
-          <p><strong>Student:</strong> ${escapeHtml(studentName)}</p>
-          <p><strong>Applying Grade:</strong> ${escapeHtml(applyingGrade)}</p>
-          <p><strong>Email:</strong> ${escapeHtml(email)}</p>
-          <p><strong>Phone:</strong> ${escapeHtml(phone)}</p>
-          <p><strong>Submitted:</strong> ${escapeHtml(submittedAt)}</p>
-          <hr />
-          <p>${escapeHtml(message || 'No additional notes.').replace(/\n/g, '<br />')}</p>
-        `,
-        text: [
-          'New admissions enquiry',
-          `Guardian: ${guardianName}`,
-          `Student: ${studentName}`,
-          `Applying Grade: ${applyingGrade}`,
-          `Email: ${email}`,
-          `Phone: ${phone}`,
-          `Submitted: ${submittedAt}`,
-          '',
-          message || 'No additional notes.'
-        ].join('\n')
-      }
-    });
+        if (!guardianName || !studentName || !applyingGrade || !email || !phone) {
+          return json(400, { error: 'Guardian name, student name, grade, email, and phone are required.' });
+        }
 
-    return json(200, { ok: true, id: response?.id || null });
+        if (!isValidEmail(email)) {
+          return json(400, { error: 'Please provide a valid email address.' });
+        }
+
+        const submittedAt = new Date().toISOString();
+
+        const response = await sendEmail({
+          apiKey,
+          payload: {
+            from,
+            to,
+            reply_to: email,
+            subject: `Admissions enquiry: ${studentName} (Grade ${applyingGrade})`,
+            html: `
+              <h2>New admissions enquiry</h2>
+              <p><strong>Guardian:</strong> ${escapeHtml(guardianName)}</p>
+              <p><strong>Student:</strong> ${escapeHtml(studentName)}</p>
+              <p><strong>Applying Grade:</strong> ${escapeHtml(applyingGrade)}</p>
+              <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+              <p><strong>Phone:</strong> ${escapeHtml(phone)}</p>
+              <p><strong>Submitted:</strong> ${escapeHtml(submittedAt)}</p>
+              <hr />
+              <p>${escapeHtml(message || 'No additional notes.').replace(/\n/g, '<br />')}</p>
+            `,
+            text: [
+              'New admissions enquiry',
+              `Guardian: ${guardianName}`,
+              `Student: ${studentName}`,
+              `Applying Grade: ${applyingGrade}`,
+              `Email: ${email}`,
+              `Phone: ${phone}`,
+              `Submitted: ${submittedAt}`,
+              '',
+              message || 'No additional notes.'
+            ].join('\n')
+          }
+        });
+
+        return json(200, { ok: true, id: response?.id || null });
+      })(),
+      HANDLER_TIMEOUT_MS,
+      'Function timed out before completion.'
+    );
   } catch (error) {
     const reason = normalize(error?.message) || 'Unable to send email right now.';
-    return json(502, { error: reason });
+    return json(504, { error: reason });
   }
 }
