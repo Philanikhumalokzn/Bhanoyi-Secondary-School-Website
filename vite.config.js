@@ -11,7 +11,8 @@ export default defineConfig({
         admissions: resolve(__dirname, 'admissions.html'),
         policies: resolve(__dirname, 'policies.html'),
         contact: resolve(__dirname, 'contact.html'),
-        admin: resolve(__dirname, 'admin.html')
+        admin: resolve(__dirname, 'admin.html'),
+        emailTester: resolve(__dirname, 'email-tester.html')
       }
     }
   }
