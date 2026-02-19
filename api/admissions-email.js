@@ -1,4 +1,4 @@
-import { Resend } from 'resend';
+import { sendEmail } from './mailer.js';
 
 const json = (status, body) =>
   new Response(JSON.stringify(body), {
@@ -28,12 +28,9 @@ export default async function handler(request) {
   }
 
   const apiKey = normalize(process.env.RESEND_API_KEY);
-  const fromAddress = normalize(process.env.RESEND_FROM) || 'Bhanoyi Secondary School <no-reply@example.com>';
-  const toAddress = normalize(process.env.RESEND_ADMISSIONS_TO) || normalize(process.env.RESEND_DEFAULT_TO);
+  const toAddress = normalize(process.env.RESEND_ADMISSIONS_TO) || normalize(process.env.RESEND_DEFAULT_TO) || normalize(process.env.MAIL_TO);
 
-  const resendClient = apiKey ? new Resend(apiKey) : null;
-
-  if (!resendClient) {
+  if (!apiKey) {
     return json(500, { error: 'RESEND_API_KEY is missing; update environment and redeploy.' });
   }
 
@@ -71,10 +68,8 @@ export default async function handler(request) {
   const submittedAt = new Date().toISOString();
 
   try {
-    const response = await resendClient.emails.send({
-      from: fromAddress,
+    const response = await sendEmail({
       to: toAddress,
-      reply_to: email,
       subject: `Admissions enquiry: ${studentName} (Grade ${applyingGrade})`,
       html: `
         <h2>New admissions enquiry</h2>
