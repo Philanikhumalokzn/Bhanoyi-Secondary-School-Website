@@ -971,7 +971,10 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
         <div id="news-image-dropzone" class="inline-file-editor" role="button" tabindex="0" aria-label="Upload images">
           <span>Drag and drop images here, or click to select multiple files</span>
         </div>
-        <p id="news-selected-images-meta"></p>
+        <div class="news-overlay-actions">
+          <p id="news-selected-images-meta"></p>
+          <button type="button" id="news-clear-selected-images">Clear selected</button>
+        </div>
         <div id="news-current-images-wrap" class="${isEditMode ? '' : 'is-hidden'}">
           <p>Current images</p>
           <div id="news-current-images-list"></div>
@@ -997,6 +1000,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const imageInput = overlay.querySelector('input[name="imageFile"]') as HTMLInputElement | null;
   const imageDropzone = overlay.querySelector('#news-image-dropzone') as HTMLElement | null;
   const selectedImagesMeta = overlay.querySelector('#news-selected-images-meta') as HTMLElement | null;
+  const clearSelectedImagesBtn = overlay.querySelector('#news-clear-selected-images') as HTMLButtonElement | null;
   const currentImagesWrap = overlay.querySelector('#news-current-images-wrap') as HTMLElement | null;
   const currentImagesList = overlay.querySelector('#news-current-images-list') as HTMLElement | null;
   const cancelBtn = overlay.querySelector('#news-overlay-cancel') as HTMLButtonElement | null;
@@ -1006,6 +1010,9 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const fileSignature = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 
   const syncSelectedImagesMeta = () => {
+    if (clearSelectedImagesBtn) {
+      clearSelectedImagesBtn.disabled = pendingImageFiles.length === 0;
+    }
     if (!selectedImagesMeta) return;
     if (!pendingImageFiles.length) {
       selectedImagesMeta.textContent = 'No new images selected.';
@@ -1060,6 +1067,12 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     event.preventDefault();
     const dropped = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
     appendPendingFiles(dropped);
+  });
+
+  clearSelectedImagesBtn?.addEventListener('click', () => {
+    pendingImageFiles = [];
+    syncSelectedImagesMeta();
+    showStatus('Selected new images cleared.');
   });
 
   const pickImageFile = () =>
