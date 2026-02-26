@@ -53,8 +53,10 @@ const renderCard = (item, clickable = false, context = {}) => {
   const hasImage = Boolean(primaryImageUrl);
   const content = `
     <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
-    <h3>${item.title}</h3>
-    <p>${item.body}</p>
+    <div class="card-content">
+      <h3>${item.title}</h3>
+      <p>${item.body}</p>
+    </div>
   `;
   if (clickable) {
     return `<a class="card" href="${item.href || '#'}" ${attrs}>${content}</a>`;
@@ -186,9 +188,11 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                 <img class="latest-news-side-image ${hasSidePanelImage ? '' : 'is-hidden'}" src="${hasSidePanelImage ? sidePanelImageUrl : ''}" alt="${sidePanel.title || 'Principal photo'}" loading="lazy" />
                 <p class="latest-news-side-panel-name">${sidePanel.principalName || 'Dr. G.K.S. Memela'}</p>
               </div>
-              <h3>${sidePanel.title || 'Principal’s Welcome'}</h3>
-              <p>${sidePanel.body || ''}</p>
-              ${sidePanel.link ? `<a href="${sidePanel.link.href || '#'}">${sidePanel.link.label || 'Read more'}</a>` : ''}
+              <div class="latest-news-side-content">
+                <h3>${sidePanel.title || 'Principal’s Welcome'}</h3>
+                <p>${sidePanel.body || ''}</p>
+                ${sidePanel.link ? `<a href="${sidePanel.link.href || '#'}">${sidePanel.link.label || 'Read more'}</a>` : ''}
+              </div>
             </aside>
           ` : ''}
         </div>
