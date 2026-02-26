@@ -929,6 +929,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   if (editRecord?.category && !categories.includes(editRecord.category)) {
     categories.push(editRecord.category);
   }
+  let workingImageUrls = isEditMode && editRecord ? [...(editRecord.imageUrls || [])] : [];
+
   const overlay = document.createElement('div');
   overlay.className = 'news-overlay';
   overlay.innerHTML = `
@@ -966,6 +968,14 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
           Upload image(s) (optional)
           <input type="file" name="imageFile" accept="image/*" multiple />
         </label>
+        <div id="news-image-dropzone" class="inline-file-editor" role="button" tabindex="0" aria-label="Upload images">
+          <span>Drag and drop images here, or click to select multiple files</span>
+        </div>
+        <p id="news-selected-images-meta"></p>
+        <div id="news-current-images-wrap" class="${isEditMode ? '' : 'is-hidden'}">
+          <p>Current images</p>
+          <div id="news-current-images-list"></div>
+        </div>
         <div class="news-overlay-actions">
           <button type="button" id="news-overlay-cancel">Cancel</button>
           <button type="submit" id="news-overlay-save">${composerActionLabel}</button>
@@ -984,8 +994,164 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const bodyInput = overlay.querySelector('textarea[name="body"]') as HTMLTextAreaElement | null;
   const hrefInput = overlay.querySelector('input[name="href"]') as HTMLInputElement | null;
   const newCategoryInput = overlay.querySelector('input[name="newCategory"]') as HTMLInputElement | null;
+  const imageInput = overlay.querySelector('input[name="imageFile"]') as HTMLInputElement | null;
+  const imageDropzone = overlay.querySelector('#news-image-dropzone') as HTMLElement | null;
+  const selectedImagesMeta = overlay.querySelector('#news-selected-images-meta') as HTMLElement | null;
+  const currentImagesWrap = overlay.querySelector('#news-current-images-wrap') as HTMLElement | null;
+  const currentImagesList = overlay.querySelector('#news-current-images-list') as HTMLElement | null;
   const cancelBtn = overlay.querySelector('#news-overlay-cancel') as HTMLButtonElement | null;
   const saveBtn = overlay.querySelector('#news-overlay-save') as HTMLButtonElement | null;
+  let pendingImageFiles: File[] = [];
+
+  const fileSignature = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+
+  const syncSelectedImagesMeta = () => {
+    if (!selectedImagesMeta) return;
+    if (!pendingImageFiles.length) {
+      selectedImagesMeta.textContent = 'No new images selected.';
+      return;
+    }
+
+    const previewNames = pendingImageFiles.slice(0, 3).map((file) => file.name).join(', ');
+    const extraCount = Math.max(0, pendingImageFiles.length - 3);
+    selectedImagesMeta.textContent =
+      extraCount > 0
+        ? `${pendingImageFiles.length} new images selected: ${previewNames} + ${extraCount} more`
+        : `${pendingImageFiles.length} new images selected: ${previewNames}`;
+  };
+
+  const appendPendingFiles = (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+
+    const seen = new Set(pendingImageFiles.map(fileSignature));
+    imageFiles.forEach((file) => {
+      const signature = fileSignature(file);
+      if (!seen.has(signature)) {
+        pendingImageFiles.push(file);
+        seen.add(signature);
+      }
+    });
+
+    syncSelectedImagesMeta();
+  };
+
+  imageInput?.addEventListener('change', () => {
+    const selected = imageInput.files ? Array.from(imageInput.files) : [];
+    appendPendingFiles(selected);
+    imageInput.value = '';
+  });
+
+  imageDropzone?.addEventListener('click', () => {
+    imageInput?.click();
+  });
+
+  imageDropzone?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    imageInput?.click();
+  });
+
+  imageDropzone?.addEventListener('dragover', (event) => {
+    event.preventDefault();
+  });
+
+  imageDropzone?.addEventListener('drop', (event) => {
+    event.preventDefault();
+    const dropped = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
+    appendPendingFiles(dropped);
+  });
+
+  const pickImageFile = () =>
+    new Promise<File | null>((resolve) => {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.accept = 'image/*';
+      picker.addEventListener(
+        'change',
+        () => {
+          const file = picker.files?.[0] ?? null;
+          resolve(file && file.size > 0 ? file : null);
+        },
+        { once: true }
+      );
+      picker.click();
+    });
+
+  const renderCurrentImages = () => {
+    if (!currentImagesWrap || !currentImagesList) return;
+    currentImagesWrap.classList.toggle('is-hidden', !isEditMode);
+    if (!isEditMode) return;
+
+    if (!workingImageUrls.length) {
+      currentImagesList.innerHTML = '<p>No images currently attached to this post.</p>';
+      return;
+    }
+
+    currentImagesList.innerHTML = workingImageUrls
+      .map(
+        (url, index) => `
+          <div class="section-asset-edit-row" data-news-image-index="${index}">
+            <span>Image ${index + 1}</span>
+            <img class="section-asset-thumb" src="${url}" alt="Post image ${index + 1}" loading="lazy" />
+            <button type="button" data-news-image-action="edit" data-news-image-index="${index}">Edit</button>
+            <button type="button" data-news-image-action="replace" data-news-image-index="${index}">Replace</button>
+            <button type="button" class="inline-item-remove" data-news-image-action="delete" data-news-image-index="${index}">Delete</button>
+          </div>
+        `
+      )
+      .join('');
+  };
+
+  currentImagesList?.addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest('button[data-news-image-action]') as HTMLButtonElement | null;
+    if (!button) return;
+
+    event.preventDefault();
+    const action = (button.dataset.newsImageAction || '').trim();
+    const index = Number(button.dataset.newsImageIndex || '-1');
+    if (!Number.isInteger(index) || index < 0 || index >= workingImageUrls.length) return;
+
+    if (action === 'delete') {
+      workingImageUrls = workingImageUrls.filter((_, entryIndex) => entryIndex !== index);
+      renderCurrentImages();
+      showStatus('Image removed from this draft. Save post to publish changes.');
+      return;
+    }
+
+    if (action !== 'edit' && action !== 'replace') return;
+
+    const picked = await pickImageFile();
+    if (!picked) return;
+
+    try {
+      button.disabled = true;
+      button.textContent = action === 'edit' ? 'Editing...' : 'Replacing...';
+
+      const preparedFile = await prepareUploadImage(picked, {
+        title: `${action === 'edit' ? 'Edit' : 'Replace'} image ${index + 1}`
+      });
+      if (!preparedFile) {
+        showStatus('Image update canceled.');
+        return;
+      }
+
+      const uploadedUrl = await uploadNewsImage(preparedFile);
+      workingImageUrls[index] = uploadedUrl;
+      renderCurrentImages();
+      showStatus(
+        action === 'edit'
+          ? 'Image edited in this draft. Save post to publish changes.'
+          : 'Image replaced in this draft. Save post to publish changes.'
+      );
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to update image.');
+    } finally {
+      button.disabled = false;
+      button.textContent = action === 'edit' ? 'Edit' : 'Replace';
+    }
+  });
 
   if (isEditMode && editRecord) {
     if (titleInput) titleInput.value = editRecord.title || '';
@@ -1004,6 +1170,9 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
       }
     }
   }
+
+  renderCurrentImages();
+  syncSelectedImagesMeta();
 
   categorySelect?.addEventListener('change', () => {
     if (!newCategoryWrap) return;
@@ -1031,9 +1200,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     const href = String(formData.get('href') || '#').trim() || '#';
     const selectedCategory = String(formData.get('category') || '').trim();
     const newCategory = String(formData.get('newCategory') || '').trim();
-    const imageFiles = formData
-      .getAll('imageFile')
-      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+    const imageFiles = pendingImageFiles.filter((file) => file.size > 0);
 
     const category = selectedCategory === '__new__' ? newCategory : selectedCategory;
     if (!title || !body || !category) {
@@ -1072,8 +1239,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
         nextSortOrder = (currentOrders.length ? Math.max(...currentOrders) : 0) + 1;
       }
 
-      const finalImageUrls = isEditMode && editRecord
-        ? Array.from(new Set([...(editRecord.imageUrls || []), ...imageUrls]))
+      const finalImageUrls = isEditMode
+        ? Array.from(new Set([...(workingImageUrls || []), ...imageUrls]))
         : imageUrls;
 
       await saveCard({
