@@ -135,46 +135,48 @@ const renderLatestNewsSection = (section, sectionIndex) => {
           <div class="latest-news-grid">
             <article class="panel latest-news-lane">
               <div class="latest-news-track" data-news-track data-news-size="${items.length}">
-                ${items
-                  .map((item, idx) => {
-                    const category = (item.category || 'General').trim() || 'General';
-                    const imageUrls = parseCardImageUrls(item.imageUrl || '');
-                    const primaryImageUrl = imageUrls[0] || '';
-                    const imageData = serializeCardImageUrls(imageUrls);
-                    const hasImage = Boolean(primaryImageUrl);
-                    const normalizedSubtitle = (item.subtitle || '').trim();
-                    const fallbackHeading = item.title;
-                    const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
-                    const attrs = [
-                      section.editable ? 'data-editable-card="true"' : '',
-                      section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
-                      item.id ? `data-card-id="${item.id}"` : '',
-                      `data-card-category="${category}"`,
-                      `data-card-subtitle="${item.subtitle || ''}"`,
-                      `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
-                      typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
-                      'data-card-clickable="true"'
-                    ]
-                      .filter(Boolean)
-                      .join(' ');
+                <div class="latest-news-rail" data-news-rail>
+                  ${items
+                    .map((item, idx) => {
+                      const category = (item.category || 'General').trim() || 'General';
+                      const imageUrls = parseCardImageUrls(item.imageUrl || '');
+                      const primaryImageUrl = imageUrls[0] || '';
+                      const imageData = serializeCardImageUrls(imageUrls);
+                      const hasImage = Boolean(primaryImageUrl);
+                      const normalizedSubtitle = (item.subtitle || '').trim();
+                      const fallbackHeading = item.title;
+                      const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
+                      const attrs = [
+                        section.editable ? 'data-editable-card="true"' : '',
+                        section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
+                        item.id ? `data-card-id="${item.id}"` : '',
+                        `data-card-category="${category}"`,
+                        `data-card-subtitle="${item.subtitle || ''}"`,
+                        `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
+                        typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
+                        'data-card-clickable="true"'
+                      ]
+                        .filter(Boolean)
+                        .join(' ');
 
-                    return `
-                      <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
-                        <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
-                        <div class="latest-news-image-fallback ${hasImage ? 'is-hidden' : ''}">
-                          <h4 class="latest-news-fallback-title">${fallbackHeading}</h4>
-                          <p class="latest-news-fallback-body">${item.body}</p>
-                        </div>
-                        <div class="latest-news-content">
-                          <span class="news-category">${category}</span>
-                          <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
-                          ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
-                          <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
-                        </div>
-                      </a>
-                    `;
-                  })
-                  .join('')}
+                      return `
+                        <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
+                          <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
+                          <div class="latest-news-image-fallback ${hasImage ? 'is-hidden' : ''}">
+                            <h4 class="latest-news-fallback-title">${fallbackHeading}</h4>
+                            <p class="latest-news-fallback-body">${item.body}</p>
+                          </div>
+                          <div class="latest-news-content">
+                            <span class="news-category">${category}</span>
+                            <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
+                            ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
+                            <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
+                          </div>
+                        </a>
+                      `;
+                    })
+                    .join('')}
+                </div>
               </div>
             </article>
           </div>
@@ -596,7 +598,10 @@ export const initLatestNewsRotators = () => {
   const adminMode = new URLSearchParams(window.location.search).get('admin') === '1';
 
   tracks.forEach((track) => {
-    const baseSlides = Array.from(track.querySelectorAll('.latest-news-slide'));
+    const rail = track.querySelector('[data-news-rail]');
+    if (!rail) return;
+
+    const baseSlides = Array.from(rail.querySelectorAll('.latest-news-slide'));
     const counter = track.parentElement?.querySelector('[data-news-counter]');
     const imageRotators = baseSlides
       .map((slide) => {
@@ -640,18 +645,23 @@ export const initLatestNewsRotators = () => {
       if (lastClone instanceof HTMLElement) {
         lastClone.dataset.carouselClone = 'true';
       }
-      track.appendChild(firstClone);
-      track.insertBefore(lastClone, track.firstChild);
+      rail.appendChild(firstClone);
+      rail.insertBefore(lastClone, rail.firstChild);
       track.dataset.carouselLooped = 'true';
     }
 
-    const slides = Array.from(track.querySelectorAll('.latest-news-slide'));
+    const slides = Array.from(rail.querySelectorAll('.latest-news-slide'));
     const realSlideCount = baseSlides.length;
 
     let index = adminMode ? 0 : 1;
+    let autoRotateTimer = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let hasTouchStart = false;
+
     const applySlidePosition = (nextIndex, animate = true) => {
-      track.style.transition = animate ? 'transform 420ms ease' : 'none';
-      track.style.transform = `translateX(-${nextIndex * 100}%)`;
+      rail.style.transition = animate ? 'transform 420ms ease' : 'none';
+      rail.style.transform = `translateX(-${nextIndex * 100}%)`;
       slides.forEach((slide, slideIndex) => {
         slide.classList.toggle('is-active', slideIndex === nextIndex);
       });
@@ -663,24 +673,76 @@ export const initLatestNewsRotators = () => {
       }
     };
 
+    const normalizeLoopEdgeIfNeeded = () => {
+      if (adminMode) return;
+      if (index === slides.length - 1) {
+        index = 1;
+        applySlidePosition(index, false);
+        return;
+      }
+      if (index === 0) {
+        index = slides.length - 2;
+        applySlidePosition(index, false);
+      }
+    };
+
+    const goToNext = () => {
+      if (track.dataset.adminPaused === 'true') return;
+      index = (index + 1) % slides.length;
+      applySlidePosition(index, true);
+    };
+
+    const goToPrevious = () => {
+      if (track.dataset.adminPaused === 'true') return;
+      index = (index - 1 + slides.length) % slides.length;
+      applySlidePosition(index, true);
+    };
+
+    const restartAutoRotate = () => {
+      if (autoRotateTimer !== null) {
+        window.clearInterval(autoRotateTimer);
+      }
+      autoRotateTimer = window.setInterval(goToNext, 5000);
+    };
+
     applySlidePosition(index, false);
 
     if (!adminMode) {
-      track.addEventListener('transitionend', () => {
-        if (index === slides.length - 1) {
-          index = 1;
-          applySlidePosition(index, false);
-        }
+      rail.addEventListener('transitionend', () => {
+        normalizeLoopEdgeIfNeeded();
       });
+
+      track.addEventListener('touchstart', (event) => {
+        if (!event.touches || event.touches.length !== 1) return;
+        touchStartX = event.touches[0].clientX;
+        touchStartY = event.touches[0].clientY;
+        hasTouchStart = true;
+      }, { passive: true });
+
+      track.addEventListener('touchend', (event) => {
+        if (!hasTouchStart || !event.changedTouches || event.changedTouches.length !== 1) return;
+        hasTouchStart = false;
+
+        const endX = event.changedTouches[0].clientX;
+        const endY = event.changedTouches[0].clientY;
+        const diffX = endX - touchStartX;
+        const diffY = endY - touchStartY;
+        const absX = Math.abs(diffX);
+        const absY = Math.abs(diffY);
+
+        if (absX < 36 || absX <= absY) return;
+
+        track.dataset.swipeLockUntil = String(Date.now() + 450);
+        if (diffX < 0) {
+          goToNext();
+        } else {
+          goToPrevious();
+        }
+        restartAutoRotate();
+      }, { passive: true });
     }
 
-    window.setInterval(() => {
-      if (track.dataset.adminPaused === 'true') {
-        return;
-      }
-      index = (index + 1) % slides.length;
-      applySlidePosition(index, true);
-    }, 5000);
+    restartAutoRotate();
   });
 };
 
@@ -822,6 +884,12 @@ export const initLatestNewsReaders = () => {
   const slides = Array.from(document.querySelectorAll('.latest-news-slide:not([data-carousel-clone="true"])'));
   slides.forEach((slide) => {
     slide.addEventListener('click', (event) => {
+      const track = slide.closest('[data-news-track]');
+      const swipeLockUntil = Number(track?.dataset.swipeLockUntil || '0');
+      if (swipeLockUntil > Date.now()) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       openLatestNewsReadOverlay(slide);
     });

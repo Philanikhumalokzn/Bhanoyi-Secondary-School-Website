@@ -552,9 +552,13 @@ h1 {
 
 .latest-news-track {
   position: relative;
-  display: flex;
   overflow: hidden;
   min-height: 270px;
+}
+
+.latest-news-rail {
+  display: flex;
+  width: 100%;
   transition: transform 420ms ease;
   will-change: transform;
 }
