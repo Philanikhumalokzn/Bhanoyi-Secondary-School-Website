@@ -180,7 +180,7 @@ const createTextEditor = (label: string, value: string) => {
   return { wrapper, input };
 };
 
-const createFileEditor = (label = 'Upload news image') => {
+const createFileEditor = (label = 'Upload image') => {
   const wrapper = document.createElement('label');
   wrapper.className = 'inline-file-editor';
 
@@ -316,7 +316,7 @@ const createSectionAssetsEditor = (section: Element) => {
     const uploadWrap = document.createElement('label');
     uploadWrap.className = 'inline-file-editor';
     uploadWrap.innerHTML = `
-      <span>Upload section files (images, PDF, DOCX, etc.)</span>
+      <span>Upload files</span>
     `;
 
     fileInput = document.createElement('input');
@@ -912,16 +912,28 @@ const formatCardImageUrls = (urls: string[]): string => {
   return normalized.length === 1 ? normalized[0] : JSON.stringify(normalized);
 };
 
-const openLatestNewsComposer = () => {
+type LatestNewsComposerOptions = {
+  mode?: 'create' | 'edit';
+  record?: CardRecord;
+};
+
+const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const existingOverlay = document.querySelector('.news-overlay');
   if (existingOverlay) return;
 
+  const isEditMode = options.mode === 'edit' && Boolean(options.record);
+  const editRecord = options.record;
+  const composerTitle = isEditMode ? 'Edit post' : 'Create post';
+  const composerActionLabel = isEditMode ? 'Save post' : 'Create post';
   const categories = getLatestNewsCategories();
+  if (editRecord?.category && !categories.includes(editRecord.category)) {
+    categories.push(editRecord.category);
+  }
   const overlay = document.createElement('div');
   overlay.className = 'news-overlay';
   overlay.innerHTML = `
-    <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Post new article">
-      <h3>Post new article</h3>
+    <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="${composerTitle}">
+      <h3>${composerTitle}</h3>
       <form class="news-overlay-form" id="news-overlay-form">
         <label>
           Title
@@ -956,7 +968,7 @@ const openLatestNewsComposer = () => {
         </label>
         <div class="news-overlay-actions">
           <button type="button" id="news-overlay-cancel">Cancel</button>
-          <button type="submit" id="news-overlay-save">Post article</button>
+          <button type="submit" id="news-overlay-save">${composerActionLabel}</button>
         </div>
       </form>
     </div>
@@ -967,8 +979,31 @@ const openLatestNewsComposer = () => {
   const form = overlay.querySelector('#news-overlay-form') as HTMLFormElement | null;
   const categorySelect = overlay.querySelector('#news-category-select') as HTMLSelectElement | null;
   const newCategoryWrap = overlay.querySelector('#news-new-category-wrap') as HTMLElement | null;
+  const titleInput = overlay.querySelector('input[name="title"]') as HTMLInputElement | null;
+  const subtitleInput = overlay.querySelector('input[name="subtitle"]') as HTMLInputElement | null;
+  const bodyInput = overlay.querySelector('textarea[name="body"]') as HTMLTextAreaElement | null;
+  const hrefInput = overlay.querySelector('input[name="href"]') as HTMLInputElement | null;
+  const newCategoryInput = overlay.querySelector('input[name="newCategory"]') as HTMLInputElement | null;
   const cancelBtn = overlay.querySelector('#news-overlay-cancel') as HTMLButtonElement | null;
   const saveBtn = overlay.querySelector('#news-overlay-save') as HTMLButtonElement | null;
+
+  if (isEditMode && editRecord) {
+    if (titleInput) titleInput.value = editRecord.title || '';
+    if (subtitleInput) subtitleInput.value = editRecord.subtitle || '';
+    if (bodyInput) bodyInput.value = editRecord.body || '';
+    if (hrefInput) hrefInput.value = editRecord.href || '#';
+
+    if (categorySelect) {
+      const hasCategoryOption = Array.from(categorySelect.options).some((option) => option.value === editRecord.category);
+      if (hasCategoryOption) {
+        categorySelect.value = editRecord.category || 'General';
+      } else {
+        categorySelect.value = '__new__';
+        if (newCategoryWrap) newCategoryWrap.style.display = 'grid';
+        if (newCategoryInput) newCategoryInput.value = editRecord.category || '';
+      }
+    }
+  }
 
   categorySelect?.addEventListener('change', () => {
     if (!newCategoryWrap) return;
@@ -1008,7 +1043,7 @@ const openLatestNewsComposer = () => {
 
     try {
       saveBtn.disabled = true;
-      saveBtn.textContent = 'Posting...';
+      saveBtn.textContent = isEditMode ? 'Saving...' : 'Posting...';
 
       const imageUrls: string[] = [];
       for (let index = 0; index < imageFiles.length; index += 1) {
@@ -1018,7 +1053,7 @@ const openLatestNewsComposer = () => {
         });
         if (!preparedFile) {
           saveBtn.disabled = false;
-          saveBtn.textContent = 'Post article';
+          saveBtn.textContent = composerActionLabel;
           showStatus('Image upload canceled.');
           return;
         }
@@ -1027,31 +1062,156 @@ const openLatestNewsComposer = () => {
         imageUrls.push(uploadedUrl);
       }
 
-      const currentOrders = Array.from(document.querySelectorAll('.latest-news-slide'))
-        .map((el) => Number((el as HTMLElement).dataset.sortOrder || '0'))
-        .filter((value) => !Number.isNaN(value));
-      const nextSortOrder = (currentOrders.length ? Math.max(...currentOrders) : 0) + 1;
+      let nextSortOrder = 1;
+      if (isEditMode && editRecord) {
+        nextSortOrder = editRecord.sortOrder;
+      } else {
+        const currentOrders = Array.from(document.querySelectorAll('.latest-news-slide'))
+          .map((el) => Number((el as HTMLElement).dataset.sortOrder || '0'))
+          .filter((value) => !Number.isNaN(value));
+        nextSortOrder = (currentOrders.length ? Math.max(...currentOrders) : 0) + 1;
+      }
+
+      const finalImageUrls = isEditMode && editRecord
+        ? Array.from(new Set([...(editRecord.imageUrls || []), ...imageUrls]))
+        : imageUrls;
 
       await saveCard({
+        id: isEditMode ? editRecord?.id : undefined,
         page_key: currentPageKey(),
         section_key: 'latest_news',
         category,
         subtitle,
         title,
         body,
-        image_url: formatCardImageUrls(imageUrls),
+        image_url: formatCardImageUrls(finalImageUrls),
         href,
         sort_order: nextSortOrder
       });
 
-      showStatus('Latest news article posted. Refreshing...');
+      showStatus(isEditMode ? 'Latest news article updated. Refreshing...' : 'Latest news article posted. Refreshing...');
       overlay.remove();
       window.location.reload();
     } catch (error) {
-      showStatus(error instanceof Error ? error.message : 'Failed to post article.');
+      showStatus(error instanceof Error ? error.message : isEditMode ? 'Failed to update article.' : 'Failed to post article.');
     } finally {
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Post article';
+      saveBtn.textContent = composerActionLabel;
+    }
+  });
+};
+
+const openStandardCardComposer = (record: CardRecord) => {
+  const existingOverlay = document.querySelector('.news-overlay');
+  if (existingOverlay) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'news-overlay';
+  overlay.innerHTML = `
+    <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Edit card">
+      <h3>Edit card</h3>
+      <form class="news-overlay-form" id="standard-card-overlay-form">
+        <label>
+          Title
+          <input type="text" name="title" required />
+        </label>
+        <label>
+          Body
+          <textarea name="body" rows="4" required></textarea>
+        </label>
+        ${record.clickable ? `
+          <label>
+            Link URL
+            <input type="url" name="href" value="#" />
+          </label>
+        ` : ''}
+        <label>
+          Upload image (optional)
+          <input type="file" name="imageFile" accept="image/*" />
+        </label>
+        <div class="news-overlay-actions">
+          <button type="button" id="standard-card-overlay-cancel">Cancel</button>
+          <button type="submit" id="standard-card-overlay-save">Save card</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const form = overlay.querySelector('#standard-card-overlay-form') as HTMLFormElement | null;
+  const titleInput = overlay.querySelector('input[name="title"]') as HTMLInputElement | null;
+  const bodyInput = overlay.querySelector('textarea[name="body"]') as HTMLTextAreaElement | null;
+  const hrefInput = overlay.querySelector('input[name="href"]') as HTMLInputElement | null;
+  const cancelBtn = overlay.querySelector('#standard-card-overlay-cancel') as HTMLButtonElement | null;
+  const saveBtn = overlay.querySelector('#standard-card-overlay-save') as HTMLButtonElement | null;
+
+  if (titleInput) titleInput.value = record.title || '';
+  if (bodyInput) bodyInput.value = record.body || '';
+  if (hrefInput) hrefInput.value = record.href || '#';
+
+  cancelBtn?.addEventListener('click', () => {
+    overlay.remove();
+  });
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      overlay.remove();
+    }
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!form || !saveBtn) return;
+
+    const formData = new FormData(form);
+    const title = String(formData.get('title') || '').trim();
+    const body = String(formData.get('body') || '').trim();
+    const href = String(formData.get('href') || record.href || '#').trim() || '#';
+    const imageFile = formData.get('imageFile');
+
+    if (!title || !body) {
+      showStatus('Title and body are required.');
+      return;
+    }
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      let imageUrl = record.imageUrl || '';
+      if (imageFile instanceof File && imageFile.size > 0) {
+        const preparedFile = await prepareUploadImage(imageFile, { title: 'Adjust card image' });
+        if (!preparedFile) {
+          showStatus('Image upload canceled.');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save card';
+          return;
+        }
+        imageUrl = await uploadNewsImage(preparedFile);
+      }
+
+      await saveCard({
+        id: record.id,
+        page_key: currentPageKey(),
+        section_key: record.sectionKey,
+        sort_order: record.sortOrder,
+        category: '',
+        subtitle: '',
+        title,
+        body,
+        image_url: imageUrl,
+        href: record.clickable ? href : '#'
+      });
+
+      showStatus('Card updated. Refreshing...');
+      overlay.remove();
+      window.location.reload();
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to update card.');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save card';
     }
   });
 };
@@ -1087,7 +1247,15 @@ const wireAnnouncementInline = (item: Element) => {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', enterEdit);
+    editBtn.addEventListener('click', (event) => {
+      if (isLatestNews) {
+        event.preventDefault();
+        event.stopPropagation();
+        openLatestNewsComposer({ mode: 'edit', record: toCardRecord(item) });
+        return;
+      }
+      enterEdit(event);
+    });
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -1502,6 +1670,10 @@ const wireCardInline = (item: Element) => {
     trigger?.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (isLatestNews) {
+        openLatestNewsComposer({ mode: 'edit', record: toCardRecord(item) });
+        return;
+      }
       enterEdit(event);
     });
   });
@@ -2461,7 +2633,7 @@ const wireHeaderInline = () => {
     renderEditControls();
 
     if (!imageFileInput) {
-      const { wrapper, input, button } = createFileEditor('Upload header background image');
+      const { wrapper, input, button } = createFileEditor('Upload image');
       controls.appendChild(wrapper);
       imageFileInput = input;
       imageUploadButton = button;
