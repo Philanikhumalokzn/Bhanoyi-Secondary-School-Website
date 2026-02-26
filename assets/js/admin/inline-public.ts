@@ -82,6 +82,34 @@ const showStatus = (message: string) => {
   document.body.appendChild(status);
 };
 
+let overlayScrollLockCount = 0;
+let overlayLockedScrollY = 0;
+
+const lockOverlayBackgroundScroll = () => {
+  overlayScrollLockCount += 1;
+  if (overlayScrollLockCount > 1) return;
+
+  overlayLockedScrollY = window.scrollY || window.pageYOffset || 0;
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${overlayLockedScrollY}px`;
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.width = '100%';
+};
+
+const unlockOverlayBackgroundScroll = () => {
+  overlayScrollLockCount = Math.max(0, overlayScrollLockCount - 1);
+  if (overlayScrollLockCount > 0) return;
+
+  const scrollY = overlayLockedScrollY;
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.width = '';
+  window.scrollTo(0, scrollY);
+};
+
 const currentPageKey = (): string => document.body.dataset.page || 'home';
 
 const getSectionIndex = (section: Element): number => {
@@ -3261,7 +3289,7 @@ const wirePageSectionReorder = () => {
     overlay.innerHTML = `
       <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Reorder sections">
         <h3>Reorder sections</h3>
-        <p>Drag rows up or down to change page section order.</p>
+        <p>Drag rows, or use Move up/down to change page section order.</p>
         <div class="section-reorder-list" id="section-reorder-list"></div>
         <div class="news-overlay-actions">
           <button type="button" id="section-order-cancel">Cancel</button>
@@ -3270,6 +3298,7 @@ const wirePageSectionReorder = () => {
       </div>
     `;
 
+    lockOverlayBackgroundScroll();
     document.body.appendChild(overlay);
 
     const list = overlay.querySelector('#section-reorder-list') as HTMLElement | null;
@@ -3287,6 +3316,10 @@ const wirePageSectionReorder = () => {
           <div class="section-reorder-item" data-drag-row="true" data-drag-key="section-${sectionIndex}" data-section-index="${sectionIndex}" draggable="true">
             <span class="section-reorder-grip" aria-hidden="true">⋮⋮</span>
             <span>${buildLabel(section, index)}</span>
+            <div class="section-reorder-item-actions">
+              <button type="button" data-move-row="up">Move up</button>
+              <button type="button" data-move-row="down">Move down</button>
+            </div>
           </div>
         `;
       })
@@ -3294,7 +3327,31 @@ const wirePageSectionReorder = () => {
 
     enableDragSort(list);
 
-    const close = () => overlay.remove();
+    list.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest('button[data-move-row]') as HTMLButtonElement | null;
+      if (!button) return;
+      event.preventDefault();
+
+      const row = button.closest('[data-drag-row]') as HTMLElement | null;
+      if (!row) return;
+
+      const direction = button.dataset.moveRow;
+      if (direction === 'up') {
+        const prev = row.previousElementSibling;
+        if (prev) list.insertBefore(row, prev);
+        return;
+      }
+
+      if (direction === 'down') {
+        const next = row.nextElementSibling;
+        if (next) list.insertBefore(next, row);
+      }
+    });
+
+    const close = () => {
+      overlay.remove();
+      unlockOverlayBackgroundScroll();
+    };
     cancel?.addEventListener('click', close);
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close();
@@ -3402,7 +3459,7 @@ const wireLatestNewsCardsReorder = () => {
     overlay.innerHTML = `
       <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Reorder latest news cards">
         <h3>Reorder Latest News cards</h3>
-        <p>Drag rows up or down to change news order.</p>
+        <p>Drag rows, or use Move up/down to change news order.</p>
         <div class="section-reorder-list" id="news-cards-reorder-list"></div>
         <div class="news-overlay-actions">
           <button type="button" id="news-cards-order-cancel">Cancel</button>
@@ -3411,6 +3468,7 @@ const wireLatestNewsCardsReorder = () => {
       </div>
     `;
 
+    lockOverlayBackgroundScroll();
     document.body.appendChild(overlay);
 
     const list = overlay.querySelector('#news-cards-reorder-list') as HTMLElement | null;
@@ -3435,6 +3493,10 @@ const wireLatestNewsCardsReorder = () => {
             <span class="section-reorder-grip" aria-hidden="true">⋮⋮</span>
             <span>${title}</span>
             <span class="news-category">${category}</span>
+            <div class="section-reorder-item-actions">
+              <button type="button" data-move-row="up">Move up</button>
+              <button type="button" data-move-row="down">Move down</button>
+            </div>
           </div>
         `;
       })
@@ -3442,7 +3504,31 @@ const wireLatestNewsCardsReorder = () => {
 
     enableDragSort(list);
 
-    const close = () => overlay.remove();
+    list.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest('button[data-move-row]') as HTMLButtonElement | null;
+      if (!button) return;
+      event.preventDefault();
+
+      const row = button.closest('[data-drag-row]') as HTMLElement | null;
+      if (!row) return;
+
+      const direction = button.dataset.moveRow;
+      if (direction === 'up') {
+        const prev = row.previousElementSibling;
+        if (prev) list.insertBefore(row, prev);
+        return;
+      }
+
+      if (direction === 'down') {
+        const next = row.nextElementSibling;
+        if (next) list.insertBefore(next, row);
+      }
+    });
+
+    const close = () => {
+      overlay.remove();
+      unlockOverlayBackgroundScroll();
+    };
     cancel?.addEventListener('click', close);
     overlay.addEventListener('click', (event) => {
       if (event.target === overlay) close();

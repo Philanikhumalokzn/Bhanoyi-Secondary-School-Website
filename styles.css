@@ -936,6 +936,7 @@ h1 {
   display: grid;
   place-items: center;
   padding: 18px;
+  overscroll-behavior: contain;
 }
 
 .news-overlay-panel {
@@ -947,6 +948,7 @@ h1 {
   border: 1px solid var(--border);
   padding: 18px;
   box-shadow: 0 18px 50px rgba(13, 34, 56, 0.22);
+  overscroll-behavior: contain;
 }
 
 .news-overlay-panel h3 {
@@ -1171,6 +1173,24 @@ h1 {
 .section-reorder-item .news-category {
   margin-left: auto;
   margin-bottom: 0;
+}
+
+.section-reorder-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.section-reorder-item-actions button {
+  min-height: 30px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 8px;
 }
 
 .news-read-overlay {
@@ -1591,6 +1611,15 @@ h1 {
   .section-order-floating-controls {
     right: 10px;
     bottom: 58px;
+  }
+
+  .section-reorder-item {
+    align-items: flex-start;
+  }
+
+  .section-reorder-item-actions {
+    width: 100%;
+    margin-left: 0;
   }
 
   .news-read-overlay {
