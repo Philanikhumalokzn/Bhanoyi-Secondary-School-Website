@@ -341,6 +341,25 @@ const resolveContactInformationSection = (section, context = {}) => {
   };
 };
 
+const getOrderedSectionEntries = (sections, context = {}) => {
+  const entries = sections.map((section, index) => ({ section, index }));
+  const order = Array.isArray(context.sectionOrder)
+    ? context.sectionOrder
+    : Array.isArray(context.page?.sectionOrder)
+      ? context.page.sectionOrder
+      : [];
+
+  if (!order.length) return entries;
+
+  const rank = new Map(order.map((value, position) => [Number(value), position]));
+  return entries.sort((left, right) => {
+    const leftRank = rank.has(left.index) ? rank.get(left.index) : Number.MAX_SAFE_INTEGER;
+    const rightRank = rank.has(right.index) ? rank.get(right.index) : Number.MAX_SAFE_INTEGER;
+    if (leftRank === rightRank) return left.index - right.index;
+    return leftRank - rightRank;
+  });
+};
+
 const renderSectionByType = (section, sectionIndex, context = {}) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const effectiveSection = resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context);
@@ -468,9 +487,12 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   return '';
 };
 
-export const renderSections = (sections) => sections.map((section, index) => renderSectionByType(section, index)).join('');
+export const renderSections = (sections) =>
+  getOrderedSectionEntries(sections).map((entry) => renderSectionByType(entry.section, entry.index)).join('');
 export const renderSectionsWithContext = (sections, context) =>
-  sections.map((section, index) => renderSectionByType(section, index, context)).join('');
+  getOrderedSectionEntries(sections, context)
+    .map((entry) => renderSectionByType(entry.section, entry.index, context))
+    .join('');
 
 export const renderPageEmailForms = (pageKey) => {
   if (pageKey === 'contact') {

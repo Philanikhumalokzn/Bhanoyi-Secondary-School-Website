@@ -239,6 +239,34 @@ const applySectionOverrides = (siteContent: SiteContent, rows: SiteSettingRow[])
   });
 };
 
+const applySectionOrders = (siteContent: SiteContent, rows: SiteSettingRow[]) => {
+  if (rows.length === 0) return;
+
+  rows.forEach((row) => {
+    const match = /^section_order:([^:]+)$/.exec(row.setting_key);
+    if (!match) return;
+
+    const [, pageKey] = match;
+    const page = siteContent.pages[pageKey];
+    if (!page || !Array.isArray(page.sections)) return;
+
+    try {
+      const parsed = JSON.parse(row.setting_value);
+      if (!Array.isArray(parsed)) return;
+
+      const maxIndex = Math.max(0, page.sections.length - 1);
+      const normalized = parsed
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value >= 0 && value <= maxIndex);
+
+      if (!normalized.length) return;
+      page.sectionOrder = Array.from(new Set(normalized));
+    } catch {
+      return;
+    }
+  });
+};
+
 const applyHeroNotices = (siteContent: SiteContent, rows: HeroNoticeRow[]) => {
   if (rows.length === 0) return;
 
@@ -304,6 +332,7 @@ export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T
     applyHeroNotices(siteContent, notices);
     applySiteSettings(siteContent, settings);
     applySectionOverrides(siteContent, settings);
+    applySectionOrders(siteContent, settings);
     return siteContent;
   } catch {
     return siteContent;

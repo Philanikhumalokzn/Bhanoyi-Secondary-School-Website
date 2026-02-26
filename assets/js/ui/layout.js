@@ -70,7 +70,7 @@ export const renderSite = (siteContent, page) => {
     ${renderHeader(siteContent, page.key)}
     <main id="main-content" class="${themeBackgroundImage ? 'has-theme-bg' : ''}" data-theme-bg-url="${themeBackgroundAttr}">
       ${renderHero(page.hero, page.key)}
-      ${renderSectionsWithContext(page.sections, { pageKey: page.key, siteContent })}
+      ${renderSectionsWithContext(page.sections, { pageKey: page.key, siteContent, page })}
       ${renderPageEmailForms(page.key)}
     </main>
     ${renderFooter(siteContent)}

@@ -3184,6 +3184,310 @@ const wireSectionAssetsInline = (section: Element) => {
   container.appendChild(controls);
 };
 
+const wirePageSectionReorder = () => {
+  const existingControl = document.querySelector('.section-order-floating-controls');
+  if (existingControl) return;
+
+  const sections = Array.from(document.querySelectorAll('[data-editable-section="true"]')) as HTMLElement[];
+  if (sections.length < 2) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls section-order-floating-controls';
+  const reorderBtn = document.createElement('button');
+  reorderBtn.type = 'button';
+  reorderBtn.textContent = 'Reorder Sections';
+  controls.appendChild(reorderBtn);
+  document.body.appendChild(controls);
+
+  const buildLabel = (section: HTMLElement, fallbackIndex: number) => {
+    const heading = (section.querySelector('h2')?.textContent || '').trim();
+    if (heading) return heading;
+    const sectionKey = (section.dataset.sectionKey || '').trim();
+    if (sectionKey) return sectionKey.replace(/_/g, ' ');
+    return `Section ${fallbackIndex + 1}`;
+  };
+
+  const enableDragSort = (list: HTMLElement) => {
+    let dragging: HTMLElement | null = null;
+
+    list.addEventListener('dragstart', (event) => {
+      const target = (event.target as HTMLElement).closest('[data-drag-row]') as HTMLElement | null;
+      if (!target) return;
+      dragging = target;
+      target.classList.add('is-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', target.dataset.dragKey || 'row');
+      }
+    });
+
+    list.addEventListener('dragover', (event) => {
+      if (!dragging) return;
+      event.preventDefault();
+      const target = (event.target as HTMLElement).closest('[data-drag-row]') as HTMLElement | null;
+      if (!target || target === dragging) return;
+
+      const rect = target.getBoundingClientRect();
+      const before = event.clientY < rect.top + rect.height / 2;
+      list.insertBefore(dragging, before ? target : target.nextSibling);
+    });
+
+    const clearDragState = () => {
+      if (!dragging) return;
+      dragging.classList.remove('is-dragging');
+      dragging = null;
+    };
+
+    list.addEventListener('drop', (event) => {
+      event.preventDefault();
+      clearDragState();
+    });
+
+    list.addEventListener('dragend', clearDragState);
+  };
+
+  const openSectionOrderOverlay = () => {
+    if (document.getElementById('section-order-overlay')) return;
+
+    const snapshotSections = Array.from(document.querySelectorAll('[data-editable-section="true"]')) as HTMLElement[];
+    if (snapshotSections.length < 2) {
+      showStatus('Need at least two sections to reorder.');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'news-overlay';
+    overlay.id = 'section-order-overlay';
+    overlay.innerHTML = `
+      <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Reorder sections">
+        <h3>Reorder sections</h3>
+        <p>Drag rows up or down to change page section order.</p>
+        <div class="section-reorder-list" id="section-reorder-list"></div>
+        <div class="news-overlay-actions">
+          <button type="button" id="section-order-cancel">Cancel</button>
+          <button type="button" id="section-order-save">Save order</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const list = overlay.querySelector('#section-reorder-list') as HTMLElement | null;
+    const cancel = overlay.querySelector('#section-order-cancel') as HTMLButtonElement | null;
+    const save = overlay.querySelector('#section-order-save') as HTMLButtonElement | null;
+    if (!list || !save) {
+      overlay.remove();
+      return;
+    }
+
+    list.innerHTML = snapshotSections
+      .map((section, index) => {
+        const sectionIndex = Number(section.dataset.sectionIndex || '-1');
+        return `
+          <div class="section-reorder-item" data-drag-row="true" data-drag-key="section-${sectionIndex}" data-section-index="${sectionIndex}" draggable="true">
+            <span class="section-reorder-grip" aria-hidden="true">⋮⋮</span>
+            <span>${buildLabel(section, index)}</span>
+          </div>
+        `;
+      })
+      .join('');
+
+    enableDragSort(list);
+
+    const close = () => overlay.remove();
+    cancel?.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close();
+    });
+
+    save.addEventListener('click', async () => {
+      const orderedIndexes = Array.from(list.querySelectorAll<HTMLElement>('[data-section-index]'))
+        .map((row) => Number(row.dataset.sectionIndex || '-1'))
+        .filter((value) => Number.isInteger(value) && value >= 0);
+
+      if (!orderedIndexes.length) {
+        showStatus('Could not read section order.');
+        return;
+      }
+
+      try {
+        save.disabled = true;
+        save.textContent = 'Saving...';
+        await saveSiteSettings({
+          [`section_order:${currentPageKey()}`]: JSON.stringify(orderedIndexes)
+        });
+        showStatus('Section order saved. Refreshing...');
+        close();
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save section order.');
+      } finally {
+        save.disabled = false;
+        save.textContent = 'Save order';
+      }
+    });
+  };
+
+  reorderBtn.addEventListener('click', openSectionOrderOverlay);
+};
+
+const wireLatestNewsCardsReorder = () => {
+  const latestNewsSection = document.querySelector(
+    '[data-editable-section="true"][data-section-key="latest_news"]'
+  ) as HTMLElement | null;
+  if (!latestNewsSection) return;
+
+  const header = latestNewsSection.querySelector('.latest-news-header');
+  if (!header) return;
+  if (header.querySelector('[data-reorder-news-cards]')) return;
+
+  const reorderBtn = document.createElement('button');
+  reorderBtn.type = 'button';
+  reorderBtn.className = 'latest-news-post-btn';
+  reorderBtn.dataset.reorderNewsCards = 'true';
+  reorderBtn.textContent = 'Reorder cards';
+  header.appendChild(reorderBtn);
+
+  const enableDragSort = (list: HTMLElement) => {
+    let dragging: HTMLElement | null = null;
+
+    list.addEventListener('dragstart', (event) => {
+      const target = (event.target as HTMLElement).closest('[data-drag-row]') as HTMLElement | null;
+      if (!target) return;
+      dragging = target;
+      target.classList.add('is-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', target.dataset.dragKey || 'card');
+      }
+    });
+
+    list.addEventListener('dragover', (event) => {
+      if (!dragging) return;
+      event.preventDefault();
+      const target = (event.target as HTMLElement).closest('[data-drag-row]') as HTMLElement | null;
+      if (!target || target === dragging) return;
+
+      const rect = target.getBoundingClientRect();
+      const before = event.clientY < rect.top + rect.height / 2;
+      list.insertBefore(dragging, before ? target : target.nextSibling);
+    });
+
+    const clearDragState = () => {
+      if (!dragging) return;
+      dragging.classList.remove('is-dragging');
+      dragging = null;
+    };
+
+    list.addEventListener('drop', (event) => {
+      event.preventDefault();
+      clearDragState();
+    });
+
+    list.addEventListener('dragend', clearDragState);
+  };
+
+  const openNewsCardOrderOverlay = () => {
+    if (document.getElementById('news-cards-order-overlay')) return;
+
+    const slides = Array.from(latestNewsSection.querySelectorAll('.latest-news-slide')) as HTMLElement[];
+    if (slides.length < 2) {
+      showStatus('Need at least two news cards to reorder.');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'news-overlay';
+    overlay.id = 'news-cards-order-overlay';
+    overlay.innerHTML = `
+      <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Reorder latest news cards">
+        <h3>Reorder Latest News cards</h3>
+        <p>Drag rows up or down to change news order.</p>
+        <div class="section-reorder-list" id="news-cards-reorder-list"></div>
+        <div class="news-overlay-actions">
+          <button type="button" id="news-cards-order-cancel">Cancel</button>
+          <button type="button" id="news-cards-order-save">Save order</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const list = overlay.querySelector('#news-cards-reorder-list') as HTMLElement | null;
+    const cancel = overlay.querySelector('#news-cards-order-cancel') as HTMLButtonElement | null;
+    const save = overlay.querySelector('#news-cards-order-save') as HTMLButtonElement | null;
+    if (!list || !save) {
+      overlay.remove();
+      return;
+    }
+
+    list.innerHTML = slides
+      .map((slide, index) => {
+        const cardId = (slide.dataset.cardId || '').trim();
+        const category = (slide.querySelector('.news-category')?.textContent || 'General').trim();
+        const title = (
+          slide.querySelector('.latest-news-title')?.textContent ||
+          slide.querySelector('.latest-news-fallback-title')?.textContent ||
+          `News card ${index + 1}`
+        ).trim();
+        return `
+          <div class="section-reorder-item" data-drag-row="true" data-drag-key="news-${index}" data-card-id="${cardId}" draggable="true">
+            <span class="section-reorder-grip" aria-hidden="true">⋮⋮</span>
+            <span>${title}</span>
+            <span class="news-category">${category}</span>
+          </div>
+        `;
+      })
+      .join('');
+
+    enableDragSort(list);
+
+    const close = () => overlay.remove();
+    cancel?.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close();
+    });
+
+    save.addEventListener('click', async () => {
+      const orderedRows = Array.from(list.querySelectorAll<HTMLElement>('[data-drag-row]'));
+      if (!orderedRows.length) {
+        showStatus('Could not read card order.');
+        return;
+      }
+
+      const updates = orderedRows
+        .map((row, index) => ({ id: (row.dataset.cardId || '').trim(), sort_order: index + 1 }))
+        .filter((entry) => Boolean(entry.id));
+
+      const skipped = orderedRows.length - updates.length;
+      if (!updates.length) {
+        showStatus('No persisted cards found to reorder yet. Edit cards once to create saved records.');
+        return;
+      }
+
+      try {
+        save.disabled = true;
+        save.textContent = 'Saving...';
+        await Promise.all(updates.map((entry) => saveCard(entry)));
+        showStatus(
+          skipped > 0
+            ? `News order saved (${skipped} default card${skipped === 1 ? '' : 's'} skipped). Refreshing...`
+            : 'News order saved. Refreshing...'
+        );
+        close();
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save news order.');
+      } finally {
+        save.disabled = false;
+        save.textContent = 'Save order';
+      }
+    });
+  };
+
+  reorderBtn.addEventListener('click', openNewsCardOrderOverlay);
+};
+
 const bindInlineActions = () => {
   const heroNotice = document.querySelector('.hero-notice');
   if (heroNotice) {
@@ -3216,6 +3520,8 @@ const bindInlineActions = () => {
 
   const editableSections = Array.from(document.querySelectorAll('[data-editable-section="true"]'));
   editableSections.forEach(wireSectionAssetsInline);
+  wirePageSectionReorder();
+  wireLatestNewsCardsReorder();
 
   wireHeaderInline();
   wireHomeThemeBackgroundUpload();
