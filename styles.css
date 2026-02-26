@@ -53,6 +53,11 @@ body {
   line-height: 1.5;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 .container {
   width: min(1100px, 92%);
   margin: 0 auto;
@@ -1662,6 +1667,43 @@ h1 {
 
   .news-read-nav-state {
     font-size: 0.82rem;
+  }
+}
+
+@media (max-width: 859px) {
+  .header-inner {
+    min-height: auto;
+    padding: 10px 0 8px;
+    justify-content: center;
+  }
+
+  .brand {
+    width: 100%;
+    justify-content: center;
+    gap: 10px;
+    font-size: clamp(1.25rem, 6vw, 2rem);
+    text-align: center;
+  }
+
+  .brand-name {
+    white-space: normal;
+    line-height: 1.1;
+  }
+
+  .brand-logo {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 0;
+  }
+
+  .primary-nav {
+    position: static;
+    border-top: 1px solid var(--border);
+  }
+
+  .primary-nav ul {
+    justify-content: flex-start;
+    padding: 6px 3.5%;
   }
 }
 
