@@ -796,7 +796,10 @@ const openLatestNewsReadOverlay = (slide) => {
   overlay.className = 'news-read-overlay';
   overlay.innerHTML = `
     <article class="news-read-panel" role="dialog" aria-modal="true" aria-label="Latest news article">
-      <button type="button" class="news-read-close" aria-label="Close article">×</button>
+      <div class="news-read-topbar">
+        <p class="news-read-mode-label">Reading mode</p>
+        <button type="button" class="news-read-close" aria-label="Close article">×</button>
+      </div>
       <div class="news-read-dynamic"></div>
       <div class="news-read-nav ${laneSlides.length > 1 ? '' : 'is-hidden'}">
         <button type="button" class="news-read-nav-btn" data-news-prev>Previous</button>
@@ -850,6 +853,7 @@ const openLatestNewsReadOverlay = (slide) => {
 
   const close = () => {
     document.removeEventListener('keydown', onKeyDown);
+    document.body.classList.remove('news-read-open');
     overlay.remove();
   };
 
@@ -877,6 +881,7 @@ const openLatestNewsReadOverlay = (slide) => {
   overlay.querySelector('[data-news-prev]')?.addEventListener('click', previousArticle);
   overlay.querySelector('.news-read-close')?.addEventListener('click', close);
   document.addEventListener('keydown', onKeyDown);
+  document.body.classList.add('news-read-open');
   document.body.appendChild(overlay);
   renderArticle();
 };
