@@ -1254,7 +1254,9 @@ const wireAnnouncementInline = (item: Element) => {
         openLatestNewsComposer({ mode: 'edit', record: toCardRecord(item) });
         return;
       }
-      enterEdit(event);
+      event.preventDefault();
+      event.stopPropagation();
+      openStandardCardComposer(toCardRecord(item));
     });
 
     const deleteBtn = document.createElement('button');
@@ -1674,7 +1676,7 @@ const wireCardInline = (item: Element) => {
         openLatestNewsComposer({ mode: 'edit', record: toCardRecord(item) });
         return;
       }
-      enterEdit(event);
+      openStandardCardComposer(toCardRecord(item));
     });
   });
 };
