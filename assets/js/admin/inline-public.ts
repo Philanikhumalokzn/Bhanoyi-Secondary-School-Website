@@ -1216,6 +1216,194 @@ const openStandardCardComposer = (record: CardRecord) => {
   });
 };
 
+const openAnnouncementComposer = (record: AnnouncementRecord) => {
+  const existingOverlay = document.querySelector('.news-overlay');
+  if (existingOverlay) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'news-overlay';
+  overlay.innerHTML = `
+    <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Edit announcement">
+      <h3>Edit announcement</h3>
+      <form class="news-overlay-form" id="announcement-overlay-form">
+        <label>
+          Date
+          <input type="text" name="date" required />
+        </label>
+        <label>
+          Tag
+          <input type="text" name="tag" />
+        </label>
+        <label>
+          Title
+          <input type="text" name="title" required />
+        </label>
+        <label>
+          Body
+          <textarea name="body" rows="4" required></textarea>
+        </label>
+        <div class="news-overlay-actions">
+          <button type="button" id="announcement-overlay-cancel">Cancel</button>
+          <button type="submit" id="announcement-overlay-save">Save announcement</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const form = overlay.querySelector('#announcement-overlay-form') as HTMLFormElement | null;
+  const dateInput = overlay.querySelector('input[name="date"]') as HTMLInputElement | null;
+  const tagInput = overlay.querySelector('input[name="tag"]') as HTMLInputElement | null;
+  const titleInput = overlay.querySelector('input[name="title"]') as HTMLInputElement | null;
+  const bodyInput = overlay.querySelector('textarea[name="body"]') as HTMLTextAreaElement | null;
+  const cancelBtn = overlay.querySelector('#announcement-overlay-cancel') as HTMLButtonElement | null;
+  const saveBtn = overlay.querySelector('#announcement-overlay-save') as HTMLButtonElement | null;
+
+  if (dateInput) dateInput.value = record.date || '';
+  if (tagInput) tagInput.value = record.tag || '';
+  if (titleInput) titleInput.value = record.title || '';
+  if (bodyInput) bodyInput.value = record.body || '';
+
+  cancelBtn?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!form || !saveBtn) return;
+
+    const formData = new FormData(form);
+    const date = String(formData.get('date') || '').trim();
+    const tag = String(formData.get('tag') || '').trim();
+    const title = String(formData.get('title') || '').trim();
+    const body = String(formData.get('body') || '').trim();
+
+    if (!date || !title || !body) {
+      showStatus('Date, title, and body are required.');
+      return;
+    }
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      await saveAnnouncement({
+        id: record.id,
+        date,
+        tag,
+        title,
+        body
+      });
+
+      showStatus('Announcement updated. Refreshing...');
+      overlay.remove();
+      window.location.reload();
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to update announcement.');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save announcement';
+    }
+  });
+};
+
+const openDownloadComposer = (record: DownloadRecord) => {
+  const existingOverlay = document.querySelector('.news-overlay');
+  if (existingOverlay) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'news-overlay';
+  overlay.innerHTML = `
+    <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Edit download">
+      <h3>Edit download</h3>
+      <form class="news-overlay-form" id="download-overlay-form">
+        <label>
+          Title
+          <input type="text" name="title" required />
+        </label>
+        <label>
+          Body
+          <textarea name="body" rows="4" required></textarea>
+        </label>
+        <label>
+          Download URL
+          <input type="url" name="href" required />
+        </label>
+        <label>
+          Link label
+          <input type="text" name="linkLabel" required />
+        </label>
+        <div class="news-overlay-actions">
+          <button type="button" id="download-overlay-cancel">Cancel</button>
+          <button type="submit" id="download-overlay-save">Save download</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const form = overlay.querySelector('#download-overlay-form') as HTMLFormElement | null;
+  const titleInput = overlay.querySelector('input[name="title"]') as HTMLInputElement | null;
+  const bodyInput = overlay.querySelector('textarea[name="body"]') as HTMLTextAreaElement | null;
+  const hrefInput = overlay.querySelector('input[name="href"]') as HTMLInputElement | null;
+  const linkLabelInput = overlay.querySelector('input[name="linkLabel"]') as HTMLInputElement | null;
+  const cancelBtn = overlay.querySelector('#download-overlay-cancel') as HTMLButtonElement | null;
+  const saveBtn = overlay.querySelector('#download-overlay-save') as HTMLButtonElement | null;
+
+  if (titleInput) titleInput.value = record.title || '';
+  if (bodyInput) bodyInput.value = record.body || '';
+  if (hrefInput) hrefInput.value = record.href || '';
+  if (linkLabelInput) linkLabelInput.value = record.linkLabel || 'Download File';
+
+  cancelBtn?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!form || !saveBtn) return;
+
+    const formData = new FormData(form);
+    const title = String(formData.get('title') || '').trim();
+    const body = String(formData.get('body') || '').trim();
+    const href = String(formData.get('href') || '').trim();
+    const linkLabel = String(formData.get('linkLabel') || 'Download File').trim() || 'Download File';
+
+    if (!title || !body || !href) {
+      showStatus('Title, body, and download URL are required.');
+      return;
+    }
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      await saveDownload({
+        id: record.id,
+        section: record.section,
+        sort_order: record.sortOrder,
+        title,
+        body,
+        href,
+        link_label: linkLabel
+      });
+
+      showStatus('Download saved. Refreshing...');
+      overlay.remove();
+      window.location.reload();
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to save download.');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save download';
+    }
+  });
+};
+
 const wireAnnouncementInline = (item: Element) => {
   const record = toRecord(item);
   if (!record) return;
@@ -1248,15 +1436,9 @@ const wireAnnouncementInline = (item: Element) => {
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', (event) => {
-      if (isLatestNews) {
-        event.preventDefault();
-        event.stopPropagation();
-        openLatestNewsComposer({ mode: 'edit', record: toCardRecord(item) });
-        return;
-      }
       event.preventDefault();
       event.stopPropagation();
-      openStandardCardComposer(toCardRecord(item));
+      openAnnouncementComposer(record);
     });
 
     const deleteBtn = document.createElement('button');
@@ -1342,9 +1524,10 @@ const wireAnnouncementInline = (item: Element) => {
 
   renderReadControls();
 
-  bodyEl?.addEventListener('click', () => {
-    if (controls.querySelector('button')?.textContent === 'Save') return;
-    enterEdit();
+  bodyEl?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openAnnouncementComposer(record);
   });
 };
 
@@ -1473,7 +1656,15 @@ const wireCardInline = (item: Element) => {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', enterEdit);
+    editBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (isLatestNews) {
+        openLatestNewsComposer({ mode: 'edit', record: toCardRecord(item) });
+        return;
+      }
+      openStandardCardComposer(toCardRecord(item));
+    });
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -1711,7 +1902,11 @@ const wireDownloadInline = (item: Element) => {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', enterEdit);
+    editBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openDownloadComposer(record);
+    });
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
@@ -1722,7 +1917,11 @@ const wireDownloadInline = (item: Element) => {
         return;
       }
 
-      const ok = confirm('Delete this download?');
+        bodyEl?.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openDownloadComposer(record);
+        });
       if (!ok) return;
 
       try {
@@ -1796,7 +1995,11 @@ const wireDownloadInline = (item: Element) => {
   };
 
   renderReadControls();
-  bodyEl?.addEventListener('click', enterEdit);
+  bodyEl?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openDownloadComposer(record);
+  });
 };
 
 const wireHeroNoticeInline = (notice: Element, isNew = false) => {
