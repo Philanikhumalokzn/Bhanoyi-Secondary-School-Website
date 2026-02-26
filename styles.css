@@ -647,6 +647,7 @@ h1 {
   width: 100%;
   max-width: 100%;
   overflow: hidden;
+  padding: 0;
 }
 
 .latest-news-slide .latest-news-inline-controls {
@@ -1645,7 +1646,7 @@ h1 {
   }
 
   .latest-news-lane {
-    padding: 12px;
+    padding: 0;
   }
 
   .latest-news-track {
