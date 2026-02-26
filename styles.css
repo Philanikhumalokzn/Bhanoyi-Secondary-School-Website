@@ -1024,6 +1024,15 @@ h1 {
   display: block;
 }
 
+.news-read-media {
+  display: grid;
+  gap: 8px;
+}
+
+.news-read-image-secondary {
+  max-height: 220px;
+}
+
 .news-read-content {
   padding: 18px;
 }

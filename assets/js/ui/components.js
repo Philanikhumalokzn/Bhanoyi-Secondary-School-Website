@@ -1,18 +1,58 @@
+const escapeHtmlAttribute = (value = '') =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+const parseCardImageUrls = (value) => {
+  const raw = (value || '').trim();
+  if (!raw) return [];
+
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const urls = parsed
+          .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+          .filter(Boolean);
+        if (urls.length) return urls;
+      }
+    } catch {
+      return [raw];
+    }
+  }
+
+  return [raw];
+};
+
+const serializeCardImageUrls = (urls) => {
+  const normalized = (Array.isArray(urls) ? urls : [])
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+
+  if (!normalized.length) return '';
+  return normalized.length === 1 ? normalized[0] : JSON.stringify(normalized);
+};
+
 const renderCard = (item, clickable = false, context = {}) => {
+  const imageUrls = parseCardImageUrls(item.imageUrl || '');
+  const primaryImageUrl = imageUrls[0] || '';
+  const imageData = serializeCardImageUrls(imageUrls);
   const attrs = [
     'data-editable-card="true"',
     context.sectionKey ? `data-section-key="${context.sectionKey}"` : '',
     item.id ? `data-card-id="${item.id}"` : '',
-    `data-card-image-url="${item.imageUrl || ''}"`,
+    `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
     typeof context.sortOrder === 'number' ? `data-sort-order="${context.sortOrder}"` : '',
     clickable ? 'data-card-clickable="true"' : 'data-card-clickable="false"'
   ]
     .filter(Boolean)
     .join(' ');
 
-  const hasImage = Boolean((item.imageUrl || '').trim());
+  const hasImage = Boolean(primaryImageUrl);
   const content = `
-    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? item.imageUrl : ''}" alt="${item.title}" loading="lazy" />
+    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
     <h3>${item.title}</h3>
     <p>${item.body}</p>
   `;
@@ -104,7 +144,10 @@ const renderLatestNewsSection = (section, sectionIndex) => {
               .map(([category, items]) => {
               const slides = items
                 .map((item, idx) => {
-                  const hasImage = Boolean((item.imageUrl || '').trim());
+                  const imageUrls = parseCardImageUrls(item.imageUrl || '');
+                  const primaryImageUrl = imageUrls[0] || '';
+                  const imageData = serializeCardImageUrls(imageUrls);
+                  const hasImage = Boolean(primaryImageUrl);
                   const normalizedSubtitle = (item.subtitle || '').trim();
                   const fallbackHeading = item.title;
                   const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
@@ -114,7 +157,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                     item.id ? `data-card-id="${item.id}"` : '',
                     `data-card-category="${category}"`,
                     `data-card-subtitle="${item.subtitle || ''}"`,
-                    `data-card-image-url="${item.imageUrl || ''}"`,
+                    `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
                     typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
                     'data-card-clickable="true"'
                   ]
@@ -123,7 +166,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
 
                   return `
                     <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
-                      <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? item.imageUrl : ''}" alt="${item.title}" loading="lazy" />
+                      <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
                       <div class="latest-news-image-fallback ${hasImage ? 'is-hidden' : ''}">
                         <h4 class="latest-news-fallback-title">${fallbackHeading}</h4>
                         <p class="latest-news-fallback-body">${item.body}</p>
@@ -560,7 +603,12 @@ const openLatestNewsReadOverlay = (slide) => {
       ''
     ).trim();
     const image = currentSlide.querySelector('.latest-news-image');
+    const imageData = (currentSlide.dataset.cardImageUrl || '').trim();
+    const imageUrls = parseCardImageUrls(imageData);
     const imageUrl = image && !image.classList.contains('is-hidden') ? image.getAttribute('src') || '' : '';
+    if (!imageUrls.length && imageUrl) {
+      imageUrls.push(imageUrl);
+    }
     const href = (currentSlide.getAttribute('href') || '#').trim();
 
     return {
@@ -568,7 +616,7 @@ const openLatestNewsReadOverlay = (slide) => {
       title,
       subtitle,
       body,
-      imageUrl,
+      imageUrls,
       href
     };
   };
@@ -596,7 +644,14 @@ const openLatestNewsReadOverlay = (slide) => {
     if (!dynamic) return;
 
     dynamic.innerHTML = `
-      ${article.imageUrl ? `<img class="news-read-image" src="${article.imageUrl}" alt="${article.title}" />` : ''}
+      ${article.imageUrls.length
+        ? `<div class="news-read-media">${article.imageUrls
+            .map(
+              (url, index) =>
+                `<img class="news-read-image ${index > 0 ? 'news-read-image-secondary' : ''}" src="${url}" alt="${article.title}" />`
+            )
+            .join('')}</div>`
+        : ''}
       <div class="news-read-content">
         ${article.category ? `<p class="news-read-category">${article.category}</p>` : ''}
         <h3>${article.title}</h3>

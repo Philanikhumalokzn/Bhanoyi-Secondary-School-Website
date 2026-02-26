@@ -33,6 +33,7 @@ type CardRecord = {
   title: string;
   body: string;
   imageUrl: string;
+  imageUrls: string[];
   href: string;
 };
 
@@ -825,11 +826,13 @@ const toCardRecord = (item: Element): CardRecord => {
   )?.trim() || '';
   const category = ((item as HTMLElement).dataset.cardCategory || getText(item, '.news-category') || 'General').trim();
   const subtitle = ((item as HTMLElement).dataset.cardSubtitle || getText(item, '.latest-news-subtitle') || '').trim();
-  const imageUrl = ((item as HTMLElement).dataset.cardImageUrl ||
+  const rawImageUrl = ((item as HTMLElement).dataset.cardImageUrl ||
     (item.querySelector('.latest-news-image') as HTMLImageElement | null)?.getAttribute('src') ||
     (item.querySelector('.card-image') as HTMLImageElement | null)?.getAttribute('src') ||
     '')
     .trim();
+  const imageUrls = parseCardImageUrls(rawImageUrl);
+  const imageUrl = imageUrls[0] || '';
 
   return {
     id: (item as HTMLElement).dataset.cardId || undefined,
@@ -841,6 +844,7 @@ const toCardRecord = (item: Element): CardRecord => {
     title,
     body,
     imageUrl,
+    imageUrls,
     href
   };
 };
@@ -876,6 +880,36 @@ const getLatestNewsCategories = () => {
 
   const defaults = ['Academics', 'Parents', 'Sports', 'Extra-curricular'];
   return Array.from(new Set([...defaults, ...fromLanes]));
+};
+
+const parseCardImageUrls = (value: string | null | undefined): string[] => {
+  const raw = (value || '').trim();
+  if (!raw) return [];
+
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const urls = parsed
+          .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+          .filter(Boolean);
+        if (urls.length) return urls;
+      }
+    } catch {
+      return [raw];
+    }
+  }
+
+  return [raw];
+};
+
+const formatCardImageUrls = (urls: string[]): string => {
+  const normalized = urls
+    .map((entry) => (entry || '').trim())
+    .filter(Boolean);
+
+  if (!normalized.length) return '';
+  return normalized.length === 1 ? normalized[0] : JSON.stringify(normalized);
 };
 
 const openLatestNewsComposer = () => {
@@ -917,8 +951,8 @@ const openLatestNewsComposer = () => {
           <input type="url" name="href" value="#" />
         </label>
         <label>
-          Upload image (optional)
-          <input type="file" name="imageFile" accept="image/*" />
+          Upload image(s) (optional)
+          <input type="file" name="imageFile" accept="image/*" multiple />
         </label>
         <div class="news-overlay-actions">
           <button type="button" id="news-overlay-cancel">Cancel</button>
@@ -962,7 +996,9 @@ const openLatestNewsComposer = () => {
     const href = String(formData.get('href') || '#').trim() || '#';
     const selectedCategory = String(formData.get('category') || '').trim();
     const newCategory = String(formData.get('newCategory') || '').trim();
-    const imageFile = formData.get('imageFile') as File | null;
+    const imageFiles = formData
+      .getAll('imageFile')
+      .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
     const category = selectedCategory === '__new__' ? newCategory : selectedCategory;
     if (!title || !body || !category) {
@@ -974,16 +1010,21 @@ const openLatestNewsComposer = () => {
       saveBtn.disabled = true;
       saveBtn.textContent = 'Posting...';
 
-      let imageUrl = '';
-      if (imageFile && imageFile.size > 0) {
-        const preparedFile = await prepareUploadImage(imageFile, { title: 'Adjust article image' });
+      const imageUrls: string[] = [];
+      for (let index = 0; index < imageFiles.length; index += 1) {
+        const imageFile = imageFiles[index];
+        const preparedFile = await prepareUploadImage(imageFile, {
+          title: imageFiles.length > 1 ? `Adjust article image ${index + 1} of ${imageFiles.length}` : 'Adjust article image'
+        });
         if (!preparedFile) {
           saveBtn.disabled = false;
           saveBtn.textContent = 'Post article';
           showStatus('Image upload canceled.');
           return;
         }
-        imageUrl = await uploadNewsImage(preparedFile);
+
+        const uploadedUrl = await uploadNewsImage(preparedFile);
+        imageUrls.push(uploadedUrl);
       }
 
       const currentOrders = Array.from(document.querySelectorAll('.latest-news-slide'))
@@ -998,7 +1039,7 @@ const openLatestNewsComposer = () => {
         subtitle,
         title,
         body,
-        image_url: imageUrl,
+        image_url: formatCardImageUrls(imageUrls),
         href,
         sort_order: nextSortOrder
       });
@@ -1168,7 +1209,8 @@ const wireCardInline = (item: Element) => {
   let categoryEditor: HTMLInputElement | null = null;
   let imageFileInput: HTMLInputElement | null = null;
   let imageUploadButton: HTMLButtonElement | null = null;
-  let currentImageUrl = record.imageUrl;
+  let currentImageUrls = [...record.imageUrls];
+  let currentImageUrl = currentImageUrls[0] || '';
 
   const readState = { ...record };
 
@@ -1308,7 +1350,7 @@ const wireCardInline = (item: Element) => {
           subtitle: isLatestNews ? (subtitleEl?.textContent ?? readState.subtitle).trim() : '',
           title: isLatestNews ? getLatestNewsTitleText() : (titleEl?.textContent ?? '').trim(),
           body: isLatestNews ? getLatestNewsBodyText() : (bodyEl?.textContent ?? '').trim(),
-          image_url: currentImageUrl.trim(),
+          image_url: formatCardImageUrls(currentImageUrls),
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
 
@@ -1330,6 +1372,7 @@ const wireCardInline = (item: Element) => {
       if (subtitleEl) subtitleEl.textContent = readState.subtitle;
       if (bodyEl) bodyEl.textContent = readState.body;
       if (categoryEl) categoryEl.textContent = readState.category;
+      currentImageUrls = [...readState.imageUrls];
       currentImageUrl = readState.imageUrl;
       syncLatestNewsMedia(readState.imageUrl, readState.title, readState.subtitle, readState.body);
       syncStandardCardMedia(readState.imageUrl, readState.title);
@@ -1394,6 +1437,7 @@ const wireCardInline = (item: Element) => {
             return;
           }
           const url = await uploadNewsImage(preparedFile);
+          currentImageUrls = [url];
           currentImageUrl = url;
           const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
           const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
