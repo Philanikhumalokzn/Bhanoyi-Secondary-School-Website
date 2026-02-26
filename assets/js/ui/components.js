@@ -248,7 +248,34 @@ export const renderHeader = (siteContent, pageKey) => {
   `;
 };
 
-export const renderHero = (hero, pageKey) => {
+const renderHeroNoticeAside = (notice, pageKey) => {
+  if (!notice) return '';
+
+  return `
+    <aside class="alert-box hero-notice" aria-label="Important announcement" data-page-key="${pageKey || ''}" data-notice-id="${notice.id || ''}">
+      <h2 class="hero-notice-title">${notice.title}</h2>
+      <p class="hero-notice-body">${notice.body}</p>
+      <a class="hero-notice-link" href="${notice.href}">${notice.linkLabel}</a>
+    </aside>
+  `;
+};
+
+const renderHeroNoticeBlock = (notice, pageKey) => {
+  if (!notice) return '';
+
+  return `
+    <section class="section section-alt hero-notice-only">
+      <div class="container">
+        ${renderHeroNoticeAside(notice, pageKey)}
+      </div>
+    </section>
+  `;
+};
+
+export const renderHeroNotice = (hero, pageKey) => renderHeroNoticeBlock(hero?.notice, pageKey);
+
+export const renderHero = (hero, pageKey, options = {}) => {
+  const includeNotice = options.includeNotice !== false;
   if (!hero) {
     return '';
   }
@@ -260,13 +287,7 @@ export const renderHero = (hero, pageKey) => {
     )
     .join('');
 
-  const notice = hero.notice
-    ? `<aside class="alert-box hero-notice" aria-label="Important announcement" data-page-key="${pageKey || ''}" data-notice-id="${hero.notice.id || ''}">
-        <h2 class="hero-notice-title">${hero.notice.title}</h2>
-        <p class="hero-notice-body">${hero.notice.body}</p>
-        <a class="hero-notice-link" href="${hero.notice.href}">${hero.notice.linkLabel}</a>
-      </aside>`
-    : '';
+  const notice = includeNotice ? renderHeroNoticeAside(hero.notice, pageKey) : '';
 
   return `
     <section class="hero">
@@ -493,6 +514,11 @@ export const renderSectionsWithContext = (sections, context) =>
   getOrderedSectionEntries(sections, context)
     .map((entry) => renderSectionByType(entry.section, entry.index, context))
     .join('');
+export const renderSectionByIndex = (sections, index, context = {}) => {
+  if (!Array.isArray(sections)) return '';
+  if (index < 0 || index >= sections.length) return '';
+  return renderSectionByType(sections[index], index, context);
+};
 
 export const renderPageEmailForms = (pageKey) => {
   if (pageKey === 'contact') {

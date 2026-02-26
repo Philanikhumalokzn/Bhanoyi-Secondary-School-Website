@@ -1,6 +1,6 @@
 type SiteContent = {
   school: any;
-  pages: Record<string, { hero?: any; sections: Array<any> }>;
+  pages: Record<string, { hero?: any; sections: Array<any>; sectionOrder?: number[]; pageOrder?: string[] }>;
 };
 
 type AnnouncementRow = {
@@ -267,6 +267,34 @@ const applySectionOrders = (siteContent: SiteContent, rows: SiteSettingRow[]) =>
   });
 };
 
+const applyPageOrders = (siteContent: SiteContent, rows: SiteSettingRow[]) => {
+  if (rows.length === 0) return;
+
+  rows.forEach((row) => {
+    const match = /^page_order:([^:]+)$/.exec(row.setting_key);
+    if (!match) return;
+
+    const [, pageKey] = match;
+    const page = siteContent.pages[pageKey];
+    if (!page || !Array.isArray(page.sections)) return;
+
+    try {
+      const parsed = JSON.parse(row.setting_value);
+      if (!Array.isArray(parsed)) return;
+
+      const allowedSectionTokens = new Set(page.sections.map((_, index) => `section:${index}`));
+      const normalized = parsed
+        .map((value) => String(value || '').trim())
+        .filter((value) => value === 'hero_intro' || value === 'hero_notice' || allowedSectionTokens.has(value));
+
+      if (!normalized.length) return;
+      page.pageOrder = Array.from(new Set(normalized));
+    } catch {
+      return;
+    }
+  });
+};
+
 const applyHeroNotices = (siteContent: SiteContent, rows: HeroNoticeRow[]) => {
   if (rows.length === 0) return;
 
@@ -333,6 +361,7 @@ export const applyRemoteOverrides = async <T extends SiteContent>(siteContent: T
     applySiteSettings(siteContent, settings);
     applySectionOverrides(siteContent, settings);
     applySectionOrders(siteContent, settings);
+    applyPageOrders(siteContent, settings);
     return siteContent;
   } catch {
     return siteContent;

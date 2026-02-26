@@ -3235,6 +3235,31 @@ const wirePageSectionReorder = () => {
     return `Section ${fallbackIndex + 1}`;
   };
 
+  const buildPageOrderRows = () => {
+    const rows: Array<{ key: string; label: string; sectionIndex?: number }> = [];
+
+    const heroTitle = (document.querySelector('.hero h1')?.textContent || '').trim();
+    rows.push({ key: 'hero_intro', label: heroTitle ? `Welcome section (${heroTitle})` : 'Welcome section' });
+
+    const noticeTitle = (document.querySelector('.hero-notice-title')?.textContent || '').trim();
+    if (noticeTitle) {
+      rows.push({ key: 'hero_notice', label: `Important notice (${noticeTitle})` });
+    }
+
+    const sectionElements = Array.from(document.querySelectorAll('[data-editable-section="true"]')) as HTMLElement[];
+    sectionElements.forEach((section, index) => {
+      const sectionIndex = Number(section.dataset.sectionIndex || '-1');
+      if (!Number.isInteger(sectionIndex) || sectionIndex < 0) return;
+      rows.push({
+        key: `section:${sectionIndex}`,
+        sectionIndex,
+        label: buildLabel(section, index)
+      });
+    });
+
+    return rows;
+  };
+
   const enableDragSort = (list: HTMLElement) => {
     let dragging: HTMLElement | null = null;
 
@@ -3277,9 +3302,9 @@ const wirePageSectionReorder = () => {
   const openSectionOrderOverlay = () => {
     if (document.getElementById('section-order-overlay')) return;
 
-    const snapshotSections = Array.from(document.querySelectorAll('[data-editable-section="true"]')) as HTMLElement[];
-    if (snapshotSections.length < 2) {
-      showStatus('Need at least two sections to reorder.');
+    const rows = buildPageOrderRows();
+    if (rows.length < 2) {
+      showStatus('Need at least two page blocks to reorder.');
       return;
     }
 
@@ -3309,13 +3334,12 @@ const wirePageSectionReorder = () => {
       return;
     }
 
-    list.innerHTML = snapshotSections
-      .map((section, index) => {
-        const sectionIndex = Number(section.dataset.sectionIndex || '-1');
+    list.innerHTML = rows
+      .map((row, index) => {
         return `
-          <div class="section-reorder-item" data-drag-row="true" data-drag-key="section-${sectionIndex}" data-section-index="${sectionIndex}" draggable="true">
+          <div class="section-reorder-item" data-drag-row="true" data-drag-key="${row.key}" data-page-order-key="${row.key}" data-section-index="${row.sectionIndex ?? ''}" draggable="true">
             <span class="section-reorder-grip" aria-hidden="true">⋮⋮</span>
-            <span>${buildLabel(section, index)}</span>
+            <span>${row.label || `Block ${index + 1}`}</span>
             <div class="section-reorder-item-actions">
               <button type="button" data-move-row="up">Move up</button>
               <button type="button" data-move-row="down">Move down</button>
@@ -3358,11 +3382,16 @@ const wirePageSectionReorder = () => {
     });
 
     save.addEventListener('click', async () => {
-      const orderedIndexes = Array.from(list.querySelectorAll<HTMLElement>('[data-section-index]'))
-        .map((row) => Number(row.dataset.sectionIndex || '-1'))
+      const orderedKeys = Array.from(list.querySelectorAll<HTMLElement>('[data-page-order-key]'))
+        .map((row) => (row.dataset.pageOrderKey || '').trim())
+        .filter(Boolean);
+
+      const orderedIndexes = orderedKeys
+        .filter((key) => key.startsWith('section:'))
+        .map((key) => Number(key.slice('section:'.length)))
         .filter((value) => Number.isInteger(value) && value >= 0);
 
-      if (!orderedIndexes.length) {
+      if (!orderedKeys.length || !orderedIndexes.length) {
         showStatus('Could not read section order.');
         return;
       }
@@ -3371,9 +3400,10 @@ const wirePageSectionReorder = () => {
         save.disabled = true;
         save.textContent = 'Saving...';
         await saveSiteSettings({
-          [`section_order:${currentPageKey()}`]: JSON.stringify(orderedIndexes)
+          [`section_order:${currentPageKey()}`]: JSON.stringify(orderedIndexes),
+          [`page_order:${currentPageKey()}`]: JSON.stringify(orderedKeys)
         });
-        showStatus('Section order saved. Refreshing...');
+        showStatus('Page order saved. Refreshing...');
         close();
         window.location.reload();
       } catch (error) {
