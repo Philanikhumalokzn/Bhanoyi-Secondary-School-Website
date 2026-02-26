@@ -53,11 +53,6 @@ body {
   line-height: 1.5;
 }
 
-html {
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-}
-
 .container {
   width: min(1100px, 92%);
   margin: 0 auto;
