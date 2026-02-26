@@ -51,6 +51,7 @@ const renderCard = (item, clickable = false, context = {}) => {
     .join(' ');
 
   const hasImage = Boolean(primaryImageUrl);
+  const cardClass = hasImage ? 'card card-has-media' : 'card';
   const content = `
     <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
     <div class="card-content">
@@ -59,9 +60,9 @@ const renderCard = (item, clickable = false, context = {}) => {
     </div>
   `;
   if (clickable) {
-    return `<a class="card" href="${item.href || '#'}" ${attrs}>${content}</a>`;
+    return `<a class="${cardClass}" href="${item.href || '#'}" ${attrs}>${content}</a>`;
   }
-  return `<article class="card" ${attrs}>${content}</article>`;
+  return `<article class="${cardClass}" ${attrs}>${content}</article>`;
 };
 
 const withAdminQuery = (href) => {
