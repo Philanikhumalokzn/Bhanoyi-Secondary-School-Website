@@ -971,7 +971,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
         <div id="news-image-dropzone" class="inline-file-editor" role="button" tabindex="0" aria-label="Upload images">
           <span>Drag and drop images here, or click to select multiple files</span>
         </div>
-        <div class="news-overlay-actions">
+        <div class="news-overlay-actions news-overlay-queue-row">
           <p id="news-selected-images-meta"></p>
           <button type="button" id="news-clear-selected-images">Clear selected</button>
         </div>
@@ -1226,19 +1226,25 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
       saveBtn.textContent = isEditMode ? 'Saving...' : 'Posting...';
 
       const imageUrls: string[] = [];
+      const shouldCropBeforeUpload = imageFiles.length === 1;
       for (let index = 0; index < imageFiles.length; index += 1) {
         const imageFile = imageFiles[index];
-        const preparedFile = await prepareUploadImage(imageFile, {
-          title: imageFiles.length > 1 ? `Adjust article image ${index + 1} of ${imageFiles.length}` : 'Adjust article image'
-        });
-        if (!preparedFile) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = composerActionLabel;
-          showStatus('Image upload canceled.');
-          return;
+        let fileToUpload: File = imageFile;
+
+        if (shouldCropBeforeUpload) {
+          const preparedFile = await prepareUploadImage(imageFile, {
+            title: 'Adjust article image'
+          });
+          if (!preparedFile) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = composerActionLabel;
+            showStatus('Image upload canceled.');
+            return;
+          }
+          fileToUpload = preparedFile;
         }
 
-        const uploadedUrl = await uploadNewsImage(preparedFile);
+        const uploadedUrl = await uploadNewsImage(fileToUpload);
         imageUrls.push(uploadedUrl);
       }
 
