@@ -797,7 +797,6 @@ const openLatestNewsReadOverlay = (slide) => {
   overlay.innerHTML = `
     <article class="news-read-panel" role="dialog" aria-modal="true" aria-label="Latest news article">
       <div class="news-read-topbar">
-        <p class="news-read-mode-label">Reading mode</p>
         <button type="button" class="news-read-close" aria-label="Close article">×</button>
       </div>
       <div class="news-read-dynamic"></div>
@@ -811,19 +810,129 @@ const openLatestNewsReadOverlay = (slide) => {
 
   const dynamic = overlay.querySelector('.news-read-dynamic');
   const state = overlay.querySelector('[data-news-state]');
+  let mediaAutoRotateTimer = null;
+
+  const clearMediaCarousel = () => {
+    if (mediaAutoRotateTimer !== null) {
+      window.clearInterval(mediaAutoRotateTimer);
+      mediaAutoRotateTimer = null;
+    }
+  };
+
+  const setupMediaCarousel = () => {
+    if (!dynamic) return;
+
+    const track = dynamic.querySelector('[data-news-read-media-track]');
+    const rail = dynamic.querySelector('[data-news-read-media-rail]');
+    if (!(track instanceof HTMLElement) || !(rail instanceof HTMLElement)) {
+      return;
+    }
+
+    const baseSlides = Array.from(rail.querySelectorAll('.news-read-media-slide'));
+    if (baseSlides.length <= 1) {
+      return;
+    }
+
+    const firstClone = baseSlides[0].cloneNode(true);
+    const lastClone = baseSlides[baseSlides.length - 1].cloneNode(true);
+    if (firstClone instanceof HTMLElement) {
+      firstClone.dataset.carouselClone = 'true';
+    }
+    if (lastClone instanceof HTMLElement) {
+      lastClone.dataset.carouselClone = 'true';
+    }
+    rail.appendChild(firstClone);
+    rail.insertBefore(lastClone, rail.firstChild);
+
+    const slides = Array.from(rail.querySelectorAll('.news-read-media-slide'));
+    let index = 1;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let hasTouchStart = false;
+
+    const applySlidePosition = (nextIndex, animate = true) => {
+      rail.style.transition = animate ? 'transform 420ms ease' : 'none';
+      rail.style.transform = `translateX(-${nextIndex * 100}%)`;
+    };
+
+    const normalizeLoopEdgeIfNeeded = () => {
+      if (index === slides.length - 1) {
+        index = 1;
+        applySlidePosition(index, false);
+        return;
+      }
+      if (index === 0) {
+        index = slides.length - 2;
+        applySlidePosition(index, false);
+      }
+    };
+
+    const goToNext = () => {
+      index = (index + 1) % slides.length;
+      applySlidePosition(index, true);
+    };
+
+    const goToPrevious = () => {
+      index = (index - 1 + slides.length) % slides.length;
+      applySlidePosition(index, true);
+    };
+
+    const restartAutoRotate = () => {
+      clearMediaCarousel();
+      mediaAutoRotateTimer = window.setInterval(goToNext, 5000);
+    };
+
+    applySlidePosition(index, false);
+
+    rail.addEventListener('transitionend', () => {
+      normalizeLoopEdgeIfNeeded();
+    });
+
+    track.addEventListener('touchstart', (event) => {
+      if (!event.touches || event.touches.length !== 1) return;
+      touchStartX = event.touches[0].clientX;
+      touchStartY = event.touches[0].clientY;
+      hasTouchStart = true;
+    }, { passive: true });
+
+    track.addEventListener('touchend', (event) => {
+      if (!hasTouchStart || !event.changedTouches || event.changedTouches.length !== 1) return;
+      hasTouchStart = false;
+
+      const endX = event.changedTouches[0].clientX;
+      const endY = event.changedTouches[0].clientY;
+      const diffX = endX - touchStartX;
+      const diffY = endY - touchStartY;
+      const absX = Math.abs(diffX);
+      const absY = Math.abs(diffY);
+
+      if (absX < 36 || absX <= absY) return;
+
+      if (diffX < 0) {
+        goToNext();
+      } else {
+        goToPrevious();
+      }
+      restartAutoRotate();
+    }, { passive: true });
+
+    restartAutoRotate();
+  };
 
   const renderArticle = () => {
     const article = readArticle(laneSlides[currentIndex]);
     if (!dynamic) return;
 
+    clearMediaCarousel();
+
     dynamic.innerHTML = `
       ${article.imageUrls.length
-        ? `<div class="news-read-media">${article.imageUrls
+        ? `<div class="news-read-media"><div class="news-read-media-track" data-news-read-media-track><div class="news-read-media-rail" data-news-read-media-rail>${article.imageUrls
             .map(
-              (url, index) =>
-                `<img class="news-read-image ${index > 0 ? 'news-read-image-secondary' : ''}" src="${url}" alt="${article.title}" />`
+              (url) =>
+                `<div class="news-read-media-slide"><img class="news-read-image" src="${url}" alt="${article.title}" /></div>`
             )
-            .join('')}</div>`
+            .join('')}</div></div></div>`
         : ''}
       <div class="news-read-content">
         ${article.category ? `<p class="news-read-category">${article.category}</p>` : ''}
@@ -837,6 +946,8 @@ const openLatestNewsReadOverlay = (slide) => {
     if (state) {
       state.textContent = `${currentIndex + 1} of ${laneSlides.length}`;
     }
+
+    setupMediaCarousel();
   };
 
   const nextArticle = () => {
@@ -853,6 +964,7 @@ const openLatestNewsReadOverlay = (slide) => {
 
   const close = () => {
     document.removeEventListener('keydown', onKeyDown);
+    clearMediaCarousel();
     document.body.classList.remove('news-read-open');
     overlay.remove();
   };

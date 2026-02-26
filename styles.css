@@ -1310,21 +1310,12 @@ h1 {
 .news-read-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.84);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-}
-
-.news-read-mode-label {
-  margin: 0;
-  font-size: 0.88rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 .news-read-close {
@@ -1345,28 +1336,45 @@ h1 {
 }
 
 .news-read-image {
-  width: min(1100px, 100%);
+  width: 100%;
   max-height: min(56vh, 560px);
   object-fit: cover;
   display: block;
-  margin: 0 auto;
 }
 
 .news-read-media {
-  display: grid;
-  gap: 10px;
+  position: relative;
   background: #0d2238;
-  padding: 0 0 10px;
 }
 
-.news-read-image-secondary {
-  max-height: 220px;
+.news-read-media-track {
+  overflow: hidden;
+}
+
+.news-read-media-rail {
+  display: flex;
+  width: 100%;
+  transition: transform 420ms ease;
+  will-change: transform;
+}
+
+.news-read-media-slide {
+  flex: 0 0 100%;
+  min-width: 0;
 }
 
 .news-read-content {
   width: min(920px, 92vw);
-  margin: 0 auto;
-  padding: 22px 0 28px;
+  margin: -34px auto 0;
+  padding: 18px 18px 28px;
+  border-radius: 18px 18px 0 0;
+  background: rgba(248, 251, 255, 0.58);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-bottom: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .news-read-category {
@@ -1391,7 +1399,7 @@ h1 {
 .news-read-nav {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 10px;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
@@ -1415,6 +1423,16 @@ h1 {
 .news-read-nav-state {
   color: var(--muted);
   font-size: 0.9rem;
+  text-align: center;
+  flex: 1;
+}
+
+.news-read-nav [data-news-prev] {
+  margin-right: auto;
+}
+
+.news-read-nav [data-news-next] {
+  margin-left: auto;
 }
 
 body.news-read-open {
@@ -1767,7 +1785,9 @@ body.news-read-open {
 
   .news-read-content {
     width: min(100%, 92vw);
-    padding: 16px 0 20px;
+    margin-top: -28px;
+    padding: 14px 14px 20px;
+    border-radius: 14px 14px 0 0;
   }
 
   .news-read-content h3 {
