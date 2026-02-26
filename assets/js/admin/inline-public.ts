@@ -906,8 +906,12 @@ const getLatestNewsCategories = () => {
     .map((el) => (el.textContent ?? '').trim())
     .filter(Boolean);
 
+  const fromCards = Array.from(document.querySelectorAll('.latest-news-slide .news-category'))
+    .map((el) => (el.textContent ?? '').trim())
+    .filter(Boolean);
+
   const defaults = ['Academics', 'Parents', 'Sports', 'Extra-curricular'];
-  return Array.from(new Set([...defaults, ...fromLanes]));
+  return Array.from(new Set([...defaults, ...fromLanes, ...fromCards]));
 };
 
 const parseCardImageUrls = (value: string | null | undefined): string[] => {

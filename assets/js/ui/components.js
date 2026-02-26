@@ -116,14 +116,7 @@ const renderSectionAttachments = (section) => {
 };
 
 const renderLatestNewsSection = (section, sectionIndex) => {
-  const grouped = (section.items || []).reduce((acc, item, index) => {
-    const category = (item.category || 'General').trim() || 'General';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push({ ...item, index });
-    return acc;
-  }, {});
-
-  const categories = Object.entries(grouped);
+  const items = (section.items || []).map((item, index) => ({ ...item, index }));
   const sidePanel = section.sidePanel;
   const hasSidePanel = Boolean(sidePanel && typeof sidePanel === 'object');
   const sidePanelImageUrl = (sidePanel?.imageUrl || '').trim();
@@ -140,60 +133,50 @@ const renderLatestNewsSection = (section, sectionIndex) => {
         </div>
         <div class="latest-news-layout ${hasSidePanel ? 'has-side-panel' : ''}">
           <div class="latest-news-grid">
-            ${categories
-              .map(([category, items]) => {
-              const slides = items
-                .map((item, idx) => {
-                  const imageUrls = parseCardImageUrls(item.imageUrl || '');
-                  const primaryImageUrl = imageUrls[0] || '';
-                  const imageData = serializeCardImageUrls(imageUrls);
-                  const hasImage = Boolean(primaryImageUrl);
-                  const normalizedSubtitle = (item.subtitle || '').trim();
-                  const fallbackHeading = item.title;
-                  const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
-                  const attrs = [
-                    section.editable ? 'data-editable-card="true"' : '',
-                    section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
-                    item.id ? `data-card-id="${item.id}"` : '',
-                    `data-card-category="${category}"`,
-                    `data-card-subtitle="${item.subtitle || ''}"`,
-                    `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
-                    typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
-                    'data-card-clickable="true"'
-                  ]
-                    .filter(Boolean)
-                    .join(' ');
+            <article class="panel latest-news-lane">
+              <div class="latest-news-track" data-news-track data-news-size="${items.length}">
+                ${items
+                  .map((item, idx) => {
+                    const category = (item.category || 'General').trim() || 'General';
+                    const imageUrls = parseCardImageUrls(item.imageUrl || '');
+                    const primaryImageUrl = imageUrls[0] || '';
+                    const imageData = serializeCardImageUrls(imageUrls);
+                    const hasImage = Boolean(primaryImageUrl);
+                    const normalizedSubtitle = (item.subtitle || '').trim();
+                    const fallbackHeading = item.title;
+                    const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
+                    const attrs = [
+                      section.editable ? 'data-editable-card="true"' : '',
+                      section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
+                      item.id ? `data-card-id="${item.id}"` : '',
+                      `data-card-category="${category}"`,
+                      `data-card-subtitle="${item.subtitle || ''}"`,
+                      `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
+                      typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
+                      'data-card-clickable="true"'
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
 
-                  return `
-                    <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
-                      <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
-                      <div class="latest-news-image-fallback ${hasImage ? 'is-hidden' : ''}">
-                        <h4 class="latest-news-fallback-title">${fallbackHeading}</h4>
-                        <p class="latest-news-fallback-body">${item.body}</p>
-                      </div>
-                      <div class="latest-news-content">
-                        <span class="news-category">${category}</span>
-                        <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
-                        ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
-                        <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
-                      </div>
-                    </a>
-                  `;
-                })
-                .join('');
-
-                return `
-                  <article class="panel latest-news-lane">
-                    <div class="latest-news-lane-head">
-                      <h3>${category}</h3>
-                    </div>
-                    <div class="latest-news-track" data-news-track data-news-size="${items.length}">
-                      ${slides}
-                    </div>
-                  </article>
-                `;
-              })
-              .join('')}
+                    return `
+                      <a class="latest-news-slide ${idx === 0 ? 'is-active' : ''}" href="${item.href || '#'}" ${attrs}>
+                        <img class="latest-news-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
+                        <div class="latest-news-image-fallback ${hasImage ? 'is-hidden' : ''}">
+                          <h4 class="latest-news-fallback-title">${fallbackHeading}</h4>
+                          <p class="latest-news-fallback-body">${item.body}</p>
+                        </div>
+                        <div class="latest-news-content">
+                          <span class="news-category">${category}</span>
+                          <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
+                          ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
+                          <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
+                        </div>
+                      </a>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            </article>
           </div>
           ${hasSidePanel ? `
             <aside class="panel latest-news-side-panel">
