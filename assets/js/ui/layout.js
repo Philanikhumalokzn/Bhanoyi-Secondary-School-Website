@@ -60,6 +60,143 @@ const bindMobileNav = () => {
   });
 };
 
+const initHomeMobileCarousel = (pageKey) => {
+  if (pageKey !== 'home') {
+    return;
+  }
+
+  const carousel = document.querySelector('[data-mobile-home-carousel]');
+  if (!carousel) {
+    return;
+  }
+
+  const track = carousel.querySelector('[data-mobile-home-track]');
+  const dotsRoot = carousel.querySelector('[data-mobile-home-dots]');
+  if (!track) {
+    return;
+  }
+
+  const slides = Array.from(track.querySelectorAll('[data-mobile-home-slide]'));
+  if (slides.length <= 1) {
+    return;
+  }
+
+  const isMobileViewport = () => window.matchMedia('(max-width: 860px)').matches;
+  let activeIndex = 0;
+  let autoTimer = null;
+
+  const dots = dotsRoot
+    ? Array.from(dotsRoot.querySelectorAll('[data-mobile-home-dot]'))
+    : [];
+
+  const syncDots = () => {
+    dots.forEach((dot, index) => {
+      const isActive = index === activeIndex;
+      dot.classList.toggle('is-active', isActive);
+      dot.setAttribute('aria-current', isActive ? 'true' : 'false');
+    });
+  };
+
+  const scrollToIndex = (index, behavior = 'smooth') => {
+    if (!isMobileViewport()) {
+      return;
+    }
+    activeIndex = (index + slides.length) % slides.length;
+    const target = slides[activeIndex];
+    track.scrollTo({
+      left: target.offsetLeft,
+      behavior
+    });
+    syncDots();
+  };
+
+  const syncIndexFromScroll = () => {
+    if (!isMobileViewport()) {
+      return;
+    }
+    const viewportCenter = track.scrollLeft + track.clientWidth / 2;
+    let nearestIndex = activeIndex;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    slides.forEach((slide, index) => {
+      const center = slide.offsetLeft + slide.clientWidth / 2;
+      const distance = Math.abs(center - viewportCenter);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+
+    activeIndex = nearestIndex;
+    syncDots();
+  };
+
+  const stopAuto = () => {
+    if (autoTimer) {
+      window.clearInterval(autoTimer);
+      autoTimer = null;
+    }
+  };
+
+  const startAuto = () => {
+    stopAuto();
+    if (!isMobileViewport()) {
+      return;
+    }
+    autoTimer = window.setInterval(() => {
+      scrollToIndex(activeIndex + 1);
+    }, 5000);
+  };
+
+  let scrollDebounce = null;
+  track.addEventListener(
+    'scroll',
+    () => {
+      if (!isMobileViewport()) {
+        return;
+      }
+      if (scrollDebounce) {
+        window.clearTimeout(scrollDebounce);
+      }
+      scrollDebounce = window.setTimeout(() => {
+        syncIndexFromScroll();
+        startAuto();
+      }, 120);
+    },
+    { passive: true }
+  );
+
+  track.addEventListener(
+    'pointerdown',
+    () => {
+      stopAuto();
+    },
+    { passive: true }
+  );
+
+  window.addEventListener('resize', () => {
+    if (!isMobileViewport()) {
+      stopAuto();
+      return;
+    }
+    scrollToIndex(activeIndex, 'auto');
+    startAuto();
+  });
+
+  dots.forEach((dot, index) => {
+    dot.addEventListener('click', () => {
+      stopAuto();
+      scrollToIndex(index);
+      startAuto();
+    });
+  });
+
+  if (isMobileViewport()) {
+    scrollToIndex(0, 'auto');
+    startAuto();
+  }
+};
+
 export const renderSite = (siteContent, page) => {
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
@@ -132,10 +269,17 @@ export const renderSite = (siteContent, page) => {
   });
 
   const app = document.getElementById('app');
+  const renderedMainBlocks = page.key === 'home'
+    ? `<div class="mobile-home-carousel" data-mobile-home-carousel><div class="mobile-home-track" data-mobile-home-track>${mainBlocks
+        .map((block, index) => `<div class="mobile-home-slide" data-mobile-home-slide="${index}">${block}</div>`)
+      .join('')}</div><div class="mobile-home-dots" data-mobile-home-dots>${mainBlocks
+      .map((_, index) => `<button type="button" class="mobile-home-dot ${index === 0 ? 'is-active' : ''}" data-mobile-home-dot="${index}" aria-label="Go to section ${index + 1}" aria-current="${index === 0 ? 'true' : 'false'}"></button>`)
+      .join('')}</div></div>`
+    : mainBlocks.join('') || renderSectionsWithContext(page.sections, { pageKey: page.key, siteContent, page });
   app.innerHTML = `
     ${renderHeader(siteContent, page.key)}
     <main id="main-content" class="${themeBackgroundImage ? 'has-theme-bg' : ''}" data-theme-bg-url="${themeBackgroundAttr}">
-      ${mainBlocks.join('') || renderSectionsWithContext(page.sections, { pageKey: page.key, siteContent, page })}
+      ${renderedMainBlocks}
       ${renderPageEmailForms(page.key)}
     </main>
     ${renderFooter(siteContent)}
@@ -158,4 +302,5 @@ export const renderSite = (siteContent, page) => {
   bindMobileNav();
   initLatestNewsRotators();
   initLatestNewsReaders();
+  initHomeMobileCarousel(page.key);
 };

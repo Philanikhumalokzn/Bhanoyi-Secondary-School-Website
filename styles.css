@@ -1288,6 +1288,18 @@ h1 {
   font-size: 0.9rem;
 }
 
+.mobile-home-track {
+  display: block;
+}
+
+.mobile-home-slide {
+  width: 100%;
+}
+
+.mobile-home-dots {
+  display: none;
+}
+
 .inline-admin-status {
   position: fixed;
   left: 14px;
@@ -1723,5 +1735,50 @@ h1 {
 
   .footer-grid {
     grid-template-columns: 1.2fr 1fr 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .mobile-home-track {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .mobile-home-track::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-home-slide {
+    flex: 0 0 100%;
+    scroll-snap-align: start;
+  }
+
+  .mobile-home-dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 10px 0 2px;
+  }
+
+  .mobile-home-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    border: 1px solid #9eb4ca;
+    background: #dfe9f3;
+    padding: 0;
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .mobile-home-dot.is-active {
+    width: 22px;
+    background: var(--primary);
+    border-color: var(--primary);
   }
 }
