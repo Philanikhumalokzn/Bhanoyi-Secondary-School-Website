@@ -326,7 +326,7 @@ const createSectionAssetsEditor = (section: Element) => {
 
     uploadBtn = document.createElement('button');
     uploadBtn.type = 'button';
-    uploadBtn.textContent = 'Upload Selected';
+    uploadBtn.textContent = 'Upload';
     uploadBtn.addEventListener('click', async () => {
       const selected = Array.from(fileInput?.files || []);
       if (!selected.length) {
@@ -368,7 +368,7 @@ const createSectionAssetsEditor = (section: Element) => {
       } finally {
         if (button) {
           button.disabled = false;
-          button.textContent = 'Upload Selected';
+          button.textContent = 'Upload';
         }
       }
     });
