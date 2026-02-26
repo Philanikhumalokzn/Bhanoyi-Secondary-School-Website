@@ -648,17 +648,24 @@ export const initLatestNewsRotators = () => {
     if (slides.length <= 1) return;
 
     let index = 0;
+    const applySlidePosition = (nextIndex) => {
+      track.style.transform = `translateX(-${nextIndex * 100}%)`;
+      slides.forEach((slide, slideIndex) => {
+        slide.classList.toggle('is-active', slideIndex === nextIndex);
+      });
+      if (counter) {
+        counter.textContent = `${nextIndex + 1} / ${slides.length}`;
+      }
+    };
+
+    applySlidePosition(index);
     window.setInterval(() => {
       if (track.dataset.adminPaused === 'true') {
         return;
       }
-      slides[index].classList.remove('is-active');
       index = (index + 1) % slides.length;
-      slides[index].classList.add('is-active');
-      if (counter) {
-        counter.textContent = `${index + 1} / ${slides.length}`;
-      }
-    }, 2000);
+      applySlidePosition(index);
+    }, 5000);
   });
 };
 
