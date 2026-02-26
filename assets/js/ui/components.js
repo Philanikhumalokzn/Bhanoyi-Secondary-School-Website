@@ -566,6 +566,37 @@ export const initLatestNewsRotators = () => {
   tracks.forEach((track) => {
     const slides = Array.from(track.querySelectorAll('.latest-news-slide'));
     const counter = track.parentElement?.querySelector('[data-news-counter]');
+    const imageRotators = slides
+      .map((slide) => {
+        const image = slide.querySelector('.latest-news-image');
+        if (!image) return null;
+
+        const imageUrls = parseCardImageUrls((slide.dataset.cardImageUrl || '').trim());
+        if (imageUrls.length <= 1) return null;
+
+        const currentSrc = (image.getAttribute('src') || '').trim();
+        const initialIndex = Math.max(0, imageUrls.indexOf(currentSrc));
+        return {
+          image,
+          imageUrls,
+          index: initialIndex
+        };
+      })
+      .filter(Boolean);
+
+    if (imageRotators.length) {
+      window.setInterval(() => {
+        if (track.dataset.adminPaused === 'true') {
+          return;
+        }
+
+        imageRotators.forEach((rotator) => {
+          rotator.index = (rotator.index + 1) % rotator.imageUrls.length;
+          rotator.image.setAttribute('src', rotator.imageUrls[rotator.index]);
+        });
+      }, 3000);
+    }
+
     if (slides.length <= 1) return;
 
     let index = 0;

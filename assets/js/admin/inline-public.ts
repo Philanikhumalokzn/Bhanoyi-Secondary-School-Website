@@ -180,7 +180,13 @@ const createTextEditor = (label: string, value: string) => {
   return { wrapper, input };
 };
 
-const createFileEditor = (label = 'Upload news image') => {
+type FileEditorOptions = {
+  multiple?: boolean;
+  includeReplaceToggle?: boolean;
+  replaceToggleLabel?: string;
+};
+
+const createFileEditor = (label = 'Upload news image', options: FileEditorOptions = {}) => {
   const wrapper = document.createElement('label');
   wrapper.className = 'inline-file-editor';
 
@@ -190,16 +196,34 @@ const createFileEditor = (label = 'Upload news image') => {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
+  input.multiple = Boolean(options.multiple);
 
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = 'Upload';
 
+  let replaceCheckbox: HTMLInputElement | null = null;
+  if (options.includeReplaceToggle) {
+    const replaceWrap = document.createElement('div');
+    replaceWrap.className = 'inline-file-editor-replace';
+
+    replaceCheckbox = document.createElement('input');
+    replaceCheckbox.type = 'checkbox';
+    replaceCheckbox.name = 'replaceImages';
+
+    const replaceText = document.createElement('span');
+    replaceText.textContent = options.replaceToggleLabel || 'Replace existing images';
+
+    replaceWrap.appendChild(replaceCheckbox);
+    replaceWrap.appendChild(replaceText);
+    wrapper.appendChild(replaceWrap);
+  }
+
   wrapper.appendChild(span);
   wrapper.appendChild(input);
   wrapper.appendChild(button);
 
-  return { wrapper, input, button };
+  return { wrapper, input, button, replaceCheckbox };
 };
 
 type SectionAttachment = {
@@ -1413,7 +1437,11 @@ const wireCardInline = (item: Element) => {
     }
 
     if (!imageFileInput) {
-      const { wrapper, input, button } = createFileEditor();
+      const { wrapper, input, button, replaceCheckbox } = createFileEditor('Upload news image(s)', {
+        multiple: true,
+        includeReplaceToggle: true,
+        replaceToggleLabel: 'Replace existing images'
+      });
       item.appendChild(wrapper);
       imageFileInput = input;
       imageUploadButton = button;
@@ -1422,33 +1450,51 @@ const wireCardInline = (item: Element) => {
         eventUpload.preventDefault();
         const uploadBtn = imageUploadButton;
         if (!uploadBtn) return;
-        const file = imageFileInput?.files?.[0];
-        if (!file) {
-          showStatus('Choose an image file first.');
+        const files = imageFileInput?.files ? Array.from(imageFileInput.files) : [];
+        if (!files.length) {
+          showStatus('Choose one or more image files first.');
           return;
         }
 
         try {
           uploadBtn.disabled = true;
           uploadBtn.textContent = 'Uploading...';
-          const preparedFile = await prepareUploadImage(file, { title: 'Adjust image before upload' });
-          if (!preparedFile) {
-            showStatus('Image upload canceled.');
-            return;
+
+          const uploadedUrls: string[] = [];
+          for (let index = 0; index < files.length; index += 1) {
+            const file = files[index];
+            const preparedFile = await prepareUploadImage(file, {
+              title: files.length > 1 ? `Adjust image ${index + 1} of ${files.length}` : 'Adjust image before upload'
+            });
+            if (!preparedFile) {
+              showStatus('Image upload canceled.');
+              return;
+            }
+            const url = await uploadNewsImage(preparedFile);
+            uploadedUrls.push(url);
           }
-          const url = await uploadNewsImage(preparedFile);
-          currentImageUrls = [url];
-          currentImageUrl = url;
+
+          const mergedUrls = replaceCheckbox?.checked
+            ? uploadedUrls
+            : Array.from(new Set([...currentImageUrls, ...uploadedUrls]));
+          currentImageUrls = mergedUrls;
+          currentImageUrl = mergedUrls[0] || '';
           const liveTitle = isLatestNews ? getLatestNewsTitleText() || readState.title : (titleEl?.textContent ?? readState.title).trim();
           const liveBody = isLatestNews ? getLatestNewsBodyText() || readState.body : (bodyEl?.textContent ?? readState.body).trim();
           syncLatestNewsMedia(
-            url,
+            currentImageUrl,
             liveTitle,
             (subtitleEl?.textContent ?? readState.subtitle).trim(),
             liveBody
           );
-          syncStandardCardMedia(url, liveTitle);
-          showStatus('Image uploaded. Save the card to publish changes.');
+          syncStandardCardMedia(currentImageUrl, liveTitle);
+          showStatus(
+            replaceCheckbox?.checked
+              ? `${uploadedUrls.length} image${uploadedUrls.length === 1 ? '' : 's'} uploaded and replaced. Save the card to publish changes.`
+              : uploadedUrls.length > 1
+                ? `${uploadedUrls.length} images uploaded. Save the card to publish changes.`
+                : 'Image uploaded. Save the card to publish changes.'
+          );
         } catch (error) {
           showStatus(
             error instanceof Error
