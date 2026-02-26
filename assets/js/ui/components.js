@@ -593,11 +593,12 @@ export const renderPageEmailForms = (pageKey) => {
 
 export const initLatestNewsRotators = () => {
   const tracks = Array.from(document.querySelectorAll('[data-news-track]'));
+  const adminMode = new URLSearchParams(window.location.search).get('admin') === '1';
 
   tracks.forEach((track) => {
-    const slides = Array.from(track.querySelectorAll('.latest-news-slide'));
+    const baseSlides = Array.from(track.querySelectorAll('.latest-news-slide'));
     const counter = track.parentElement?.querySelector('[data-news-counter]');
-    const imageRotators = slides
+    const imageRotators = baseSlides
       .map((slide) => {
         const image = slide.querySelector('.latest-news-image');
         if (!image) return null;
@@ -628,26 +629,57 @@ export const initLatestNewsRotators = () => {
       }, 3000);
     }
 
-    if (slides.length <= 1) return;
+    if (baseSlides.length <= 1) return;
 
-    let index = 0;
-    const applySlidePosition = (nextIndex) => {
+    if (!adminMode && !track.dataset.carouselLooped) {
+      const firstClone = baseSlides[0].cloneNode(true);
+      const lastClone = baseSlides[baseSlides.length - 1].cloneNode(true);
+      if (firstClone instanceof HTMLElement) {
+        firstClone.dataset.carouselClone = 'true';
+      }
+      if (lastClone instanceof HTMLElement) {
+        lastClone.dataset.carouselClone = 'true';
+      }
+      track.appendChild(firstClone);
+      track.insertBefore(lastClone, track.firstChild);
+      track.dataset.carouselLooped = 'true';
+    }
+
+    const slides = Array.from(track.querySelectorAll('.latest-news-slide'));
+    const realSlideCount = baseSlides.length;
+
+    let index = adminMode ? 0 : 1;
+    const applySlidePosition = (nextIndex, animate = true) => {
+      track.style.transition = animate ? 'transform 420ms ease' : 'none';
       track.style.transform = `translateX(-${nextIndex * 100}%)`;
       slides.forEach((slide, slideIndex) => {
         slide.classList.toggle('is-active', slideIndex === nextIndex);
       });
       if (counter) {
-        counter.textContent = `${nextIndex + 1} / ${slides.length}`;
+        const visibleIndex = adminMode
+          ? nextIndex
+          : ((nextIndex - 1 + realSlideCount) % realSlideCount);
+        counter.textContent = `${visibleIndex + 1} / ${realSlideCount}`;
       }
     };
 
-    applySlidePosition(index);
+    applySlidePosition(index, false);
+
+    if (!adminMode) {
+      track.addEventListener('transitionend', () => {
+        if (index === slides.length - 1) {
+          index = 1;
+          applySlidePosition(index, false);
+        }
+      });
+    }
+
     window.setInterval(() => {
       if (track.dataset.adminPaused === 'true') {
         return;
       }
       index = (index + 1) % slides.length;
-      applySlidePosition(index);
+      applySlidePosition(index, true);
     }, 5000);
   });
 };
@@ -659,7 +691,9 @@ const openLatestNewsReadOverlay = (slide) => {
   }
 
   const lane = slide.closest('.latest-news-lane');
-  const laneSlides = lane ? Array.from(lane.querySelectorAll('.latest-news-slide')) : [slide];
+  const laneSlides = lane
+    ? Array.from(lane.querySelectorAll('.latest-news-slide:not([data-carousel-clone="true"])'))
+    : [slide];
   let currentIndex = Math.max(0, laneSlides.indexOf(slide));
 
   const readArticle = (currentSlide) => {
@@ -785,7 +819,7 @@ export const initLatestNewsReaders = () => {
     return;
   }
 
-  const slides = Array.from(document.querySelectorAll('.latest-news-slide'));
+  const slides = Array.from(document.querySelectorAll('.latest-news-slide:not([data-carousel-clone="true"])'));
   slides.forEach((slide) => {
     slide.addEventListener('click', (event) => {
       event.preventDefault();
