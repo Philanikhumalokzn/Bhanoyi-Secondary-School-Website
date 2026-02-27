@@ -1052,7 +1052,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const isEditMode = options.mode === 'edit' && Boolean(options.record);
   const editRecord = options.record;
   const composerTitle = isEditMode ? 'Edit post' : 'Create post';
-  const composerActionLabel = isEditMode ? 'Save post' : 'Create post';
+  const composerActionLabel = 'Publish';
   const categories = getLatestNewsCategories();
   if (editRecord?.category && !categories.includes(editRecord.category)) {
     categories.push(editRecord.category);
@@ -1078,10 +1078,6 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
           <textarea name="body" rows="4" required></textarea>
         </label>
         <div class="news-overlay-ai-options">
-          <label class="news-overlay-checkbox-label">
-            <input type="checkbox" name="useAiProofread" />
-            <span>Use AI proofreading and editing before save</span>
-          </label>
           <label>
             AI model
             <select name="aiModelChoice">
@@ -1128,6 +1124,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
         </div>
         <div class="news-overlay-actions">
           <button type="button" id="news-overlay-cancel">Cancel</button>
+          <button type="button" id="news-overlay-proofread">AI Proofread</button>
           <button type="submit" id="news-overlay-save">${composerActionLabel}</button>
         </div>
       </form>
@@ -1153,8 +1150,91 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const currentImagesWrap = overlay.querySelector('#news-current-images-wrap') as HTMLElement | null;
   const currentImagesList = overlay.querySelector('#news-current-images-list') as HTMLElement | null;
   const cancelBtn = overlay.querySelector('#news-overlay-cancel') as HTMLButtonElement | null;
+  const proofreadBtn = overlay.querySelector('#news-overlay-proofread') as HTMLButtonElement | null;
   const saveBtn = overlay.querySelector('#news-overlay-save') as HTMLButtonElement | null;
   let pendingImageFiles: File[] = [];
+
+  const setComposerBusy = (busy: boolean, mode: 'proofread' | 'publish') => {
+    if (saveBtn) {
+      saveBtn.disabled = busy;
+      saveBtn.textContent = busy && mode === 'publish' ? 'Publishing...' : composerActionLabel;
+    }
+    if (proofreadBtn) {
+      proofreadBtn.disabled = busy;
+      proofreadBtn.textContent = busy && mode === 'proofread' ? 'Proofreading...' : 'AI Proofread';
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = busy;
+    }
+    if (aiModelSelect) {
+      aiModelSelect.disabled = busy;
+    }
+  };
+
+  const getComposerCategory = () => {
+    const selectedCategory = (categorySelect?.value || '').trim();
+    const newCategory = (newCategoryInput?.value || '').trim();
+    return selectedCategory === '__new__' ? newCategory : selectedCategory;
+  };
+
+  const applyComposerCategory = (nextCategoryRaw: string) => {
+    const nextCategory = nextCategoryRaw.trim();
+    if (!nextCategory || !categorySelect) return;
+
+    const matchingOption = Array.from(categorySelect.options).find(
+      (option) => option.value.trim().toLowerCase() === nextCategory.toLowerCase()
+    );
+
+    if (matchingOption) {
+      categorySelect.value = matchingOption.value;
+      if (newCategoryWrap) newCategoryWrap.style.display = 'none';
+      if (newCategoryInput) newCategoryInput.value = '';
+      return;
+    }
+
+    categorySelect.value = '__new__';
+    if (newCategoryWrap) newCategoryWrap.style.display = 'grid';
+    if (newCategoryInput) newCategoryInput.value = nextCategory;
+  };
+
+  const rewriteWithChoice = async (
+    input: string,
+    refinementPrompt: string,
+    aiModelChoice: AiModelChoice
+  ) => {
+    const useHostedAi = shouldUseHostedAiForChoice(aiModelChoice);
+    if (useHostedAi) {
+      return rewriteWithHostedAi(input, {
+        refinementPrompt,
+        modelChoice: aiModelChoice
+      });
+    }
+    return rewriteWithOllama(input, { refinementPrompt });
+  };
+
+  const buildFieldProofreadPrompt = (fieldLabel: string, fieldValue: string, context: {
+    title: string;
+    subtitle: string;
+    category: string;
+    body: string;
+    href: string;
+  }) => {
+    return [
+      'You are proofreading a school news article draft.',
+      `Target field to rewrite: ${fieldLabel}`,
+      'Rewrite only the target field while considering the full article context below.',
+      'Keep factual meaning and school-appropriate tone.',
+      'Return only the rewritten target field text with no labels or quotes.',
+      '',
+      `Main heading: ${context.title}`,
+      `Subtitle: ${context.subtitle}`,
+      `Category: ${context.category}`,
+      `Body: ${context.body}`,
+      `Article link: ${context.href}`,
+      '',
+      `Current ${fieldLabel}: ${fieldValue}`
+    ].join('\n');
+  };
 
   const fileSignature = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 
@@ -1357,6 +1437,77 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     newCategoryWrap.style.display = categorySelect.value === '__new__' ? 'grid' : 'none';
   });
 
+  proofreadBtn?.addEventListener('click', async () => {
+    const currentTitle = (titleInput?.value || '').trim();
+    const currentBody = (bodyInput?.value || '').trim();
+    const currentCategory = getComposerCategory();
+    if (!currentTitle || !currentBody || !currentCategory) {
+      showStatus('Add title, body, and category first, then run AI Proofread.');
+      return;
+    }
+
+    const aiModelChoice = normalizeAiModelChoice(aiModelSelect?.value || 'auto');
+    const aiRefinementPrompt = (form?.querySelector('textarea[name="aiRefinementPrompt"]') as HTMLTextAreaElement | null)?.value?.trim() || '';
+
+    const providerMessage = shouldUseHostedAiForChoice(aiModelChoice)
+      ? aiModelChoice === 'gemini'
+        ? 'AI proofreading via Gemini...'
+        : 'AI proofreading via production AI...'
+      : `AI proofreading via local Ollama (${ollamaModel})...`;
+
+    try {
+      setComposerBusy(true, 'proofread');
+      showStatus(providerMessage);
+
+      const context = {
+        title: currentTitle,
+        subtitle: (subtitleInput?.value || '').trim(),
+        category: currentCategory,
+        body: currentBody,
+        href: (hrefInput?.value || '#').trim() || '#'
+      };
+
+      const rewrittenTitle = await rewriteWithChoice(
+        buildFieldProofreadPrompt('main heading', context.title, context),
+        aiRefinementPrompt,
+        aiModelChoice
+      );
+      context.title = rewrittenTitle.trim() || context.title;
+
+      const rewrittenSubtitle = await rewriteWithChoice(
+        buildFieldProofreadPrompt('subtitle', context.subtitle, context),
+        aiRefinementPrompt,
+        aiModelChoice
+      );
+      context.subtitle = rewrittenSubtitle.trim() || context.subtitle;
+
+      const rewrittenCategory = await rewriteWithChoice(
+        buildFieldProofreadPrompt('category', context.category, context),
+        aiRefinementPrompt,
+        aiModelChoice
+      );
+      context.category = rewrittenCategory.trim() || context.category;
+
+      const rewrittenBody = await rewriteWithChoice(
+        buildFieldProofreadPrompt('body', context.body, context),
+        aiRefinementPrompt,
+        aiModelChoice
+      );
+      context.body = rewrittenBody.trim() || context.body;
+
+      if (titleInput) titleInput.value = context.title;
+      if (subtitleInput) subtitleInput.value = context.subtitle;
+      if (bodyInput) bodyInput.value = context.body;
+      applyComposerCategory(context.category);
+
+      showStatus('AI proofread applied. Review, edit further if needed, then Publish.');
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'AI proofreading failed.');
+    } finally {
+      setComposerBusy(false, 'proofread');
+    }
+  });
+
   cancelBtn?.addEventListener('click', () => {
     overlay.remove();
   });
@@ -1375,9 +1526,6 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     const title = String(formData.get('title') || '').trim();
     const subtitle = String(formData.get('subtitle') || '').trim();
     const body = String(formData.get('body') || '').trim();
-    const useAiProofread = formData.get('useAiProofread') === 'on';
-    const aiModelChoice = normalizeAiModelChoice(String(formData.get('aiModelChoice') || 'auto'));
-    const aiRefinementPrompt = String(formData.get('aiRefinementPrompt') || '').trim();
     const href = String(formData.get('href') || '#').trim() || '#';
     const selectedCategory = String(formData.get('category') || '').trim();
     const newCategory = String(formData.get('newCategory') || '').trim();
@@ -1389,52 +1537,22 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
       return;
     }
 
+    const confirmed = window.confirm(
+      isEditMode
+        ? 'Publish these updates to the article now?'
+        : 'Publish this article now?'
+    );
+    if (!confirmed) {
+      showStatus('Publish canceled.');
+      return;
+    }
+
     try {
-      saveBtn.disabled = true;
-      saveBtn.textContent = isEditMode ? 'Saving...' : 'Posting...';
+      setComposerBusy(true, 'publish');
 
       let finalTitle = title;
       let finalSubtitle = subtitle;
       let finalBody = body;
-
-      if (useAiProofread) {
-        const useHostedAi = shouldUseHostedAiForChoice(aiModelChoice);
-
-        showStatus(
-          useHostedAi
-            ? aiModelChoice === 'gemini'
-              ? 'Applying AI proofreading via Gemini...'
-              : 'Applying AI proofreading in production...'
-            : `Applying AI proofreading via local Ollama (${ollamaModel})...`
-        );
-        saveBtn.textContent = 'AI Editing...';
-
-        const rewrite = (text: string) => {
-          if (!text.trim()) return Promise.resolve(text);
-          if (useHostedAi) {
-            return rewriteWithHostedAi(text, {
-              refinementPrompt: aiRefinementPrompt,
-              modelChoice: aiModelChoice
-            });
-          }
-          return rewriteWithOllama(text, { refinementPrompt: aiRefinementPrompt });
-        };
-
-        const rewrittenTitle = await rewrite(finalTitle);
-        finalTitle = rewrittenTitle.trim() || finalTitle;
-
-        const rewrittenSubtitle = await rewrite(finalSubtitle);
-        finalSubtitle = rewrittenSubtitle.trim() || finalSubtitle;
-
-        const rewrittenBody = await rewrite(finalBody);
-        finalBody = rewrittenBody.trim() || finalBody;
-
-        if (titleInput) titleInput.value = finalTitle;
-        if (subtitleInput) subtitleInput.value = finalSubtitle;
-        if (bodyInput) bodyInput.value = finalBody;
-
-        saveBtn.textContent = isEditMode ? 'Saving...' : 'Posting...';
-      }
 
       const imageUrls: string[] = [];
       const shouldCropBeforeUpload = imageFiles.length === 1;
@@ -1447,8 +1565,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
             title: 'Adjust article image'
           });
           if (!preparedFile) {
-            saveBtn.disabled = false;
-            saveBtn.textContent = composerActionLabel;
+            setComposerBusy(false, 'publish');
             showStatus('Image upload canceled.');
             return;
           }
@@ -1492,8 +1609,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     } catch (error) {
       showStatus(error instanceof Error ? error.message : isEditMode ? 'Failed to update article.' : 'Failed to post article.');
     } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = composerActionLabel;
+      setComposerBusy(false, 'publish');
     }
   });
 };
