@@ -1331,6 +1331,33 @@ h1 {
   margin: 0 auto;
 }
 
+.news-read-close-btn {
+  display: none;
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.news-read-close-btn:hover,
+.news-read-close-btn:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--surface);
+}
+
 .news-read-heading {
   margin: 0;
   width: 100%;
@@ -1444,6 +1471,22 @@ h1 {
 
 .news-read-nav [data-news-next] {
   margin-left: auto;
+}
+
+@media (min-width: 641px) {
+  .news-read-topbar {
+    cursor: default;
+    user-select: text;
+    padding-right: 56px;
+  }
+
+  .news-read-sheet-thumb {
+    display: none;
+  }
+
+  .news-read-close-btn {
+    display: inline-flex;
+  }
 }
 
 body.news-read-open {
