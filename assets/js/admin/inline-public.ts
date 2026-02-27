@@ -945,7 +945,9 @@ const toCardRecord = (item: Element): CardRecord => {
   )?.trim() || '';
   const body = (
     isLatestNews
-      ? item.querySelector('.latest-news-body')?.textContent || item.querySelector('.latest-news-fallback-body')?.textContent
+      ? (item as HTMLElement).dataset.cardBodyHtml ||
+        item.querySelector('.latest-news-body')?.textContent ||
+        item.querySelector('.latest-news-fallback-body')?.textContent
       : item.querySelector('p')?.textContent
   )?.trim() || '';
   const category = ((item as HTMLElement).dataset.cardCategory || getText(item, '.news-category') || 'General').trim();
@@ -1075,7 +1077,19 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
         </label>
         <label>
           Preview / Body
-          <textarea name="body" rows="4" required></textarea>
+          <div class="news-rich-editor" data-news-rich-editor>
+            <div class="news-rich-toolbar" role="toolbar" aria-label="Body formatting">
+              <button type="button" data-editor-cmd="bold" title="Bold"><strong>B</strong></button>
+              <button type="button" data-editor-cmd="italic" title="Italic"><em>I</em></button>
+              <button type="button" data-editor-cmd="underline" title="Underline"><u>U</u></button>
+              <button type="button" data-editor-cmd="insertUnorderedList" title="Bulleted list">• List</button>
+              <button type="button" data-editor-cmd="insertOrderedList" title="Numbered list">1. List</button>
+              <button type="button" data-editor-action="link" title="Insert link">Link</button>
+              <button type="button" data-editor-action="clear" title="Clear formatting">Clear</button>
+            </div>
+            <div class="news-rich-surface" data-news-rich-input contenteditable="true" role="textbox" aria-multiline="true"></div>
+          </div>
+          <textarea name="body" rows="4" required hidden></textarea>
         </label>
         <div class="news-overlay-ai-options">
           <label>
@@ -1139,6 +1153,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const titleInput = overlay.querySelector('input[name="title"]') as HTMLInputElement | null;
   const subtitleInput = overlay.querySelector('input[name="subtitle"]') as HTMLInputElement | null;
   const bodyInput = overlay.querySelector('textarea[name="body"]') as HTMLTextAreaElement | null;
+  const bodyEditor = overlay.querySelector('[data-news-rich-input]') as HTMLDivElement | null;
   const hrefInput = overlay.querySelector('input[name="href"]') as HTMLInputElement | null;
   const newCategoryInput = overlay.querySelector('input[name="newCategory"]') as HTMLInputElement | null;
   const imageInput = overlay.querySelector('input[name="imageFile"]') as HTMLInputElement | null;
@@ -1153,6 +1168,45 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const proofreadBtn = overlay.querySelector('#news-overlay-proofread') as HTMLButtonElement | null;
   const saveBtn = overlay.querySelector('#news-overlay-save') as HTMLButtonElement | null;
   let pendingImageFiles: File[] = [];
+
+  const editorEscapeHtml = (value: string) =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+  const bodyHtmlToPlainText = (value: string) => {
+    const temp = document.createElement('div');
+    temp.innerHTML = value || '';
+    return (temp.textContent || '').replace(/\s+/g, ' ').trim();
+  };
+
+  const setBodyEditorContent = (value: string) => {
+    if (!bodyEditor) return;
+    const raw = (value || '').trim();
+    if (!raw) {
+      bodyEditor.innerHTML = '';
+      return;
+    }
+
+    const hasHtml = /<[^>]+>/.test(raw);
+    bodyEditor.innerHTML = hasHtml ? raw : editorEscapeHtml(raw).replace(/\n/g, '<br>');
+  };
+
+  const syncBodyInputFromEditor = () => {
+    if (!bodyEditor || !bodyInput) return;
+    const html = (bodyEditor.innerHTML || '')
+      .replace(/<(div|p|li)>\s*<br\s*\/?><\/(div|p|li)>/gi, '')
+      .trim();
+    bodyInput.value = html;
+  };
+
+  const getBodyPlainText = () => {
+    if (!bodyEditor) return '';
+    return bodyHtmlToPlainText(bodyEditor.innerHTML || '');
+  };
 
   const setComposerBusy = (busy: boolean, mode: 'proofread' | 'publish') => {
     if (saveBtn) {
@@ -1169,6 +1223,12 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     if (aiModelSelect) {
       aiModelSelect.disabled = busy;
     }
+    if (bodyEditor) {
+      bodyEditor.contentEditable = busy ? 'false' : 'true';
+    }
+    overlay.querySelectorAll<HTMLButtonElement>('.news-rich-toolbar button').forEach((button) => {
+      button.disabled = busy;
+    });
   };
 
   const getComposerCategory = () => {
@@ -1398,7 +1458,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   if (isEditMode && editRecord) {
     if (titleInput) titleInput.value = editRecord.title || '';
     if (subtitleInput) subtitleInput.value = editRecord.subtitle || '';
-    if (bodyInput) bodyInput.value = editRecord.body || '';
+    setBodyEditorContent(editRecord.body || '');
+    syncBodyInputFromEditor();
     if (hrefInput) hrefInput.value = editRecord.href || '#';
 
     if (categorySelect) {
@@ -1412,6 +1473,52 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
       }
     }
   }
+
+  if (!isEditMode) {
+    setBodyEditorContent('');
+    syncBodyInputFromEditor();
+  }
+
+  overlay.querySelectorAll<HTMLButtonElement>('.news-rich-toolbar button').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (!bodyEditor) return;
+      bodyEditor.focus();
+
+      const command = button.dataset.editorCmd;
+      const action = button.dataset.editorAction;
+
+      if (command) {
+        document.execCommand(command, false);
+        syncBodyInputFromEditor();
+        return;
+      }
+
+      if (action === 'link') {
+        const url = window.prompt('Enter link URL (https://...)', 'https://');
+        if (!url) return;
+        document.execCommand('createLink', false, url.trim());
+        syncBodyInputFromEditor();
+        return;
+      }
+
+      if (action === 'clear') {
+        document.execCommand('removeFormat', false);
+        syncBodyInputFromEditor();
+      }
+    });
+  });
+
+  bodyEditor?.addEventListener('input', () => {
+    syncBodyInputFromEditor();
+  });
+
+  bodyEditor?.addEventListener('paste', (event) => {
+    event.preventDefault();
+    const text = event.clipboardData?.getData('text/plain') || '';
+    document.execCommand('insertText', false, text);
+    syncBodyInputFromEditor();
+  });
 
   if (aiModelSelect) {
     aiModelSelect.value = getPreferredAiModelChoice();
@@ -1439,7 +1546,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
 
   proofreadBtn?.addEventListener('click', async () => {
     const currentTitle = (titleInput?.value || '').trim();
-    const currentBody = (bodyInput?.value || '').trim();
+    const currentBody = getBodyPlainText();
     const currentCategory = getComposerCategory();
     if (!currentTitle || !currentBody || !currentCategory) {
       showStatus('Add title, body, and category first, then run AI Proofread.');
@@ -1497,7 +1604,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
 
       if (titleInput) titleInput.value = context.title;
       if (subtitleInput) subtitleInput.value = context.subtitle;
-      if (bodyInput) bodyInput.value = context.body;
+      setBodyEditorContent(context.body);
+      syncBodyInputFromEditor();
       applyComposerCategory(context.category);
 
       showStatus('AI proofread applied. Review, edit further if needed, then Publish.');
@@ -1522,6 +1630,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     event.preventDefault();
     if (!form || !saveBtn) return;
 
+    syncBodyInputFromEditor();
+
     const formData = new FormData(form);
     const title = String(formData.get('title') || '').trim();
     const subtitle = String(formData.get('subtitle') || '').trim();
@@ -1532,7 +1642,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     const imageFiles = pendingImageFiles.filter((file) => file.size > 0);
 
     const category = selectedCategory === '__new__' ? newCategory : selectedCategory;
-    if (!title || !body || !category) {
+    const bodyPlain = bodyHtmlToPlainText(body);
+    if (!title || !bodyPlain || !category) {
       showStatus('Title, body, and category are required.');
       return;
     }

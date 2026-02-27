@@ -5,6 +5,13 @@ const escapeHtmlAttribute = (value = '') =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
+const stripHtmlTags = (value = '') =>
+  String(value)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const parseCardImageUrls = (value) => {
   const raw = (value || '').trim();
   if (!raw) return [];
@@ -200,6 +207,8 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                       const normalizedSubtitle = (item.subtitle || '').trim();
                       const fallbackHeading = item.title;
                       const showSubtitle = Boolean(normalizedSubtitle) && normalizedSubtitle.toLowerCase() !== item.title.toLowerCase();
+                      const bodyHtml = (item.body || '').trim();
+                      const bodyPreview = stripHtmlTags(bodyHtml);
                       const attrs = [
                         section.editable ? 'data-editable-card="true"' : '',
                         section.sectionKey ? `data-section-key="${section.sectionKey}"` : '',
@@ -211,6 +220,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                         `data-card-date="${escapeHtmlAttribute(metadata.publishedLabel)}"`,
                         `data-card-date-iso="${escapeHtmlAttribute(metadata.publishedIso)}"`,
                         `data-card-read-time="${escapeHtmlAttribute(metadata.readTimeLabel)}"`,
+                        `data-card-body-html="${escapeHtmlAttribute(bodyHtml)}"`,
                         `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
                         typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
                         'data-card-clickable="true"'
@@ -236,7 +246,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                             <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
                             ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
                             <div class="latest-news-preview ${hasImage ? '' : 'is-hidden'}">
-                              <p class="latest-news-body">${item.body}</p>
+                              <div class="latest-news-body">${bodyPreview}</div>
                               <span class="latest-news-read-more">Read more</span>
                             </div>
                           </div>
@@ -848,6 +858,7 @@ const openLatestNewsReadOverlay = (slide) => {
       currentSlide.querySelector('.latest-news-fallback-body')?.textContent ??
       ''
     ).trim();
+    const bodyHtml = (currentSlide.dataset.cardBodyHtml || '').trim();
     const image = currentSlide.querySelector('.latest-news-image');
     const imageData = (currentSlide.dataset.cardImageUrl || '').trim();
     const imageUrls = parseCardImageUrls(imageData);
@@ -874,6 +885,7 @@ const openLatestNewsReadOverlay = (slide) => {
       subtitle,
       metadata,
       body,
+      bodyHtml,
       imageUrls,
       href
     };
@@ -1056,7 +1068,7 @@ const openLatestNewsReadOverlay = (slide) => {
           <span class="news-read-meta-item">${article.metadata.readTimeLabel}</span>
         </p>
         ${article.subtitle ? `<p class="news-read-subtitle">${article.subtitle}</p>` : ''}
-        <p class="news-read-body">${article.body || 'No article content provided yet.'}</p>
+        <div class="news-read-body">${article.bodyHtml || article.body || 'No article content provided yet.'}</div>
         ${article.href && article.href !== '#' ? `<a class="btn btn-secondary" href="${article.href}">Open linked page</a>` : ''}
       </div>
     `;
