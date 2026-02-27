@@ -35,6 +35,51 @@ const serializeCardImageUrls = (urls) => {
   return normalized.length === 1 ? normalized[0] : JSON.stringify(normalized);
 };
 
+const parseNewsDate = (value) => {
+  const raw = (value || '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const formatNewsDateLabel = (value) => {
+  const parsed = parseNewsDate(value) || new Date();
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  }).format(parsed);
+};
+
+const estimateReadTimeMinutes = (text) => {
+  const words = String(text || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return Math.max(1, Math.round(words / 180));
+};
+
+const buildNewsMetadata = (item = {}) => {
+  const source = item && typeof item === 'object' ? item : {};
+  const author = (source.author || source.byline || source.reporter || 'Bhanoyi News Desk').trim() || 'Bhanoyi News Desk';
+  const location = (source.location || source.dateline || source.campus || 'Bhanoyi Secondary School').trim() || 'Bhanoyi Secondary School';
+  const rawDate = (source.postedAt || source.publishedAt || source.publishedDate || source.date || '').trim();
+  const date = parseNewsDate(rawDate) || new Date();
+  const publishedLabel = formatNewsDateLabel(rawDate);
+  const publishedIso = date.toISOString().split('T')[0];
+  const readTimeMinutes = estimateReadTimeMinutes(source.body || '');
+  const readTimeLabel = `${readTimeMinutes} min read`;
+
+  return {
+    author,
+    location,
+    publishedLabel,
+    publishedIso,
+    readTimeLabel
+  };
+};
+
 const renderCard = (item, clickable = false, context = {}) => {
   const imageUrls = parseCardImageUrls(item.imageUrl || '');
   const primaryImageUrl = imageUrls[0] || '';
@@ -142,6 +187,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                   ${items
                     .map((item, idx) => {
                       const category = (item.category || 'General').trim() || 'General';
+                      const metadata = buildNewsMetadata(item);
                       const imageUrls = parseCardImageUrls(item.imageUrl || '');
                       const primaryImageUrl = imageUrls[0] || '';
                       const imageData = serializeCardImageUrls(imageUrls);
@@ -155,6 +201,11 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                         item.id ? `data-card-id="${item.id}"` : '',
                         `data-card-category="${category}"`,
                         `data-card-subtitle="${item.subtitle || ''}"`,
+                        `data-card-author="${escapeHtmlAttribute(metadata.author)}"`,
+                        `data-card-location="${escapeHtmlAttribute(metadata.location)}"`,
+                        `data-card-date="${escapeHtmlAttribute(metadata.publishedLabel)}"`,
+                        `data-card-date-iso="${escapeHtmlAttribute(metadata.publishedIso)}"`,
+                        `data-card-read-time="${escapeHtmlAttribute(metadata.readTimeLabel)}"`,
                         `data-card-image-url="${escapeHtmlAttribute(imageData)}"`,
                         typeof item.index === 'number' ? `data-sort-order="${item.index}"` : '',
                         'data-card-clickable="true"'
@@ -171,6 +222,12 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                           </div>
                           <div class="latest-news-content">
                             <span class="news-category">${category}</span>
+                            <p class="latest-news-meta" aria-label="Article metadata">
+                              <span class="latest-news-meta-item"><time datetime="${metadata.publishedIso}">${metadata.publishedLabel}</time></span>
+                              <span class="latest-news-meta-item">${metadata.location}</span>
+                              <span class="latest-news-meta-item">By ${metadata.author}</span>
+                              <span class="latest-news-meta-item">${metadata.readTimeLabel}</span>
+                            </p>
                             <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
                             ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
                             <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
@@ -790,12 +847,24 @@ const openLatestNewsReadOverlay = (slide) => {
     if (!imageUrls.length && imageUrl) {
       imageUrls.push(imageUrl);
     }
+    const metadata = buildNewsMetadata({
+      author: (currentSlide.dataset.cardAuthor || '').trim(),
+      location: (currentSlide.dataset.cardLocation || '').trim(),
+      date: (currentSlide.dataset.cardDate || '').trim(),
+      body,
+      postedAt: (currentSlide.dataset.cardDateIso || '').trim()
+    });
+    const readTimeFromCard = (currentSlide.dataset.cardReadTime || '').trim();
+    if (readTimeFromCard) {
+      metadata.readTimeLabel = readTimeFromCard;
+    }
     const href = (currentSlide.getAttribute('href') || '#').trim();
 
     return {
       category,
       title,
       subtitle,
+      metadata,
       body,
       imageUrls,
       href
@@ -972,6 +1041,12 @@ const openLatestNewsReadOverlay = (slide) => {
         : ''}
       <div class="news-read-content">
         ${article.category ? `<p class="news-read-category">${article.category}</p>` : ''}
+        <p class="news-read-meta" aria-label="Article metadata">
+          <span class="news-read-meta-item">By ${article.metadata.author}</span>
+          <span class="news-read-meta-item">${article.metadata.location}</span>
+          <span class="news-read-meta-item"><time datetime="${article.metadata.publishedIso}">${article.metadata.publishedLabel}</time></span>
+          <span class="news-read-meta-item">${article.metadata.readTimeLabel}</span>
+        </p>
         ${article.subtitle ? `<p class="news-read-subtitle">${article.subtitle}</p>` : ''}
         <p class="news-read-body">${article.body || 'No article content provided yet.'}</p>
         ${article.href && article.href !== '#' ? `<a class="btn btn-secondary" href="${article.href}">Open linked page</a>` : ''}
