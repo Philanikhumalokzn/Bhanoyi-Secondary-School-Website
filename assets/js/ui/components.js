@@ -797,6 +797,7 @@ const openLatestNewsReadOverlay = (slide) => {
   overlay.innerHTML = `
     <article class="news-read-panel" role="dialog" aria-modal="true" aria-label="Latest news article">
       <div class="news-read-topbar">
+        <h2 class="news-read-heading" data-news-read-heading></h2>
         <button type="button" class="news-read-close" aria-label="Close article">×</button>
       </div>
       <div class="news-read-dynamic"></div>
@@ -810,6 +811,7 @@ const openLatestNewsReadOverlay = (slide) => {
 
   const dynamic = overlay.querySelector('.news-read-dynamic');
   const state = overlay.querySelector('[data-news-state]');
+  const heading = overlay.querySelector('[data-news-read-heading]');
   let mediaAutoRotateTimer = null;
 
   const clearMediaCarousel = () => {
@@ -936,12 +938,15 @@ const openLatestNewsReadOverlay = (slide) => {
         : ''}
       <div class="news-read-content">
         ${article.category ? `<p class="news-read-category">${article.category}</p>` : ''}
-        <h3>${article.title}</h3>
         ${article.subtitle ? `<p class="news-read-subtitle">${article.subtitle}</p>` : ''}
         <p class="news-read-body">${article.body || 'No article content provided yet.'}</p>
         ${article.href && article.href !== '#' ? `<a class="btn btn-secondary" href="${article.href}">Open linked page</a>` : ''}
       </div>
     `;
+
+    if (heading) {
+      heading.textContent = article.title || 'Latest News';
+    }
 
     if (state) {
       state.textContent = `${currentIndex + 1} of ${laneSlides.length}`;
