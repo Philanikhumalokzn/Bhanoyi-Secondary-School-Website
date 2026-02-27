@@ -601,10 +601,21 @@ export const renderPageEmailForms = (pageKey) => {
 export const initLatestNewsRotators = () => {
   const tracks = Array.from(document.querySelectorAll('[data-news-track]'));
   const adminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  const isDesktopViewport = window.matchMedia('(min-width: 860px)').matches;
 
   tracks.forEach((track) => {
     const rail = track.querySelector('[data-news-rail]');
     if (!rail) return;
+
+    if (isDesktopViewport) {
+      rail.style.transition = '';
+      rail.style.transform = '';
+      const slides = Array.from(rail.querySelectorAll('.latest-news-slide'));
+      slides.forEach((slide, index) => {
+        slide.classList.toggle('is-active', index === 0);
+      });
+      return;
+    }
 
     const baseSlides = Array.from(rail.querySelectorAll('.latest-news-slide'));
     const counter = track.parentElement?.querySelector('[data-news-counter]');

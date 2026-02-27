@@ -1925,6 +1925,34 @@ body.news-read-open {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .latest-news-layout.has-side-panel .latest-news-grid > .latest-news-lane {
+    grid-column: 1 / -1;
+  }
+
+  .latest-news-lane {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .latest-news-track {
+    overflow: visible;
+    min-height: auto;
+  }
+
+  .latest-news-rail {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .latest-news-slide {
+    min-height: 100%;
+  }
+
   .latest-news-layout.has-side-panel .latest-news-side-panel {
     grid-column: 4;
     justify-self: stretch;
