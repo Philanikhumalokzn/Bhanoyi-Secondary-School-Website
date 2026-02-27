@@ -1110,6 +1110,33 @@ h1 {
   resize: vertical;
 }
 
+.news-overlay-ai-options {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(248, 251, 255, 0.85);
+}
+
+.news-overlay-checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.news-overlay-checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.news-overlay-ai-options textarea {
+  min-height: 72px;
+}
+
 .news-overlay-actions {
   display: flex;
   justify-content: flex-end;

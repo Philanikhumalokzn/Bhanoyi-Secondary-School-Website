@@ -6,15 +6,22 @@ const json = (status, body) =>
     }
   });
 
-const buildPrompt = (input) =>
-  [
+const buildPrompt = (input, refinementPrompt = '') => {
+  const normalizedRefinement = normalize(refinementPrompt);
+  const promptLines = [
     'Rewrite the text for a school website admin editor.',
     'Keep the original meaning and factual details.',
     'Improve grammar, clarity, and readability.',
-    'Return only the rewritten text with no quotes or extra labels.',
-    '',
-    input
-  ].join('\n');
+    'Return only the rewritten text with no quotes or extra labels.'
+  ];
+
+  if (normalizedRefinement) {
+    promptLines.push(`Additional refinement instructions: ${normalizedRefinement}`);
+  }
+
+  promptLines.push('', input);
+  return promptLines.join('\n');
+};
 
 const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -39,6 +46,7 @@ export default async function handler(request) {
   }
 
   const input = normalize(body?.input);
+  const refinementPrompt = normalize(body?.refinementPrompt);
   if (!input) {
     return json(400, { error: 'Input text is required.' });
   }
@@ -61,7 +69,7 @@ export default async function handler(request) {
       body: JSON.stringify({
         model,
         temperature: 0.3,
-        messages: [{ role: 'user', content: buildPrompt(input) }]
+        messages: [{ role: 'user', content: buildPrompt(input, refinementPrompt) }]
       })
     });
   } catch {

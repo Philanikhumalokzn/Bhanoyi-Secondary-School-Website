@@ -715,7 +715,14 @@ const findAiTarget = (root: Element): Element | null => {
   return root.querySelector('[contenteditable="true"], input[type="text"], input[type="url"], textarea');
 };
 
-const rewriteWithHostedAi = async (input: string) => {
+type AiRewriteOptions = {
+  refinementPrompt?: string;
+};
+
+const normalizeRefinementPrompt = (value?: string) => (typeof value === 'string' ? value.trim() : '');
+
+const rewriteWithHostedAi = async (input: string, options: AiRewriteOptions = {}) => {
+  const refinementPrompt = normalizeRefinementPrompt(options.refinementPrompt);
   let response: Response;
   try {
     response = await fetch('/api/ai-rewrite', {
@@ -723,7 +730,10 @@ const rewriteWithHostedAi = async (input: string) => {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ input })
+      body: JSON.stringify({
+        input,
+        refinementPrompt
+      })
     });
   } catch {
     throw new Error('Could not reach production AI endpoint. Check deployment and try again.');
@@ -742,15 +752,21 @@ const rewriteWithHostedAi = async (input: string) => {
   return rewritten;
 };
 
-const rewriteWithOllama = async (input: string) => {
-  const prompt = [
+const rewriteWithOllama = async (input: string, options: AiRewriteOptions = {}) => {
+  const refinementPrompt = normalizeRefinementPrompt(options.refinementPrompt);
+  const promptLines = [
     'Rewrite the text for a school website admin editor.',
     'Keep the original meaning and factual details.',
     'Improve grammar, clarity, and readability.',
-    'Return only the rewritten text with no quotes or extra labels.',
-    '',
-    input
-  ].join('\n');
+    'Return only the rewritten text with no quotes or extra labels.'
+  ];
+
+  if (refinementPrompt) {
+    promptLines.push(`Additional refinement instructions: ${refinementPrompt}`);
+  }
+
+  promptLines.push('', input);
+  const prompt = promptLines.join('\n');
 
   let response: Response;
   try {
@@ -981,6 +997,16 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
           Preview / Body
           <textarea name="body" rows="4" required></textarea>
         </label>
+        <div class="news-overlay-ai-options">
+          <label class="news-overlay-checkbox-label">
+            <input type="checkbox" name="useAiProofread" />
+            <span>Use AI proofreading and editing before save</span>
+          </label>
+          <label>
+            AI refinement prompt (optional)
+            <textarea name="aiRefinementPrompt" rows="2" placeholder="Example: Keep a formal school tone and make it concise."></textarea>
+          </label>
+        </div>
         <label>
           Category
           <select name="category" id="news-category-select">
@@ -1242,6 +1268,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     const title = String(formData.get('title') || '').trim();
     const subtitle = String(formData.get('subtitle') || '').trim();
     const body = String(formData.get('body') || '').trim();
+    const useAiProofread = formData.get('useAiProofread') === 'on';
+    const aiRefinementPrompt = String(formData.get('aiRefinementPrompt') || '').trim();
     const href = String(formData.get('href') || '#').trim() || '#';
     const selectedCategory = String(formData.get('category') || '').trim();
     const newCategory = String(formData.get('newCategory') || '').trim();
@@ -1256,6 +1284,40 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     try {
       saveBtn.disabled = true;
       saveBtn.textContent = isEditMode ? 'Saving...' : 'Posting...';
+
+      let finalTitle = title;
+      let finalSubtitle = subtitle;
+      let finalBody = body;
+
+      if (useAiProofread) {
+        const shouldUseHostedAi = !isLocalHost() && isLoopbackOllama;
+        showStatus(shouldUseHostedAi ? 'Applying AI proofreading in production...' : `Applying AI proofreading via local Ollama (${ollamaModel})...`);
+        saveBtn.textContent = 'AI Editing...';
+
+        const rewrite = (text: string) => {
+          if (!text.trim()) return Promise.resolve(text);
+          if (shouldUseHostedAi) {
+            return rewriteWithHostedAi(text, { refinementPrompt: aiRefinementPrompt });
+          }
+          return rewriteWithOllama(text, { refinementPrompt: aiRefinementPrompt });
+        };
+
+        const [rewrittenTitle, rewrittenSubtitle, rewrittenBody] = await Promise.all([
+          rewrite(finalTitle),
+          rewrite(finalSubtitle),
+          rewrite(finalBody)
+        ]);
+
+        finalTitle = rewrittenTitle.trim() || finalTitle;
+        finalSubtitle = rewrittenSubtitle.trim() || finalSubtitle;
+        finalBody = rewrittenBody.trim() || finalBody;
+
+        if (titleInput) titleInput.value = finalTitle;
+        if (subtitleInput) subtitleInput.value = finalSubtitle;
+        if (bodyInput) bodyInput.value = finalBody;
+
+        saveBtn.textContent = isEditMode ? 'Saving...' : 'Posting...';
+      }
 
       const imageUrls: string[] = [];
       const shouldCropBeforeUpload = imageFiles.length === 1;
@@ -1299,9 +1361,9 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
         page_key: currentPageKey(),
         section_key: 'latest_news',
         category,
-        subtitle,
-        title,
-        body,
+        subtitle: finalSubtitle,
+        title: finalTitle,
+        body: finalBody,
         image_url: formatCardImageUrls(finalImageUrls),
         href,
         sort_order: nextSortOrder
