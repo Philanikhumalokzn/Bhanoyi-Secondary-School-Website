@@ -796,9 +796,9 @@ const openLatestNewsReadOverlay = (slide) => {
   overlay.className = 'news-read-overlay';
   overlay.innerHTML = `
     <article class="news-read-panel" role="dialog" aria-modal="true" aria-label="Latest news article">
-      <div class="news-read-topbar">
+      <div class="news-read-topbar" data-news-sheet-handle>
+        <div class="news-read-sheet-thumb" aria-hidden="true"></div>
         <h2 class="news-read-heading" data-news-read-heading></h2>
-        <button type="button" class="news-read-close" aria-label="Close article">×</button>
       </div>
       <div class="news-read-dynamic"></div>
       <div class="news-read-nav ${laneSlides.length > 1 ? '' : 'is-hidden'}">
@@ -812,7 +812,28 @@ const openLatestNewsReadOverlay = (slide) => {
   const dynamic = overlay.querySelector('.news-read-dynamic');
   const state = overlay.querySelector('[data-news-state]');
   const heading = overlay.querySelector('[data-news-read-heading]');
+  const panel = overlay.querySelector('.news-read-panel');
+  const sheetHandle = overlay.querySelector('[data-news-sheet-handle]');
   let mediaAutoRotateTimer = null;
+  let isSheetDragging = false;
+  let sheetDragStartY = 0;
+  let sheetDragOffsetY = 0;
+
+  const setSheetOffset = (offsetY, animate = false) => {
+    if (!(panel instanceof HTMLElement)) return;
+    panel.style.transition = animate ? 'transform 220ms ease' : 'none';
+    panel.style.transform = `translateY(${Math.max(0, offsetY)}px)`;
+  };
+
+  const closeWithSheetAnimation = () => {
+    if (!(panel instanceof HTMLElement)) {
+      close();
+      return;
+    }
+    const panelHeight = panel.getBoundingClientRect().height;
+    setSheetOffset(panelHeight, true);
+    window.setTimeout(close, 220);
+  };
 
   const clearMediaCarousel = () => {
     if (mediaAutoRotateTimer !== null) {
@@ -969,9 +990,46 @@ const openLatestNewsReadOverlay = (slide) => {
 
   const close = () => {
     document.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('touchmove', onSheetDragMove);
+    document.removeEventListener('touchend', onSheetDragEnd);
+    document.removeEventListener('touchcancel', onSheetDragEnd);
+    document.removeEventListener('mousemove', onSheetDragMove);
+    document.removeEventListener('mouseup', onSheetDragEnd);
     clearMediaCarousel();
     document.body.classList.remove('news-read-open');
     overlay.remove();
+  };
+
+  const onSheetDragStart = (clientY) => {
+    isSheetDragging = true;
+    sheetDragStartY = clientY;
+    sheetDragOffsetY = 0;
+    setSheetOffset(0, false);
+  };
+
+  const onSheetDragMove = (event) => {
+    if (!isSheetDragging) return;
+
+    const clientY = event instanceof TouchEvent
+      ? event.touches?.[0]?.clientY
+      : event.clientY;
+
+    if (typeof clientY !== 'number') return;
+    sheetDragOffsetY = Math.max(0, clientY - sheetDragStartY);
+    setSheetOffset(sheetDragOffsetY, false);
+  };
+
+  const onSheetDragEnd = () => {
+    if (!isSheetDragging) return;
+    isSheetDragging = false;
+
+    if (sheetDragOffsetY > 120) {
+      closeWithSheetAnimation();
+      return;
+    }
+
+    sheetDragOffsetY = 0;
+    setSheetOffset(0, true);
   };
 
   const onKeyDown = (event) => {
@@ -994,12 +1052,32 @@ const openLatestNewsReadOverlay = (slide) => {
     if (event.target === overlay) close();
   });
 
+  sheetHandle?.addEventListener('touchstart', (event) => {
+    if (!event.touches || event.touches.length !== 1) return;
+    onSheetDragStart(event.touches[0].clientY);
+  }, { passive: true });
+
+  sheetHandle?.addEventListener('mousedown', (event) => {
+    onSheetDragStart(event.clientY);
+  });
+
+  document.addEventListener('touchmove', onSheetDragMove, { passive: true });
+  document.addEventListener('touchend', onSheetDragEnd);
+  document.addEventListener('touchcancel', onSheetDragEnd);
+  document.addEventListener('mousemove', onSheetDragMove);
+  document.addEventListener('mouseup', onSheetDragEnd);
+
   overlay.querySelector('[data-news-next]')?.addEventListener('click', nextArticle);
   overlay.querySelector('[data-news-prev]')?.addEventListener('click', previousArticle);
-  overlay.querySelector('.news-read-close')?.addEventListener('click', close);
   document.addEventListener('keydown', onKeyDown);
   document.body.classList.add('news-read-open');
   document.body.appendChild(overlay);
+  if (panel instanceof HTMLElement) {
+    setSheetOffset(panel.getBoundingClientRect().height, false);
+    window.requestAnimationFrame(() => {
+      setSheetOffset(0, true);
+    });
+  }
   renderArticle();
 };
 
