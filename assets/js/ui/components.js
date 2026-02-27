@@ -130,6 +130,11 @@ const withAdminQuery = (href) => {
   }
 };
 
+const isAdminModeEnabled = () => {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('admin') === '1';
+};
+
 const renderSectionAttachments = (section) => {
   const attachments = Array.isArray(section.attachments) ? section.attachments : [];
   if (!attachments.length) {
@@ -1207,5 +1212,21 @@ export const renderFooter = (siteContent) => `
       <p>© 2026 ${siteContent.school.name}. All rights reserved.</p>
       <p><a class="footer-utility-link" href="${withAdminQuery('email-tester.html')}">Email Tester</a></p>
     </div>
+    ${
+      isAdminModeEnabled()
+        ? `
+    <div class="container footer-admin-tools">
+      <form class="gemini-tester" data-gemini-tester="true" novalidate>
+        <label for="gemini-test-input">Gemini API Test</label>
+        <div class="gemini-tester-row">
+          <input id="gemini-test-input" name="prompt" type="text" value="Say OK if the API key works." maxlength="200" />
+          <button type="submit" class="btn btn-secondary">Test Key</button>
+        </div>
+        <p class="gemini-tester-status" data-gemini-status aria-live="polite"></p>
+      </form>
+    </div>
+    `
+        : ''
+    }
   </footer>
 `;

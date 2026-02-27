@@ -1668,6 +1668,55 @@ body.news-read-open {
   text-underline-offset: 2px;
 }
 
+.footer-admin-tools {
+  margin-top: 12px;
+}
+
+.gemini-tester {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  padding-top: 12px;
+}
+
+.gemini-tester label {
+  display: block;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.gemini-tester-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gemini-tester-row input {
+  flex: 1 1 320px;
+  min-width: 200px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(230, 239, 250, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.gemini-tester-row input::placeholder {
+  color: rgba(230, 239, 250, 0.72);
+}
+
+.gemini-tester-status {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+}
+
+.gemini-tester-status[data-tone='success'] {
+  color: #c8facc;
+}
+
+.gemini-tester-status[data-tone='error'] {
+  color: #ffd2d2;
+}
+
 .admin-shell {
   width: min(1200px, 94%);
   margin: 28px auto;

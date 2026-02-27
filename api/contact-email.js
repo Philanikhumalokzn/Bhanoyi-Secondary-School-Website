@@ -1,14 +1,5 @@
 import { sendEmail } from './mailer.js';
-
-const json = (status, body) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  });
-
-const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
+import { normalize, readJsonBody, sendJson } from './http.js';
 
 const cleanText = (value, maxLength = 5000) => normalize(value).slice(0, maxLength);
 
@@ -22,27 +13,27 @@ const escapeHtml = (value) =>
 
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
-export default async function handler(request) {
+export default async function handler(request, response) {
   if (request.method !== 'POST') {
-    return json(405, { error: 'Method not allowed.' });
+    return sendJson(response, 405, { error: 'Method not allowed.' });
   }
 
   const apiKey = normalize(process.env.RESEND_API_KEY);
   const toAddress = normalize(process.env.RESEND_CONTACT_TO) || normalize(process.env.RESEND_DEFAULT_TO) || normalize(process.env.MAIL_TO);
 
   if (!apiKey) {
-    return json(500, { error: 'RESEND_API_KEY is missing; update environment and redeploy.' });
+    return sendJson(response, 500, { error: 'RESEND_API_KEY is missing; update environment and redeploy.' });
   }
 
   if (!toAddress) {
-    return json(400, { error: 'Destination email is required (RESEND_CONTACT_TO or RESEND_DEFAULT_TO).' });
+    return sendJson(response, 400, { error: 'Destination email is required (RESEND_CONTACT_TO or RESEND_DEFAULT_TO).' });
   }
 
   let body;
   try {
-    body = await request.json();
+    body = await readJsonBody(request);
   } catch {
-    return json(400, { error: 'Invalid JSON body.' });
+    return sendJson(response, 400, { error: 'Invalid JSON body.' });
   }
 
   const fullName = cleanText(body?.fullName, 120);
@@ -53,22 +44,22 @@ export default async function handler(request) {
   const website = cleanText(body?.website, 120);
 
   if (website) {
-    return json(200, { ok: true });
+    return sendJson(response, 200, { ok: true });
   }
 
   if (!fullName || !email || !subject || !message) {
-    return json(400, { error: 'Full name, email, subject, and message are required.' });
+    return sendJson(response, 400, { error: 'Full name, email, subject, and message are required.' });
   }
 
   if (!isValidEmail(email)) {
-    return json(400, { error: 'Please provide a valid email address.' });
+    return sendJson(response, 400, { error: 'Please provide a valid email address.' });
   }
 
   const submittedAt = new Date().toISOString();
   const safeSubject = escapeHtml(subject);
 
   try {
-    const response = await sendEmail({
+    const emailResult = await sendEmail({
       to: toAddress,
       subject: `Contact form: ${subject}`,
       html: `
@@ -93,8 +84,8 @@ export default async function handler(request) {
       ].join('\n')
     });
 
-    return json(200, { ok: true, id: response?.id || response?.data?.id || null });
+    return sendJson(response, 200, { ok: true, id: emailResult?.id || emailResult?.data?.id || null });
   } catch (err) {
-    return json(500, { error: err?.message || 'Failed to send email via Resend.' });
+    return sendJson(response, 500, { error: err?.message || 'Failed to send email via Resend.' });
   }
 }

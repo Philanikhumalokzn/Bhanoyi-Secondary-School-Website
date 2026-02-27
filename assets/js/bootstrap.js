@@ -1,7 +1,7 @@
 import { getPageConfig } from './pages/index.js';
 import { loadSiteContent } from './content/content.loader.js';
 import { initInlinePublicAdmin } from './admin/inline-public.ts';
-import { initPageEmailForms } from './ui/forms.js';
+import { initGeminiApiTester, initPageEmailForms } from './ui/forms.js';
 import { renderSite } from './ui/layout.js';
 
 const bootstrap = async () => {
@@ -11,6 +11,7 @@ const bootstrap = async () => {
 
 	renderSite(siteContent, pageConfig);
 	initPageEmailForms();
+	initGeminiApiTester();
 	await initInlinePublicAdmin();
 };
 

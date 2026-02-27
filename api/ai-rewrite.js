@@ -1,10 +1,4 @@
-const json = (status, body) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  });
+import { normalize, readJsonBody, sendJson } from './http.js';
 
 const buildPrompt = (input, refinementPrompt = '') => {
   const normalizedRefinement = normalize(refinementPrompt);
@@ -23,7 +17,6 @@ const buildPrompt = (input, refinementPrompt = '') => {
   return promptLines.join('\n');
 };
 
-const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
 const PROVIDER_TIMEOUT_MS = 20000;
 
 const makeTimeoutController = () => {
@@ -49,9 +42,9 @@ const pickGeminiText = (data) => {
   return '';
 };
 
-export default async function handler(request) {
+export default async function handler(request, response) {
   if (request.method !== 'POST') {
-    return json(405, { error: 'Method not allowed.' });
+    return sendJson(response, 405, { error: 'Method not allowed.' });
   }
 
   const apiKey = normalize(process.env.AI_API_KEY);
@@ -66,16 +59,16 @@ export default async function handler(request) {
 
   let body;
   try {
-    body = await request.json();
+    body = await readJsonBody(request);
   } catch {
-    return json(400, { error: 'Invalid JSON body.' });
+    return sendJson(response, 400, { error: 'Invalid JSON body.' });
   }
 
   const input = normalize(body?.input);
   const refinementPrompt = normalize(body?.refinementPrompt);
   const modelChoice = normalize(body?.modelChoice).toLowerCase();
   if (!input) {
-    return json(400, { error: 'Input text is required.' });
+    return sendJson(response, 400, { error: 'Input text is required.' });
   }
 
   const wantsGemini = modelChoice === 'gemini';
@@ -87,11 +80,11 @@ export default async function handler(request) {
     : !canUseOpenAiCompatible && canUseGemini;
 
   if (!canUseGemini && !canUseOpenAiCompatible) {
-    return json(500, { error: 'Configure GOOGLE_API_KEY for Gemini or AI_API_KEY for OpenAI-compatible providers.' });
+    return sendJson(response, 500, { error: 'Configure GOOGLE_API_KEY for Gemini or AI_API_KEY for OpenAI-compatible providers.' });
   }
 
   if (wantsGemini && !canUseGemini) {
-    return json(500, { error: 'GOOGLE_API_KEY is not configured for Gemini.' });
+    return sendJson(response, 500, { error: 'GOOGLE_API_KEY is not configured for Gemini.' });
   }
 
   if (useGemini) {
@@ -118,9 +111,9 @@ export default async function handler(request) {
       });
     } catch (error) {
       if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
-        return json(504, { error: 'Gemini request timed out. Try a shorter prompt or retry.' });
+        return sendJson(response, 504, { error: 'Gemini request timed out. Try a shorter prompt or retry.' });
       }
-      return json(502, { error: 'Could not reach Google Gemini API.' });
+      return sendJson(response, 502, { error: 'Could not reach Google Gemini API.' });
     } finally {
       timeout.clear();
     }
@@ -128,15 +121,15 @@ export default async function handler(request) {
     const data = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
       const providerError = normalize(data?.error?.message) || normalize(data?.error) || 'Gemini request failed.';
-      return json(502, { error: providerError });
+      return sendJson(response, 502, { error: providerError });
     }
 
     const responseText = pickGeminiText(data);
     if (!responseText) {
-      return json(502, { error: 'Gemini returned an empty response.' });
+      return sendJson(response, 502, { error: 'Gemini returned an empty response.' });
     }
 
-    return json(200, { response: responseText });
+    return sendJson(response, 200, { response: responseText });
   }
 
   const model = defaultModel;
@@ -166,9 +159,9 @@ export default async function handler(request) {
     });
   } catch (error) {
     if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
-      return json(504, { error: 'AI provider timed out. Try a shorter prompt or retry.' });
+      return sendJson(response, 504, { error: 'AI provider timed out. Try a shorter prompt or retry.' });
     }
-    return json(502, { error: 'Could not reach AI provider.' });
+    return sendJson(response, 502, { error: 'Could not reach AI provider.' });
   } finally {
     timeout.clear();
   }
@@ -176,7 +169,7 @@ export default async function handler(request) {
   const data = await upstream.json().catch(() => ({}));
   if (!upstream.ok) {
     const providerError = normalize(data?.error?.message) || normalize(data?.error) || 'Provider request failed.';
-    return json(502, { error: providerError });
+    return sendJson(response, 502, { error: providerError });
   }
 
   const responseText =
@@ -185,8 +178,8 @@ export default async function handler(request) {
     normalize(data?.output_text);
 
   if (!responseText) {
-    return json(502, { error: 'AI provider returned an empty response.' });
+    return sendJson(response, 502, { error: 'AI provider returned an empty response.' });
   }
 
-  return json(200, { response: responseText });
+  return sendJson(response, 200, { response: responseText });
 }

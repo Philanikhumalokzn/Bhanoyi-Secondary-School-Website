@@ -1,16 +1,9 @@
 import { Resend } from 'resend';
+import { readJsonBody, sendJson } from './http.js';
 
-const json = (status, body) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  });
-
-export default async function handler(request) {
+export default async function handler(request, response) {
   if (request.method !== 'POST') {
-    return json(405, { error: 'Method not allowed.' });
+    return sendJson(response, 405, { error: 'Method not allowed.' });
   }
 
   const apiKey = process.env.RESEND_API_KEY;
@@ -18,9 +11,9 @@ export default async function handler(request) {
 
   let body;
   try {
-    body = await request.json();
+    body = await readJsonBody(request);
   } catch {
-    return json(400, { error: 'Invalid JSON body.' });
+    return sendJson(response, 400, { error: 'Invalid JSON body.' });
   }
 
   const to = typeof body?.to === 'string' ? body.to.trim() : '';
@@ -31,24 +24,24 @@ export default async function handler(request) {
   const toAddress = to || process.env.MAIL_TO;
 
   if (!resendClient) {
-    return json(500, { error: 'RESEND_API_KEY is missing; update environment and redeploy.' });
+    return sendJson(response, 500, { error: 'RESEND_API_KEY is missing; update environment and redeploy.' });
   }
 
   if (!toAddress) {
-    return json(400, { error: 'Destination email is required (either in the form or MAIL_TO)' });
+    return sendJson(response, 400, { error: 'Destination email is required (either in the form or MAIL_TO)' });
   }
 
   try {
-    const response = await resendClient.emails.send({
+    const emailResult = await resendClient.emails.send({
       from: fromAddress,
       to: toAddress,
       subject: subject || 'Resend Test Email',
       html: message ? `<p>${message}</p>` : '<p>Hello! This is a Resend test email from the Bhanoyi test harness.</p>'
     });
 
-    return json(200, { ok: true, id: response?.id || response?.data?.id || null });
+    return sendJson(response, 200, { ok: true, id: emailResult?.id || emailResult?.data?.id || null });
   } catch (err) {
     console.error('Resend send error:', err);
-    return json(500, { error: err?.message || 'Failed to send email via Resend.' });
+    return sendJson(response, 500, { error: err?.message || 'Failed to send email via Resend.' });
   }
 }
