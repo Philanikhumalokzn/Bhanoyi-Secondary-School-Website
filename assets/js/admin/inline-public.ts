@@ -1278,12 +1278,31 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     category: string;
     body: string;
     href: string;
-  }) => {
+  }, refinementPrompt: string) => {
+    const normalizedField = fieldLabel.trim().toLowerCase();
+    const fieldRule =
+      normalizedField === 'main heading'
+        ? 'Hard-wired default: keep the main heading short and punchy (target 6-12 words). Never include full body detail in the heading.'
+        : normalizedField === 'subtitle'
+          ? 'Hard-wired default: keep subtitle even shorter than heading (target 4-8 words), supporting the heading without repeating it.'
+          : normalizedField === 'body'
+            ? 'Hard-wired default: body can be longer; preserve facts and improve clarity, grammar, and flow.'
+            : normalizedField === 'category'
+              ? 'Hard-wired default: category must remain concise (1-3 words) and newsroom-appropriate.'
+              : 'Hard-wired default: keep this field concise and newsroom-appropriate.';
+
+    const refinementLine = refinementPrompt
+      ? `Admin refinement instructions (highest priority, override defaults where needed): ${refinementPrompt}`
+      : 'Admin refinement instructions: none provided.';
+
     return [
       'You are proofreading a school news article draft.',
       `Target field to rewrite: ${fieldLabel}`,
       'Rewrite only the target field while considering the full article context below.',
+      'Do not move body-length content into heading/subtitle fields.',
       'Keep factual meaning and school-appropriate tone.',
+      fieldRule,
+      refinementLine,
       'Return only the rewritten target field text with no labels or quotes.',
       '',
       `Main heading: ${context.title}`,
@@ -1575,28 +1594,28 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
       };
 
       const rewrittenTitle = await rewriteWithChoice(
-        buildFieldProofreadPrompt('main heading', context.title, context),
+        buildFieldProofreadPrompt('main heading', context.title, context, aiRefinementPrompt),
         aiRefinementPrompt,
         aiModelChoice
       );
       context.title = rewrittenTitle.trim() || context.title;
 
       const rewrittenSubtitle = await rewriteWithChoice(
-        buildFieldProofreadPrompt('subtitle', context.subtitle, context),
+        buildFieldProofreadPrompt('subtitle', context.subtitle, context, aiRefinementPrompt),
         aiRefinementPrompt,
         aiModelChoice
       );
       context.subtitle = rewrittenSubtitle.trim() || context.subtitle;
 
       const rewrittenCategory = await rewriteWithChoice(
-        buildFieldProofreadPrompt('category', context.category, context),
+        buildFieldProofreadPrompt('category', context.category, context, aiRefinementPrompt),
         aiRefinementPrompt,
         aiModelChoice
       );
       context.category = rewrittenCategory.trim() || context.category;
 
       const rewrittenBody = await rewriteWithChoice(
-        buildFieldProofreadPrompt('body', context.body, context),
+        buildFieldProofreadPrompt('body', context.body, context, aiRefinementPrompt),
         aiRefinementPrompt,
         aiModelChoice
       );
