@@ -42,6 +42,21 @@ const pickGeminiText = (data) => {
   return '';
 };
 
+const toFriendlyProviderError = (message) => {
+  const providerMessage = normalize(message);
+  const normalized = providerMessage.toLowerCase();
+
+  if (
+    normalized.includes('quota exceeded') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('too many requests')
+  ) {
+    return 'Gemini API quota is currently exhausted. Wait a moment and retry, or use a key/project with more available quota.';
+  }
+
+  return providerMessage || 'Gemini request failed.';
+};
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     return sendJson(response, 405, { error: 'Method not allowed.' });
@@ -121,7 +136,10 @@ export default async function handler(request, response) {
     const data = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
       const providerError = normalize(data?.error?.message) || normalize(data?.error) || 'Gemini request failed.';
-      return sendJson(response, 502, { error: providerError });
+      return sendJson(response, 502, {
+        error: toFriendlyProviderError(providerError),
+        providerError
+      });
     }
 
     const responseText = pickGeminiText(data);
