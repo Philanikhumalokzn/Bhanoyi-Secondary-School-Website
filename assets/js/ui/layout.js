@@ -83,6 +83,8 @@ export const renderSite = (siteContent, page) => {
     : [];
   const validSectionTokens = new Set(orderedSectionIndexes.map((index) => `section:${index}`));
   const hasNotice = Boolean(page.hero?.notice);
+  const isDesktopViewport = window.matchMedia('(min-width: 860px)').matches;
+  const useDesktopHomeHeroNoticeSplit = page.key === 'home' && hasNotice && isDesktopViewport;
   const normalizedPageOrder = rawPageOrder.filter(
     (token) => token === 'hero_intro' || (token === 'hero_notice' && hasNotice) || validSectionTokens.has(token)
   );
@@ -93,11 +95,17 @@ export const renderSite = (siteContent, page) => {
     renderedTokens.add(token);
 
     if (token === 'hero_intro') {
-      parts.push(renderHero(page.hero, page.key, { includeNotice: false }));
+      parts.push(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
+      if (useDesktopHomeHeroNoticeSplit) {
+        renderedTokens.add('hero_notice');
+      }
       return;
     }
 
     if (token === 'hero_notice') {
+      if (useDesktopHomeHeroNoticeSplit) {
+        return;
+      }
       parts.push(renderHeroNotice(page.hero, page.key));
       return;
     }
@@ -116,11 +124,14 @@ export const renderSite = (siteContent, page) => {
   }
 
   if (!renderedTokens.has('hero_intro')) {
-    mainBlocks.unshift(renderHero(page.hero, page.key, { includeNotice: false }));
+    mainBlocks.unshift(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
     renderedTokens.add('hero_intro');
+    if (useDesktopHomeHeroNoticeSplit) {
+      renderedTokens.add('hero_notice');
+    }
   }
 
-  if (hasNotice && !renderedTokens.has('hero_notice')) {
+  if (hasNotice && !renderedTokens.has('hero_notice') && !useDesktopHomeHeroNoticeSplit) {
     mainBlocks.splice(1, 0, renderHeroNotice(page.hero, page.key));
     renderedTokens.add('hero_notice');
   }
