@@ -1420,14 +1420,13 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
           return rewriteWithOllama(text, { refinementPrompt: aiRefinementPrompt });
         };
 
-        const [rewrittenTitle, rewrittenSubtitle, rewrittenBody] = await Promise.all([
-          rewrite(finalTitle),
-          rewrite(finalSubtitle),
-          rewrite(finalBody)
-        ]);
-
+        const rewrittenTitle = await rewrite(finalTitle);
         finalTitle = rewrittenTitle.trim() || finalTitle;
+
+        const rewrittenSubtitle = await rewrite(finalSubtitle);
         finalSubtitle = rewrittenSubtitle.trim() || finalSubtitle;
+
+        const rewrittenBody = await rewrite(finalBody);
         finalBody = rewrittenBody.trim() || finalBody;
 
         if (titleInput) titleInput.value = finalTitle;

@@ -24,6 +24,16 @@ const buildPrompt = (input, refinementPrompt = '') => {
 };
 
 const normalize = (value) => (typeof value === 'string' ? value.trim() : '');
+const PROVIDER_TIMEOUT_MS = 20000;
+
+const makeTimeoutController = () => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  return {
+    controller,
+    clear: () => clearTimeout(timer)
+  };
+};
 
 const pickGeminiText = (data) => {
   const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
@@ -86,12 +96,14 @@ export default async function handler(request) {
 
   if (useGemini) {
     let upstream;
+    const timeout = makeTimeoutController();
     try {
       upstream = await fetch(`${geminiApiUrl}/${geminiModel}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
+        signal: timeout.controller.signal,
         body: JSON.stringify({
           contents: [
             {
@@ -104,8 +116,13 @@ export default async function handler(request) {
           }
         })
       });
-    } catch {
+    } catch (error) {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
+        return json(504, { error: 'Gemini request timed out. Try a shorter prompt or retry.' });
+      }
       return json(502, { error: 'Could not reach Google Gemini API.' });
+    } finally {
+      timeout.clear();
     }
 
     const data = await upstream.json().catch(() => ({}));
@@ -135,18 +152,25 @@ export default async function handler(request) {
   if (appTitle) outboundHeaders['X-Title'] = appTitle;
 
   let upstream;
+  const timeout = makeTimeoutController();
   try {
     upstream = await fetch(apiUrl, {
       method: 'POST',
       headers: outboundHeaders,
+      signal: timeout.controller.signal,
       body: JSON.stringify({
         model,
         temperature: 0.3,
         messages: [{ role: 'user', content: buildPrompt(input, refinementPrompt) }]
       })
     });
-  } catch {
+  } catch (error) {
+    if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
+      return json(504, { error: 'AI provider timed out. Try a shorter prompt or retry.' });
+    }
     return json(502, { error: 'Could not reach AI provider.' });
+  } finally {
+    timeout.clear();
   }
 
   const data = await upstream.json().catch(() => ({}));
