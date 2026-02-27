@@ -717,12 +717,56 @@ const findAiTarget = (root: Element): Element | null => {
 
 type AiRewriteOptions = {
   refinementPrompt?: string;
+  modelChoice?: 'auto' | 'ollama' | 'gemini';
+};
+
+type AiModelChoice = 'auto' | 'ollama' | 'gemini';
+
+const AI_MODEL_STORAGE_KEY = 'inline_admin_ai_model_choice';
+
+const normalizeAiModelChoice = (value?: string): AiModelChoice => {
+  const normalized = (value || '').trim().toLowerCase();
+  if (normalized === 'gemini') return 'gemini';
+  if (normalized === 'ollama') return 'ollama';
+  return 'auto';
+};
+
+const getPreferredAiModelChoice = (): AiModelChoice => {
+  try {
+    return normalizeAiModelChoice(window.localStorage.getItem(AI_MODEL_STORAGE_KEY) || 'auto');
+  } catch {
+    return 'auto';
+  }
+};
+
+const setPreferredAiModelChoice = (choice: AiModelChoice) => {
+  try {
+    window.localStorage.setItem(AI_MODEL_STORAGE_KEY, choice);
+  } catch {
+    // ignore storage failures
+  }
+};
+
+const shouldUseHostedAiForChoice = (choice: AiModelChoice) =>
+  choice === 'gemini'
+    ? true
+    : choice === 'ollama'
+      ? false
+      : !isLocalHost() && isLoopbackOllama;
+
+const getAiProviderLabel = (choice: AiModelChoice) => {
+  const useHostedAi = shouldUseHostedAiForChoice(choice);
+  if (useHostedAi) {
+    return choice === 'gemini' ? 'Gemini (Production API)' : 'Hosted AI (Production API)';
+  }
+  return `Local Ollama (${ollamaModel})`;
 };
 
 const normalizeRefinementPrompt = (value?: string) => (typeof value === 'string' ? value.trim() : '');
 
 const rewriteWithHostedAi = async (input: string, options: AiRewriteOptions = {}) => {
   const refinementPrompt = normalizeRefinementPrompt(options.refinementPrompt);
+  const modelChoice = options.modelChoice === 'gemini' ? 'gemini' : 'auto';
   let response: Response;
   try {
     response = await fetch('/api/ai-rewrite', {
@@ -732,7 +776,8 @@ const rewriteWithHostedAi = async (input: string, options: AiRewriteOptions = {}
       },
       body: JSON.stringify({
         input,
-        refinementPrompt
+        refinementPrompt,
+        modelChoice
       })
     });
   } catch {
@@ -805,6 +850,30 @@ const rewriteWithOllama = async (input: string, options: AiRewriteOptions = {}) 
 };
 
 const attachAiButton = (controls: HTMLElement, root: Element) => {
+  const aiModelSelect = document.createElement('select');
+  aiModelSelect.className = 'inline-ai-model-select';
+  aiModelSelect.setAttribute('aria-label', 'AI model');
+  aiModelSelect.innerHTML = `
+    <option value="auto">AI: Auto</option>
+    <option value="ollama">AI: Ollama</option>
+    <option value="gemini">AI: Gemini</option>
+  `;
+  aiModelSelect.value = getPreferredAiModelChoice();
+
+  const aiProviderHint = document.createElement('span');
+  aiProviderHint.className = 'inline-ai-provider-hint';
+
+  const refreshInlineProviderHint = () => {
+    const choice = normalizeAiModelChoice(aiModelSelect.value);
+    aiProviderHint.textContent = `Using: ${getAiProviderLabel(choice)}`;
+  };
+
+  refreshInlineProviderHint();
+  aiModelSelect.addEventListener('change', () => {
+    setPreferredAiModelChoice(normalizeAiModelChoice(aiModelSelect.value));
+    refreshInlineProviderHint();
+  });
+
   const aiBtn = document.createElement('button');
   aiBtn.type = 'button';
   aiBtn.textContent = 'AI Update';
@@ -823,11 +892,19 @@ const attachAiButton = (controls: HTMLElement, root: Element) => {
 
     try {
       aiBtn.disabled = true;
+      aiModelSelect.disabled = true;
       aiBtn.textContent = 'AI Working...';
-      const shouldUseHostedAi = !isLocalHost() && isLoopbackOllama;
-      showStatus(shouldUseHostedAi ? 'Using production AI...' : `Using local Ollama (${ollamaModel})...`);
+      const aiModelChoice = normalizeAiModelChoice(aiModelSelect.value);
+      const shouldUseHostedAi = shouldUseHostedAiForChoice(aiModelChoice);
+      showStatus(
+        shouldUseHostedAi
+          ? aiModelChoice === 'gemini'
+            ? 'Using production AI (Gemini)...'
+            : 'Using production AI...'
+          : `Using local Ollama (${ollamaModel})...`
+      );
       const rewritten = shouldUseHostedAi
-        ? await rewriteWithHostedAi(sourceText)
+        ? await rewriteWithHostedAi(sourceText, { modelChoice: aiModelChoice })
         : await rewriteWithOllama(sourceText);
       setTargetText(target, rewritten);
       target.dispatchEvent(new Event('input', { bubbles: true }));
@@ -836,10 +913,13 @@ const attachAiButton = (controls: HTMLElement, root: Element) => {
       showStatus(error instanceof Error ? error.message : 'AI update failed.');
     } finally {
       aiBtn.disabled = false;
+      aiModelSelect.disabled = false;
       aiBtn.textContent = 'AI Update';
     }
   });
 
+  controls.appendChild(aiModelSelect);
+  controls.appendChild(aiProviderHint);
   controls.appendChild(aiBtn);
 };
 
@@ -1003,6 +1083,15 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
             <span>Use AI proofreading and editing before save</span>
           </label>
           <label>
+            AI model
+            <select name="aiModelChoice">
+              <option value="auto">Auto (recommended)</option>
+              <option value="ollama">Local Ollama</option>
+              <option value="gemini">Gemini</option>
+            </select>
+          </label>
+          <p id="news-ai-provider-hint" class="news-overlay-ai-provider-hint"></p>
+          <label>
             AI refinement prompt (optional)
             <textarea name="aiRefinementPrompt" rows="2" placeholder="Example: Keep a formal school tone and make it concise."></textarea>
           </label>
@@ -1056,6 +1145,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
   const hrefInput = overlay.querySelector('input[name="href"]') as HTMLInputElement | null;
   const newCategoryInput = overlay.querySelector('input[name="newCategory"]') as HTMLInputElement | null;
   const imageInput = overlay.querySelector('input[name="imageFile"]') as HTMLInputElement | null;
+  const aiModelSelect = overlay.querySelector('select[name="aiModelChoice"]') as HTMLSelectElement | null;
+  const aiProviderHint = overlay.querySelector('#news-ai-provider-hint') as HTMLElement | null;
   const imageDropzone = overlay.querySelector('#news-image-dropzone') as HTMLElement | null;
   const selectedImagesMeta = overlay.querySelector('#news-selected-images-meta') as HTMLElement | null;
   const clearSelectedImagesBtn = overlay.querySelector('#news-clear-selected-images') as HTMLButtonElement | null;
@@ -1242,6 +1333,22 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     }
   }
 
+  if (aiModelSelect) {
+    aiModelSelect.value = getPreferredAiModelChoice();
+
+    const refreshOverlayProviderHint = () => {
+      if (!aiProviderHint) return;
+      const choice = normalizeAiModelChoice(aiModelSelect.value);
+      aiProviderHint.textContent = `Provider in use: ${getAiProviderLabel(choice)}`;
+    };
+
+    refreshOverlayProviderHint();
+    aiModelSelect.addEventListener('change', () => {
+      setPreferredAiModelChoice(normalizeAiModelChoice(aiModelSelect.value));
+      refreshOverlayProviderHint();
+    });
+  }
+
   renderCurrentImages();
   syncSelectedImagesMeta();
 
@@ -1269,6 +1376,7 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     const subtitle = String(formData.get('subtitle') || '').trim();
     const body = String(formData.get('body') || '').trim();
     const useAiProofread = formData.get('useAiProofread') === 'on';
+    const aiModelChoice = normalizeAiModelChoice(String(formData.get('aiModelChoice') || 'auto'));
     const aiRefinementPrompt = String(formData.get('aiRefinementPrompt') || '').trim();
     const href = String(formData.get('href') || '#').trim() || '#';
     const selectedCategory = String(formData.get('category') || '').trim();
@@ -1290,14 +1398,24 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
       let finalBody = body;
 
       if (useAiProofread) {
-        const shouldUseHostedAi = !isLocalHost() && isLoopbackOllama;
-        showStatus(shouldUseHostedAi ? 'Applying AI proofreading in production...' : `Applying AI proofreading via local Ollama (${ollamaModel})...`);
+        const useHostedAi = shouldUseHostedAiForChoice(aiModelChoice);
+
+        showStatus(
+          useHostedAi
+            ? aiModelChoice === 'gemini'
+              ? 'Applying AI proofreading via Gemini...'
+              : 'Applying AI proofreading in production...'
+            : `Applying AI proofreading via local Ollama (${ollamaModel})...`
+        );
         saveBtn.textContent = 'AI Editing...';
 
         const rewrite = (text: string) => {
           if (!text.trim()) return Promise.resolve(text);
-          if (shouldUseHostedAi) {
-            return rewriteWithHostedAi(text, { refinementPrompt: aiRefinementPrompt });
+          if (useHostedAi) {
+            return rewriteWithHostedAi(text, {
+              refinementPrompt: aiRefinementPrompt,
+              modelChoice: aiModelChoice
+            });
           }
           return rewriteWithOllama(text, { refinementPrompt: aiRefinementPrompt });
         };
