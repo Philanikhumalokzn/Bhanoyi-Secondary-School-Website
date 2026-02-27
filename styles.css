@@ -243,7 +243,7 @@ body {
 
 .hero {
   background: linear-gradient(180deg, #edf4ff 0%, #f6f8fb 100%);
-  padding: 48px 0;
+  padding: 34px 0;
 }
 
 .hero-grid {
@@ -305,7 +305,7 @@ h1 {
 }
 
 .section {
-  padding: 48px 0;
+  padding: 32px 0;
 }
 
 .section-alt {
@@ -1652,6 +1652,14 @@ body.news-read-open {
 }
 
 @media (max-width: 640px) {
+  .hero {
+    padding: 26px 0;
+  }
+
+  .section {
+    padding: 24px 0;
+  }
+
   .admin-shell {
     width: min(100%, 94%);
     margin-top: 20px;
