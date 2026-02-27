@@ -709,6 +709,8 @@ h1 {
   position: relative;
   z-index: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .latest-news-content h3,
@@ -724,18 +726,22 @@ h1 {
 }
 
 .latest-news-preview {
-  display: block;
+  width: 100%;
+  margin-top: auto;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
 }
 
 .latest-news-body {
-  display: block;
-  max-height: calc(1.55em * 4);
-  margin-bottom: 6px;
+  margin: 0;
+  max-height: calc(1.55em * 3);
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .latest-news-read-more {
