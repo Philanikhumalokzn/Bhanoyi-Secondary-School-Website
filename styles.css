@@ -616,6 +616,7 @@ h1 {
   min-height: 270px;
   min-width: 0;
   width: 100%;
+  touch-action: pan-y;
 }
 
 .latest-news-rail {

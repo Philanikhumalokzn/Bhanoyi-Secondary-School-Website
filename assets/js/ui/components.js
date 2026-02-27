@@ -746,9 +746,14 @@ export const initLatestNewsRotators = () => {
 
     let index = adminMode ? 0 : 1;
     let autoRotateTimer = null;
+    let normalizeTimer = null;
     let touchStartX = 0;
     let touchStartY = 0;
     let hasTouchStart = false;
+    let pointerStartX = 0;
+    let pointerStartY = 0;
+    let hasPointerStart = false;
+    let pointerId = null;
 
     const applySlidePosition = (nextIndex, animate = true) => {
       rail.style.transition = animate ? 'transform 420ms ease' : 'none';
@@ -777,16 +782,58 @@ export const initLatestNewsRotators = () => {
       }
     };
 
+    const scheduleLoopNormalization = () => {
+      if (adminMode) return;
+      if (normalizeTimer !== null) {
+        window.clearTimeout(normalizeTimer);
+      }
+      normalizeTimer = window.setTimeout(() => {
+        normalizeLoopEdgeIfNeeded();
+      }, 460);
+    };
+
     const goToNext = () => {
       if (track.dataset.adminPaused === 'true') return;
-      index = (index + 1) % slides.length;
+      if (adminMode) {
+        index = (index + 1) % slides.length;
+      } else {
+        index += 1;
+        if (index > slides.length - 1) {
+          index = slides.length - 1;
+        }
+      }
       applySlidePosition(index, true);
+      scheduleLoopNormalization();
     };
 
     const goToPrevious = () => {
       if (track.dataset.adminPaused === 'true') return;
-      index = (index - 1 + slides.length) % slides.length;
+      if (adminMode) {
+        index = (index - 1 + slides.length) % slides.length;
+      } else {
+        index -= 1;
+        if (index < 0) {
+          index = 0;
+        }
+      }
       applySlidePosition(index, true);
+      scheduleLoopNormalization();
+    };
+
+    const handleManualGesture = (diffX, diffY) => {
+      const absX = Math.abs(diffX);
+      const absY = Math.abs(diffY);
+
+      if (absX < 36 || absX <= absY) return false;
+
+      track.dataset.swipeLockUntil = String(Date.now() + 450);
+      if (diffX < 0) {
+        goToNext();
+      } else {
+        goToPrevious();
+      }
+      restartAutoRotate();
+      return true;
     };
 
     const restartAutoRotate = () => {
@@ -818,19 +865,33 @@ export const initLatestNewsRotators = () => {
         const endY = event.changedTouches[0].clientY;
         const diffX = endX - touchStartX;
         const diffY = endY - touchStartY;
-        const absX = Math.abs(diffX);
-        const absY = Math.abs(diffY);
-
-        if (absX < 36 || absX <= absY) return;
-
-        track.dataset.swipeLockUntil = String(Date.now() + 450);
-        if (diffX < 0) {
-          goToNext();
-        } else {
-          goToPrevious();
-        }
-        restartAutoRotate();
+        handleManualGesture(diffX, diffY);
       }, { passive: true });
+
+      track.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'touch') return;
+        pointerId = event.pointerId;
+        pointerStartX = event.clientX;
+        pointerStartY = event.clientY;
+        hasPointerStart = true;
+      });
+
+      track.addEventListener('pointerup', (event) => {
+        if (!hasPointerStart) return;
+        if (pointerId !== null && event.pointerId !== pointerId) return;
+
+        hasPointerStart = false;
+        pointerId = null;
+
+        const diffX = event.clientX - pointerStartX;
+        const diffY = event.clientY - pointerStartY;
+        handleManualGesture(diffX, diffY);
+      });
+
+      track.addEventListener('pointercancel', () => {
+        hasPointerStart = false;
+        pointerId = null;
+      });
     }
 
     restartAutoRotate();
