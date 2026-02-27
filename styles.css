@@ -631,6 +631,8 @@ h1 {
   inset: auto;
   flex: 0 0 100%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   opacity: 1;
   pointer-events: auto;
   transition: none;
@@ -700,6 +702,7 @@ h1 {
 .latest-news-content {
   margin: -42px 0 0;
   padding: 14px 16px 16px;
+  min-height: 260px;
   border-radius: 0;
   background: rgba(248, 251, 255, 0.56);
   backdrop-filter: blur(10px) saturate(120%);
@@ -707,6 +710,8 @@ h1 {
   border-top: 1px solid rgba(255, 255, 255, 0.42);
   position: relative;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .latest-news-content h3,
@@ -719,6 +724,28 @@ h1 {
 .latest-news-body {
   margin: 0;
   line-height: 1.55;
+}
+
+.latest-news-preview {
+  margin-top: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.latest-news-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+.latest-news-read-more {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .latest-news-subtitle {
@@ -928,6 +955,7 @@ h1 {
 .inline-admin-active .latest-news-meta,
 .inline-admin-active .latest-news-subtitle,
 .inline-admin-active .latest-news-body,
+.inline-admin-active .latest-news-read-more,
 .inline-admin-active .latest-news-fallback-title,
 .inline-admin-active .latest-news-fallback-body,
 .inline-admin-active .latest-news-side-panel h3,
@@ -1928,6 +1956,7 @@ body.news-read-open {
 
   .latest-news-content {
     padding: 10px;
+    min-height: 238px;
   }
 
   .latest-news-content h3,

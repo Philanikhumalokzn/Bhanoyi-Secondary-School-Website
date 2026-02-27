@@ -235,7 +235,10 @@ const renderLatestNewsSection = (section, sectionIndex) => {
                             </p>
                             <h3 class="latest-news-title ${hasImage ? '' : 'is-hidden'}">${item.title}</h3>
                             ${showSubtitle ? `<p class="latest-news-subtitle ${hasImage ? '' : 'is-hidden'}">${normalizedSubtitle}</p>` : ''}
-                            <p class="latest-news-body ${hasImage ? '' : 'is-hidden'}">${item.body}</p>
+                            <div class="latest-news-preview ${hasImage ? '' : 'is-hidden'}">
+                              <p class="latest-news-body">${item.body}</p>
+                              <span class="latest-news-read-more">Read more</span>
+                            </div>
                           </div>
                         </a>
                       `;
