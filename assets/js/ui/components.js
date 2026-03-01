@@ -570,6 +570,57 @@ const getDefaultMatchPair = (teams = [], leftCandidate = '', rightCandidate = ''
   };
 };
 
+const initSportsWorkflowSteps = (rootNode) => {
+  const steps = Array.from(rootNode.querySelectorAll('[data-sports-workflow-step]'))
+    .map((stepNode) => {
+      if (!(stepNode instanceof HTMLElement)) return null;
+      const toggle = stepNode.querySelector('[data-sports-workflow-toggle]');
+      const body = stepNode.querySelector('[data-sports-workflow-body]');
+      if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
+      return {
+        id: String(stepNode.dataset.sportsWorkflowId || '').trim(),
+        stepNode,
+        toggle,
+        body
+      };
+    })
+    .filter(Boolean);
+
+  const setExpanded = (entry, expanded) => {
+    if (!entry) return;
+    entry.stepNode.classList.toggle('is-expanded', expanded);
+    entry.stepNode.classList.toggle('is-collapsed', !expanded);
+    entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    entry.body.style.maxHeight = expanded ? `${entry.body.scrollHeight}px` : '0px';
+  };
+
+  steps.forEach((entry) => {
+    const startsExpanded = entry.stepNode.classList.contains('is-expanded');
+    setExpanded(entry, startsExpanded);
+    entry.toggle.addEventListener('click', () => {
+      const isExpanded = entry.stepNode.classList.contains('is-expanded');
+      setExpanded(entry, !isExpanded);
+    });
+  });
+
+  window.addEventListener('resize', () => {
+    steps.forEach((entry) => {
+      if (!entry.stepNode.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+    });
+  });
+
+  return {
+    expandStep: (id) => {
+      const key = String(id || '').trim();
+      if (!key) return;
+      const matched = steps.find((entry) => entry.id === key);
+      if (!matched) return;
+      setExpanded(matched, true);
+    }
+  };
+};
+
 const renderMatchLogSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const houseOptions = normalizeMatchTeams(
@@ -610,62 +661,76 @@ const renderMatchLogSection = (section, sectionIndex) => {
         <h2>${section.title || 'Live Match Event Log'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
-          <header class="match-log-header">
-            <div>
-              <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
-              <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
+          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-log">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
+              <span>Set Up Match Logging</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <header class="match-log-header">
+                <div>
+                  <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
+                  <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
+                </div>
+                <div class="match-log-header-actions">
+                  <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
+                  <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
+                </div>
+              </header>
+              <div class="match-log-team-pickers">
+                <label>
+                  Left column
+                  <select data-team-select="left">
+                    ${renderHouseOptions(leftTeam.id)}
+                  </select>
+                </label>
+                <label>
+                  Right column
+                  <select data-team-select="right">
+                    ${renderHouseOptions(rightTeam.id)}
+                  </select>
+                </label>
+              </div>
             </div>
-            <div class="match-log-header-actions">
-              <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
-              <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
+          </section>
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="log-events">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Log and Review Match Events</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <div class="match-log-table-wrap">
+                <table class="match-log-table">
+                  <thead>
+                    <tr>
+                      <th class="match-log-team-col">
+                        <div class="match-log-team-head">
+                          <h3 class="match-log-team-title">
+                            <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
+                            <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
+                          </h3>
+                          <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
+                        </div>
+                      </th>
+                      <th class="match-log-minute-col">Minute</th>
+                      <th class="match-log-team-col">
+                        <div class="match-log-team-head match-log-team-head-right">
+                          <h3 class="match-log-team-title">
+                            <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
+                            <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
+                          </h3>
+                          <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody data-match-table-body>
+                    <tr>
+                      <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </header>
-          <div class="match-log-team-pickers">
-            <label>
-              Left column
-              <select data-team-select="left">
-                ${renderHouseOptions(leftTeam.id)}
-              </select>
-            </label>
-            <label>
-              Right column
-              <select data-team-select="right">
-                ${renderHouseOptions(rightTeam.id)}
-              </select>
-            </label>
-          </div>
-          <div class="match-log-table-wrap">
-            <table class="match-log-table">
-              <thead>
-                <tr>
-                  <th class="match-log-team-col">
-                    <div class="match-log-team-head">
-                      <h3 class="match-log-team-title">
-                        <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
-                        <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
-                      </h3>
-                      <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
-                    </div>
-                  </th>
-                  <th class="match-log-minute-col">Minute</th>
-                  <th class="match-log-team-col">
-                    <div class="match-log-team-head match-log-team-head-right">
-                      <h3 class="match-log-team-title">
-                        <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
-                        <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
-                      </h3>
-                      <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody data-match-table-body>
-                <tr>
-                  <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          </section>
           <div class="match-log-modal is-hidden" data-match-modal>
             <div class="match-log-modal-backdrop" data-match-close-modal></div>
             <article class="panel match-log-modal-panel" role="dialog" aria-modal="true" aria-label="Add match event">
@@ -818,6 +883,8 @@ const hydrateMatchLog = (matchLogNode) => {
   if (!modal || !typeStep || !detailsStep || !typeListNode || !nextButton || !backButton || !saveButton || !eventForm) {
     return;
   }
+
+  const workflowSteps = initSportsWorkflowSteps(matchLogNode);
 
   const storageKey = getMatchStorageKey(matchLogNode.dataset.matchLogId || config.sectionKey || 'sports_log');
   let state = {
@@ -1043,6 +1110,7 @@ const hydrateMatchLog = (matchLogNode) => {
   };
 
   const openModalForTeam = (teamId) => {
+    workflowSteps?.expandStep('log-events');
     activeTeamId = teamId;
     const team = teams.find((entry) => entry.id === teamId);
     if (teamLabel) {
@@ -1247,173 +1315,194 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
         <h2>${section.title || 'Create Season Fixtures'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
-          <header class="fixture-creator-header">
-            <p class="fixture-creator-meta" data-fixture-meta>Choose a sport format to begin.</p>
-            <div class="fixture-creator-actions">
-              <label class="fixture-autofill-toggle">
-                <input type="checkbox" data-fixture-auto-fill />
-                <span>Auto-fill dates (use rules)</span>
-              </label>
-              <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate draft fixtures</button>
-              <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
-              <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
-            </div>
-          </header>
-          <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
-          <div class="fixture-date-rules" data-fixture-date-rules>
-            <h3>Set Auto-fill Date Rules</h3>
-            <div class="fixture-creator-sport-grid">
-              <label>
-                Start scheduling from
-                <input type="date" data-fixture-rule-start-date />
-              </label>
-              <label>
-                Minimum days between fixtures
-                <input type="number" min="1" max="30" step="1" value="7" data-fixture-rule-gap-days />
-              </label>
-              <label>
-                Matches per day
-                <input type="number" min="1" max="20" step="1" value="1" data-fixture-rule-matches-per-day />
-              </label>
-              <label>
-                Kickoff start time
-                <input type="time" value="14:00" data-fixture-rule-kickoff-time />
-              </label>
-              <label>
-                Minutes between same-day matches
-                <input type="number" min="15" max="360" step="5" value="120" data-fixture-rule-kickoff-gap-minutes />
-              </label>
-            </div>
-            <div class="fixture-rule-weekdays" data-fixture-rule-weekdays>
-              ${[
-                ['1', 'Mon'],
-                ['2', 'Tue'],
-                ['3', 'Wed'],
-                ['4', 'Thu'],
-                ['5', 'Fri'],
-                ['6', 'Sat'],
-                ['0', 'Sun']
-              ]
-                .map(
-                  ([value, label]) => `
-                    <label class="fixture-rule-day-chip">
-                      <input type="checkbox" data-fixture-rule-weekday value="${value}" />
-                      <span>${label}</span>
-                    </label>
-                  `
-                )
-                .join('')}
-            </div>
-            <div class="fixture-rule-flags">
-              <label>
-                <input type="checkbox" data-fixture-rule-use-terms checked />
-                <span>Only schedule within configured school terms</span>
-              </label>
-              <label>
-                <input type="checkbox" data-fixture-rule-avoid-academic checked />
-                <span>Avoid dates with Academic calendar events</span>
-              </label>
-            </div>
-            <label>
-              Excluded date ranges (optional)
-              <textarea rows="3" data-fixture-rule-exclusions placeholder="One range per line, e.g. 2026-04-01 to 2026-04-05"></textarea>
-            </label>
-            <div class="fixture-creator-actions">
-              <button type="button" class="btn btn-secondary" data-fixture-rules-preview>2) Preview candidate dates</button>
-              <button type="button" class="btn btn-secondary" data-fixture-rules-save>Save rules</button>
-            </div>
-            <p class="fixture-creator-status" data-fixture-rules-status aria-live="polite"></p>
-            <div class="fixture-rules-preview is-hidden" data-fixture-rules-preview-output></div>
-          </div>
-          <div class="fixture-creator-sport-grid">
-            <label>
-              Sport code (required)
-              <select data-fixture-sport required>
-                <option value="">Select sport</option>
-                <option value="soccer">Soccer</option>
-                <option value="netball">Netball</option>
-              </select>
-            </label>
-          </div>
-          <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
-            <h3>Soccer Format</h3>
-            <div class="fixture-creator-sport-grid">
-              <label>
-                Halves
-                <input type="number" min="2" max="2" step="1" value="2" data-fixture-soccer-halves />
-              </label>
-              <label>
-                Minutes per half
-                <input type="number" min="10" max="60" step="1" value="40" data-fixture-soccer-half-minutes />
-              </label>
-              <label>
-                Break minutes
-                <input type="number" min="0" max="30" step="1" value="10" data-fixture-soccer-break-minutes />
-              </label>
-            </div>
-          </div>
-          <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="netball">
-            <h3>Netball Format</h3>
-            <div class="fixture-creator-sport-grid">
-              <label>
-                Quarters
-                <input type="number" min="4" max="4" step="1" value="4" data-fixture-netball-quarters />
-              </label>
-              <label>
-                Minutes per quarter
-                <input type="number" min="8" max="20" step="1" value="15" data-fixture-netball-quarter-minutes />
-              </label>
-              <label>
-                Quarter break minutes
-                <input type="number" min="0" max="15" step="1" value="3" data-fixture-netball-break-minutes />
-              </label>
-              <label>
-                Half-time minutes
-                <input type="number" min="0" max="20" step="1" value="5" data-fixture-netball-half-time-minutes />
-              </label>
-            </div>
-          </div>
-          <div class="fixture-creator-team-picks" data-fixture-team-picks>
-            ${houseOptions
-              .map(
-                (team) => `
-                  <label class="fixture-team-option">
-                    <input type="checkbox" data-fixture-team value="${team.id}" checked />
-                    <span>${team.name}</span>
+          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-fixtures">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
+              <span>Set Up and Generate Fixtures</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <header class="fixture-creator-header">
+                <p class="fixture-creator-meta" data-fixture-meta>Choose a sport format to begin.</p>
+                <div class="fixture-creator-actions">
+                  <label class="fixture-autofill-toggle">
+                    <input type="checkbox" data-fixture-auto-fill />
+                    <span>Auto-fill dates (use rules)</span>
                   </label>
-                `
-              )
-              .join('')}
-          </div>
-          <p class="fixture-creator-status" data-fixture-status aria-live="polite">Select teams and generate fixtures.</p>
-          <div class="fixture-approval-panel is-hidden" data-fixture-approval-panel>
-            <p class="fixture-creator-status" data-fixture-approval-status aria-live="polite"></p>
-            <div class="fixture-creator-actions">
-              <button type="button" class="btn btn-secondary" data-fixture-approve-resolved>4) Finalize & sync (after fixes)</button>
-              <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>4) Finalize & sync (approve with unfairnesses)</button>
+                  <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate draft fixtures</button>
+                  <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
+                  <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
+                </div>
+              </header>
+              <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
+              <div class="fixture-creator-sport-grid">
+                <label>
+                  Sport code (required)
+                  <select data-fixture-sport required>
+                    <option value="">Select sport</option>
+                    <option value="soccer">Soccer</option>
+                    <option value="netball">Netball</option>
+                  </select>
+                </label>
+              </div>
+              <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
+                <h3>Soccer Format</h3>
+                <div class="fixture-creator-sport-grid">
+                  <label>
+                    Halves
+                    <input type="number" min="2" max="2" step="1" value="2" data-fixture-soccer-halves />
+                  </label>
+                  <label>
+                    Minutes per half
+                    <input type="number" min="10" max="60" step="1" value="40" data-fixture-soccer-half-minutes />
+                  </label>
+                  <label>
+                    Break minutes
+                    <input type="number" min="0" max="30" step="1" value="10" data-fixture-soccer-break-minutes />
+                  </label>
+                </div>
+              </div>
+              <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="netball">
+                <h3>Netball Format</h3>
+                <div class="fixture-creator-sport-grid">
+                  <label>
+                    Quarters
+                    <input type="number" min="4" max="4" step="1" value="4" data-fixture-netball-quarters />
+                  </label>
+                  <label>
+                    Minutes per quarter
+                    <input type="number" min="8" max="20" step="1" value="15" data-fixture-netball-quarter-minutes />
+                  </label>
+                  <label>
+                    Quarter break minutes
+                    <input type="number" min="0" max="15" step="1" value="3" data-fixture-netball-break-minutes />
+                  </label>
+                  <label>
+                    Half-time minutes
+                    <input type="number" min="0" max="20" step="1" value="5" data-fixture-netball-half-time-minutes />
+                  </label>
+                </div>
+              </div>
+              <div class="fixture-creator-team-picks" data-fixture-team-picks>
+                ${houseOptions
+                  .map(
+                    (team) => `
+                      <label class="fixture-team-option">
+                        <input type="checkbox" data-fixture-team value="${team.id}" checked />
+                        <span>${team.name}</span>
+                      </label>
+                    `
+                  )
+                  .join('')}
+              </div>
+              <p class="fixture-creator-status" data-fixture-status aria-live="polite">Select teams and generate fixtures.</p>
             </div>
-          </div>
-          <div class="fixture-table-wrap">
-            <table class="fixture-table">
-              <thead>
-                <tr>
-                  <th>Round</th>
-                  <th>Leg</th>
-                  <th>Match</th>
-                  <th>Date</th>
-                  <th>Kickoff</th>
-                  <th>Format</th>
-                  <th>Home</th>
-                  <th>Away</th>
-                </tr>
-              </thead>
-              <tbody data-fixture-body>
-                <tr>
-                  <td colspan="8" class="fixture-empty">No fixtures generated yet.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          </section>
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="rules-fixtures">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Set Auto-fill Date Rules</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <div class="fixture-date-rules" data-fixture-date-rules>
+                <h3>Set Auto-fill Date Rules</h3>
+                <div class="fixture-creator-sport-grid">
+                  <label>
+                    Start scheduling from
+                    <input type="date" data-fixture-rule-start-date />
+                  </label>
+                  <label>
+                    Minimum days between fixtures
+                    <input type="number" min="1" max="30" step="1" value="7" data-fixture-rule-gap-days />
+                  </label>
+                  <label>
+                    Matches per day
+                    <input type="number" min="1" max="20" step="1" value="1" data-fixture-rule-matches-per-day />
+                  </label>
+                  <label>
+                    Kickoff start time
+                    <input type="time" value="14:00" data-fixture-rule-kickoff-time />
+                  </label>
+                  <label>
+                    Minutes between same-day matches
+                    <input type="number" min="15" max="360" step="5" value="120" data-fixture-rule-kickoff-gap-minutes />
+                  </label>
+                </div>
+                <div class="fixture-rule-weekdays" data-fixture-rule-weekdays>
+                  ${[
+                    ['1', 'Mon'],
+                    ['2', 'Tue'],
+                    ['3', 'Wed'],
+                    ['4', 'Thu'],
+                    ['5', 'Fri'],
+                    ['6', 'Sat'],
+                    ['0', 'Sun']
+                  ]
+                    .map(
+                      ([value, label]) => `
+                        <label class="fixture-rule-day-chip">
+                          <input type="checkbox" data-fixture-rule-weekday value="${value}" />
+                          <span>${label}</span>
+                        </label>
+                      `
+                    )
+                    .join('')}
+                </div>
+                <div class="fixture-rule-flags">
+                  <label>
+                    <input type="checkbox" data-fixture-rule-use-terms checked />
+                    <span>Only schedule within configured school terms</span>
+                  </label>
+                  <label>
+                    <input type="checkbox" data-fixture-rule-avoid-academic checked />
+                    <span>Avoid dates with Academic calendar events</span>
+                  </label>
+                </div>
+                <label>
+                  Excluded date ranges (optional)
+                  <textarea rows="3" data-fixture-rule-exclusions placeholder="One range per line, e.g. 2026-04-01 to 2026-04-05"></textarea>
+                </label>
+                <div class="fixture-creator-actions">
+                  <button type="button" class="btn btn-secondary" data-fixture-rules-preview>2) Preview candidate dates</button>
+                  <button type="button" class="btn btn-secondary" data-fixture-rules-save>Save rules</button>
+                </div>
+                <p class="fixture-creator-status" data-fixture-rules-status aria-live="polite"></p>
+                <div class="fixture-rules-preview is-hidden" data-fixture-rules-preview-output></div>
+              </div>
+            </div>
+          </section>
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="review-fixtures">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Review and Finalize Fixtures</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <div class="fixture-approval-panel is-hidden" data-fixture-approval-panel>
+                <p class="fixture-creator-status" data-fixture-approval-status aria-live="polite"></p>
+                <div class="fixture-creator-actions">
+                  <button type="button" class="btn btn-secondary" data-fixture-approve-resolved>4) Finalize & sync (after fixes)</button>
+                  <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>4) Finalize & sync (approve with unfairnesses)</button>
+                </div>
+              </div>
+              <div class="fixture-table-wrap">
+                <table class="fixture-table">
+                  <thead>
+                    <tr>
+                      <th>Round</th>
+                      <th>Leg</th>
+                      <th>Match</th>
+                      <th>Date</th>
+                      <th>Kickoff</th>
+                      <th>Format</th>
+                      <th>Home</th>
+                      <th>Away</th>
+                    </tr>
+                  </thead>
+                  <tbody data-fixture-body>
+                    <tr>
+                      <td colspan="8" class="fixture-empty">No fixtures generated yet.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
         </article>
       </div>
     </section>
@@ -1532,6 +1621,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const approveAnywayButton = fixtureNode.querySelector('[data-fixture-approve-anyway]');
 
   if (!bodyNode || !generateButton || !exportButton) return;
+
+  const workflowSteps = initSportsWorkflowSteps(fixtureNode);
 
   let lastFixtures = [];
   let lastSportKey = '';
@@ -2242,6 +2333,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     renderAutoFillPreview(lastFixtures, result.dateMap, result.matchesPerDay);
+    workflowSteps?.expandStep('rules-fixtures');
     if (rulesStatusNode) {
       rulesStatusNode.textContent = `Candidate dates previewed (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Click "Apply previewed dates" to stage them in draft.`;
     }
@@ -2276,6 +2368,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         : `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     renderAutoFillPreview(fixtures, result.dateMap, result.matchesPerDay);
+    workflowSteps?.expandStep('review-fixtures');
     return true;
   };
 
@@ -2316,6 +2409,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         : `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     renderFixtures(lastFixtures);
+    workflowSteps?.expandStep('review-fixtures');
   };
 
   const sportProfiles = {
@@ -3450,6 +3544,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   generateButton.addEventListener('click', () => {
     const wantsAutoFill = isAdminMode && autoFillToggle instanceof HTMLInputElement && autoFillToggle.checked;
     generateFixtures({ autoFillDates: wantsAutoFill });
+    workflowSteps?.expandStep('review-fixtures');
     const statusMessage = String(statusNode?.textContent || '').trim();
     if (statusMessage) {
       const isError = /unable|could not|required|select|missing|invalid|no\s+school\s+terms/i.test(statusMessage);

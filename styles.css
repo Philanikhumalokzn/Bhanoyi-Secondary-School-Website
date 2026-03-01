@@ -2359,6 +2359,57 @@ body.news-read-open {
   gap: 8px;
 }
 
+.sports-workflow-step {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.sports-workflow-toggle {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.sports-workflow-toggle::after {
+  content: '▾';
+  color: var(--primary);
+  transform: rotate(-90deg);
+  transition: transform 180ms ease;
+}
+
+.sports-workflow-step.is-expanded .sports-workflow-toggle {
+  border-bottom-color: var(--border);
+}
+
+.sports-workflow-step.is-expanded .sports-workflow-toggle::after {
+  transform: rotate(0deg);
+}
+
+.sports-workflow-body {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: max-height 240ms ease, opacity 180ms ease, transform 180ms ease;
+}
+
+.sports-workflow-step.is-expanded .sports-workflow-body {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .fixture-creator-actions {
   display: flex;
   gap: 6px;
