@@ -152,6 +152,45 @@ const isAdminModeEnabled = () => {
   return new URLSearchParams(window.location.search).get('admin') === '1';
 };
 
+const ensureToastHost = () => {
+  if (typeof document === 'undefined') return null;
+  const existing = document.querySelector('[data-app-toast-host]');
+  if (existing instanceof HTMLElement) return existing;
+
+  const host = document.createElement('div');
+  host.className = 'app-toast-host';
+  host.setAttribute('data-app-toast-host', 'true');
+  host.setAttribute('aria-live', 'polite');
+  host.setAttribute('aria-atomic', 'false');
+  document.body.appendChild(host);
+  return host;
+};
+
+const showSmartToast = (message, { tone = 'info' } = {}) => {
+  const text = String(message || '').trim();
+  if (!text) return;
+
+  const host = ensureToastHost();
+  if (!(host instanceof HTMLElement)) return;
+
+  const toast = document.createElement('div');
+  toast.className = 'app-toast';
+  toast.dataset.tone = tone;
+  toast.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+  toast.textContent = text;
+  host.appendChild(toast);
+
+  const timeout = Math.max(2200, Math.min(6200, 1500 + text.length * 28));
+  const closeToast = () => {
+    toast.classList.add('is-hiding');
+    window.setTimeout(() => {
+      toast.remove();
+    }, 220);
+  };
+
+  window.setTimeout(closeToast, timeout);
+};
+
 const renderSectionAttachments = (section) => {
   const attachments = Array.isArray(section.attachments) ? section.attachments : [];
   if (!attachments.length) {
@@ -2784,22 +2823,41 @@ const hydrateFixtureCreator = (fixtureNode) => {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+    showSmartToast('Fixtures exported to CSV.', { tone: 'success' });
   });
 
   generateButton.addEventListener('click', () => {
     const wantsAutoFill = isAdminMode && autoFillToggle instanceof HTMLInputElement && autoFillToggle.checked;
     generateFixtures({ autoFillDates: wantsAutoFill });
+    const statusMessage = String(statusNode?.textContent || '').trim();
+    if (statusMessage) {
+      const isError = /unable|could not|required|select|missing|invalid|no\s+school\s+terms/i.test(statusMessage);
+      showSmartToast(statusMessage, { tone: isError ? 'error' : 'success' });
+    }
   });
   teamPickInputs.forEach((input) => {
     input.addEventListener('change', generateFixtures);
   });
 
   rulesSaveButton?.addEventListener('click', () => {
-    saveDateRules();
+    const saved = saveDateRules();
+    if (saved) {
+      showSmartToast('Fixture date rules saved.', { tone: 'success' });
+      return;
+    }
+    const statusMessage = String(rulesStatusNode?.textContent || '').trim();
+    if (statusMessage) {
+      showSmartToast(statusMessage, { tone: 'error' });
+    }
   });
 
   rulesPreviewButton?.addEventListener('click', () => {
     buildAutoFillPreview();
+    const statusMessage = String(rulesStatusNode?.textContent || '').trim();
+    if (statusMessage) {
+      const isError = /generate fixtures first|could not|invalid|set a start date|select at least one/i.test(statusMessage);
+      showSmartToast(statusMessage, { tone: isError ? 'error' : 'success' });
+    }
   });
 
   rulesPreviewNode?.addEventListener('click', (event) => {
@@ -2808,6 +2866,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const button = target.closest('[data-fixture-rules-apply-preview]');
     if (!(button instanceof HTMLButtonElement)) return;
     applyPreviewedDates();
+    const statusMessage = String(rulesStatusNode?.textContent || statusNode?.textContent || '').trim();
+    if (statusMessage) {
+      const isError = /no preview|please preview again|changed after preview|invalid|could not/i.test(statusMessage);
+      showSmartToast(statusMessage, { tone: isError ? 'error' : 'success' });
+    }
   });
 
   bodyNode.addEventListener('change', (event) => {
@@ -4456,6 +4519,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
       if (!title || !start || !eventType) {
         if (statusNode) statusNode.textContent = 'Title, event type, and start date are required.';
+        showSmartToast('Title, event type, and start date are required.', { tone: 'error' });
         return;
       }
 
@@ -4463,6 +4527,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
         if (statusNode) {
           statusNode.textContent = 'Save at least one school term range before scheduling fixture events.';
         }
+        showSmartToast('Save at least one school term range before scheduling fixture events.', { tone: 'error' });
         return;
       }
 
@@ -4498,12 +4563,19 @@ const hydrateSchoolCalendar = (calendarShell) => {
           ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
           : 'Event saved.';
       }
+      showSmartToast(
+        fixtureId && effectiveStartDate !== startDate
+          ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
+          : 'Event saved.',
+        { tone: 'success' }
+      );
       clearForm();
     });
 
     newButton?.addEventListener('click', () => {
       clearForm();
       if (statusNode) statusNode.textContent = 'Ready for a new event.';
+      showSmartToast('Ready for a new event.', { tone: 'info' });
     });
 
     deleteButton?.addEventListener('click', () => {
@@ -4511,11 +4583,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
       const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
       if (!eventId) {
         if (statusNode) statusNode.textContent = 'Select an event first.';
+        showSmartToast('Select an event first.', { tone: 'error' });
         return;
       }
       const eventEntry = calendar.getEventById(eventId);
       if (!eventEntry) {
         if (statusNode) statusNode.textContent = 'Selected event not found.';
+        showSmartToast('Selected event not found.', { tone: 'error' });
         return;
       }
       const confirmDelete = window.confirm('Delete this calendar event?');
@@ -4525,6 +4599,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       refreshDayOverlay();
       clearForm();
       if (statusNode) statusNode.textContent = 'Event deleted.';
+      showSmartToast('Event deleted.', { tone: 'success' });
     });
 
     if (eventTypeSelect instanceof HTMLSelectElement) {
@@ -4550,6 +4625,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
         if (eventTypesStatusNode) {
           eventTypesStatusNode.textContent = 'Type added. Rename it and click Save types.';
         }
+        showSmartToast('Event type added. Rename it and save types.', { tone: 'success' });
       });
     }
 
@@ -4602,6 +4678,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (eventTypesStatusNode) {
         eventTypesStatusNode.textContent = 'Type removed.';
       }
+      showSmartToast('Event type removed.', { tone: 'success' });
     });
 
     if (eventTypesSaveButton instanceof HTMLButtonElement) {
@@ -4622,6 +4699,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
         if (eventTypesStatusNode) {
           eventTypesStatusNode.textContent = 'Event types saved.';
         }
+        showSmartToast('Event types saved.', { tone: 'success' });
       });
     }
 
@@ -4649,6 +4727,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (termsStatusNode) {
         termsStatusNode.textContent = 'School terms saved.';
       }
+      showSmartToast('School terms saved.', { tone: 'success' });
     });
   }
 

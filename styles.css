@@ -698,6 +698,71 @@ h1 {
   display: none !important;
 }
 
+.app-toast-host {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1300;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 24px));
+}
+
+.app-toast {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 9px 11px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  box-shadow: 0 10px 22px rgba(13, 34, 56, 0.16);
+  opacity: 0;
+  transform: translateY(6px);
+  animation: toast-in 180ms ease forwards;
+}
+
+.app-toast[data-tone='success'] {
+  border-left-color: var(--primary);
+}
+
+.app-toast[data-tone='error'] {
+  border-left-color: #8b1f1f;
+}
+
+.app-toast[data-tone='info'] {
+  border-left-color: #4d5f73;
+}
+
+.app-toast.is-hiding {
+  animation: toast-out 180ms ease forwards;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 .latest-news-content {
   margin: -42px 0 0;
   padding: 14px 16px 16px;
