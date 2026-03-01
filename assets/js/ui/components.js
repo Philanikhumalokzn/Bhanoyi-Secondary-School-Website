@@ -816,6 +816,12 @@ const renderMatchLogSection = (section, sectionIndex) => {
             <article class="panel match-log-modal-panel" role="dialog" aria-modal="true" aria-label="Add match event">
               <h3 class="match-log-modal-title">Add match event</h3>
               <p class="match-log-modal-subtitle" data-match-modal-team></p>
+              <div class="match-log-form-grid">
+                <label>
+                  Team
+                  <select data-match-modal-team-select></select>
+                </label>
+              </div>
               <section class="match-log-step" data-match-step="type">
                 <h4>Select event type</h4>
                 <div class="match-log-event-type-list" data-match-event-types></div>
@@ -1033,6 +1039,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const fixtureSelect = matchLogNode.querySelector('[data-match-fixture-select]');
   const modal = matchLogNode.querySelector('[data-match-modal]');
   const teamLabel = matchLogNode.querySelector('[data-match-modal-team]');
+  const modalTeamSelect = matchLogNode.querySelector('[data-match-modal-team-select]');
   const exportButton = matchLogNode.querySelector('[data-match-export]');
   const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
   const detailsStep = matchLogNode.querySelector('[data-match-step="details"]');
@@ -1394,6 +1401,7 @@ const hydrateMatchLog = (matchLogNode) => {
           button.disabled = true;
         }
       });
+      syncModalTeamState();
       return;
     }
 
@@ -1453,6 +1461,8 @@ const hydrateMatchLog = (matchLogNode) => {
       }
     });
 
+    syncModalTeamState();
+
     persistCurrentFixtureLog();
   };
 
@@ -1484,14 +1494,47 @@ const hydrateMatchLog = (matchLogNode) => {
     resetModal();
   };
 
+  const syncModalTeamState = () => {
+    const fixture = getCurrentFixture();
+    if (!(modalTeamSelect instanceof HTMLSelectElement)) {
+      if (teamLabel && fixture) {
+        const teamName = activeTeamId === fixture.awayId ? fixture.awayName : fixture.homeName;
+        teamLabel.textContent = `Team: ${teamName}`;
+      }
+      return;
+    }
+
+    if (!fixture) {
+      modalTeamSelect.innerHTML = '<option value="">Select team</option>';
+      modalTeamSelect.disabled = true;
+      if (teamLabel) teamLabel.textContent = '';
+      return;
+    }
+
+    const validTeamIds = new Set([fixture.homeId, fixture.awayId]);
+    if (!validTeamIds.has(activeTeamId)) {
+      activeTeamId = fixture.homeId;
+    }
+
+    modalTeamSelect.disabled = false;
+    modalTeamSelect.innerHTML = `
+      <option value="${escapeHtmlAttribute(fixture.homeId)}">${escapeHtmlText(fixture.homeName)}</option>
+      <option value="${escapeHtmlAttribute(fixture.awayId)}">${escapeHtmlText(fixture.awayName)}</option>
+    `;
+    modalTeamSelect.value = activeTeamId;
+
+    if (teamLabel) {
+      const teamName = activeTeamId === fixture.awayId ? fixture.awayName : fixture.homeName;
+      teamLabel.textContent = `Team: ${teamName}`;
+    }
+  };
+
   const openModalForTeam = (teamId) => {
     const fixture = getCurrentFixture();
     if (!fixture || !teamId) return;
     workflowSteps?.expandStep('log-events');
-    activeTeamId = teamId;
-    if (teamLabel) {
-      teamLabel.textContent = `Team: ${teamId === fixture.awayId ? fixture.awayName : fixture.homeName}`;
-    }
+    activeTeamId = teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+    syncModalTeamState();
     resetModal();
     modal.classList.remove('is-hidden');
   };
@@ -1613,6 +1656,14 @@ const hydrateMatchLog = (matchLogNode) => {
     applyFixtureSelection();
   });
 
+  modalTeamSelect?.addEventListener('change', () => {
+    const fixture = getCurrentFixture();
+    if (!(modalTeamSelect instanceof HTMLSelectElement) || !fixture) return;
+    const nextTeamId = String(modalTeamSelect.value || '').trim();
+    activeTeamId = nextTeamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+    syncModalTeamState();
+  });
+
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
     const fixture = getCurrentFixture();
     if (!fixture) return;
@@ -1723,6 +1774,7 @@ const hydrateMatchLog = (matchLogNode) => {
   }
 
   applyFixtureSelection();
+  syncModalTeamState();
 };
 
 const isGenericHouseName = (value) => /^house\s*\d+$/i.test(String(value || '').trim());
