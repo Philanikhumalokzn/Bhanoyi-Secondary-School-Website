@@ -2434,6 +2434,57 @@ body.news-read-open {
   background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
+.calendar-color-popover {
+  position: absolute;
+  z-index: 12;
+  width: min(220px, 90vw);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  box-shadow: 0 8px 18px rgba(13, 34, 56, 0.14);
+}
+
+.calendar-color-popover-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.calendar-color-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-color-swatch {
+  border: 1px solid var(--swatch-border);
+  background: var(--swatch-bg);
+  border-radius: 8px;
+  min-height: 26px;
+}
+
+.calendar-color-custom-label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.calendar-color-custom-label input[type='color'] {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 4px;
+}
+
 @media (max-width: 640px) {
   .hero {
     padding: 20px 0;

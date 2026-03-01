@@ -1742,6 +1742,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
           start: normalizeDateString(entry.start),
           end: normalizeDateString(entry.end),
           allDay: true,
+          backgroundColor: String(entry.backgroundColor || '').trim() || undefined,
+          borderColor: String(entry.borderColor || '').trim() || undefined,
+          textColor: String(entry.textColor || '').trim() || undefined,
           extendedProps: {
             fixtureId: String(entry.fixtureId || ''),
             notes: String(entry.notes || '')
@@ -1760,6 +1763,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
       title: entry.title,
       start: normalizeDateString(entry.startStr || entry.start || ''),
       end: normalizeDateString(entry.endStr || entry.end || ''),
+      backgroundColor: String(entry.backgroundColor || '').trim(),
+      borderColor: String(entry.borderColor || '').trim(),
+      textColor: String(entry.textColor || '').trim(),
       fixtureId: String(entry.extendedProps?.fixtureId || ''),
       notes: String(entry.extendedProps?.notes || '')
     }));
@@ -1808,7 +1814,130 @@ const hydrateSchoolCalendar = (calendarShell) => {
     });
   };
 
+  const hasConfiguredActiveTerms = () => getActiveTermRanges().length > 0;
+
+  const getContrastTextColor = (hexColor) => {
+    const raw = String(hexColor || '').trim().replace('#', '');
+    if (!/^[0-9a-fA-F]{6}$/.test(raw)) return '#1a2a3a';
+    const red = Number.parseInt(raw.slice(0, 2), 16);
+    const green = Number.parseInt(raw.slice(2, 4), 16);
+    const blue = Number.parseInt(raw.slice(4, 6), 16);
+    const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+    return luminance > 0.62 ? '#1a2a3a' : '#ffffff';
+  };
+
+  const calendarThemePresets = [
+    { key: 'blue', bg: '#e7f1ff', border: '#0b5cab', text: '#1a2a3a' },
+    { key: 'green', bg: '#e5f7ec', border: '#15803d', text: '#1a2a3a' },
+    { key: 'amber', bg: '#fff4dd', border: '#b45309', text: '#1a2a3a' },
+    { key: 'rose', bg: '#ffe8ee', border: '#be185d', text: '#1a2a3a' },
+    { key: 'slate', bg: '#e9edf3', border: '#334155', text: '#1a2a3a' }
+  ];
+  const defaultCalendarTheme = calendarThemePresets[0];
+
+  const applyEventTheme = (eventEntry, theme) => {
+    if (!eventEntry || !theme) return;
+    eventEntry.setProp('backgroundColor', theme.bg);
+    eventEntry.setProp('borderColor', theme.border || theme.bg);
+    eventEntry.setProp('textColor', theme.text || getContrastTextColor(theme.bg));
+  };
+
+  const colorPopover = document.createElement('div');
+  colorPopover.className = 'calendar-color-popover is-hidden';
+  colorPopover.innerHTML = `
+    <p class="calendar-color-popover-title">Event Theme</p>
+    <div class="calendar-color-swatches" data-calendar-swatches></div>
+    <label class="calendar-color-custom-label">
+      Custom color
+      <input type="color" data-calendar-color-input value="#0b5cab" />
+    </label>
+    <button type="button" class="btn btn-secondary" data-calendar-theme-reset>Reset</button>
+  `;
+  calendarShell.appendChild(colorPopover);
+
+  const swatchWrap = colorPopover.querySelector('[data-calendar-swatches]');
+  const colorInput = colorPopover.querySelector('[data-calendar-color-input]');
+  const resetThemeBtn = colorPopover.querySelector('[data-calendar-theme-reset]');
+  let activeThemeEvent = null;
+
+  if (swatchWrap) {
+    swatchWrap.innerHTML = calendarThemePresets
+      .map(
+        (preset) => `
+          <button
+            type="button"
+            class="calendar-color-swatch"
+            data-theme-key="${preset.key}"
+            title="${preset.key}"
+            style="--swatch-bg: ${preset.bg}; --swatch-border: ${preset.border};"
+          ></button>
+        `
+      )
+      .join('');
+  }
+
+  const hideColorPopover = () => {
+    colorPopover.classList.add('is-hidden');
+    activeThemeEvent = null;
+  };
+
+  const showColorPopover = (eventEntry, anchorElement) => {
+    if (!isAdminMode || !eventEntry || !anchorElement) return;
+    activeThemeEvent = eventEntry;
+    colorPopover.classList.remove('is-hidden');
+
+    const rootRect = calendarShell.getBoundingClientRect();
+    const anchorRect = anchorElement.getBoundingClientRect();
+    const left = Math.max(10, anchorRect.left - rootRect.left + anchorRect.width + 8);
+    const top = Math.max(10, anchorRect.top - rootRect.top);
+    colorPopover.style.left = `${left}px`;
+    colorPopover.style.top = `${top}px`;
+
+    const currentBg = String(eventEntry.backgroundColor || eventEntry.borderColor || '#0b5cab').trim();
+    if (colorInput instanceof HTMLInputElement && /^#[0-9a-fA-F]{6}$/.test(currentBg)) {
+      colorInput.value = currentBg;
+    }
+  };
+
   const events = loadEvents();
+
+  swatchWrap?.addEventListener('click', (event) => {
+    const button = (event.target instanceof HTMLElement)
+      ? event.target.closest('.calendar-color-swatch')
+      : null;
+    if (!(button instanceof HTMLButtonElement) || !activeThemeEvent) return;
+    const themeKey = (button.dataset.themeKey || '').trim();
+    const preset = calendarThemePresets.find((entry) => entry.key === themeKey);
+    if (!preset) return;
+    applyEventTheme(activeThemeEvent, preset);
+    saveEvents(calendar.getEvents());
+  });
+
+  colorInput?.addEventListener('input', () => {
+    if (!(colorInput instanceof HTMLInputElement) || !activeThemeEvent) return;
+    const picked = colorInput.value;
+    applyEventTheme(activeThemeEvent, {
+      bg: picked,
+      border: picked,
+      text: getContrastTextColor(picked)
+    });
+    saveEvents(calendar.getEvents());
+  });
+
+  resetThemeBtn?.addEventListener('click', () => {
+    if (!activeThemeEvent) return;
+    applyEventTheme(activeThemeEvent, defaultCalendarTheme);
+    saveEvents(calendar.getEvents());
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest('.calendar-color-popover')) return;
+    if (target.closest('.fc-event')) return;
+    hideColorPopover();
+  });
+
   const calendar = new Calendar(calendarRoot, {
     plugins: [dayGridPlugin, interactionPlugin],
     initialView: 'dayGridMonth',
@@ -1818,6 +1947,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (info.event.display === 'background') return;
       if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
       info.jsEvent.preventDefault();
+      showColorPopover(info.event, info.el);
       const formData = new FormData(form);
       formData.set('id', String(info.event.id || ''));
       formData.set('title', String(info.event.title || ''));
@@ -1919,6 +2049,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
         return;
       }
 
+      if (fixtureId && !hasConfiguredActiveTerms()) {
+        if (statusNode) {
+          statusNode.textContent = 'Save at least one school term range before scheduling fixture events.';
+        }
+        return;
+      }
+
       let eventEntry = eventId ? calendar.getEventById(eventId) : null;
       if (!eventEntry) {
         eventEntry = calendar.addEvent({
@@ -1932,6 +2069,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
             notes
           }
         });
+        applyEventTheme(eventEntry, defaultCalendarTheme);
       } else {
         eventEntry.setProp('title', title);
         eventEntry.setStart(start);
