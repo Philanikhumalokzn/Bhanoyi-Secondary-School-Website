@@ -3287,6 +3287,114 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
   renderReadControls();
 };
 
+const wireMatchLogInline = (section: Element) => {
+  const container = section.querySelector('.container');
+  const shell = section.querySelector('[data-match-log="true"]');
+  const leftSelect = section.querySelector('[data-team-select="left"]') as HTMLSelectElement | null;
+  const rightSelect = section.querySelector('[data-team-select="right"]') as HTMLSelectElement | null;
+  if (!container || !shell || !leftSelect || !rightSelect) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  container.appendChild(controls);
+
+  const readState = {
+    options: Array.from(leftSelect.options).map((option) => ({
+      id: option.value,
+      name: option.textContent?.trim() || option.value
+    })),
+    leftTeamId: leftSelect.value,
+    rightTeamId: rightSelect.value
+  };
+
+  let editorWrap: HTMLElement | null = null;
+  let editors: Array<{ id: string; input: HTMLInputElement }> = [];
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit Houses';
+    editBtn.addEventListener('click', enterEdit);
+    controls.appendChild(editBtn);
+  };
+
+  const exitEdit = () => {
+    if (editorWrap) {
+      editorWrap.remove();
+      editorWrap = null;
+    }
+    editors = [];
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save Houses';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const houseOptions = editors
+          .map((entry) => ({
+            id: entry.id,
+            name: entry.input.value.trim() || entry.id
+          }))
+          .filter((entry) => Boolean(entry.id));
+
+        if (houseOptions.length < 2) {
+          showStatus('Add at least two house names before saving.');
+          return;
+        }
+
+        await saveSectionOverride(section, {
+          type: 'match-log',
+          houseOptions,
+          leftTeamId: leftSelect.value,
+          rightTeamId: rightSelect.value
+        });
+        showStatus('House names saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save house names.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    if (editorWrap) {
+      return;
+    }
+
+    editorWrap = document.createElement('div');
+    editorWrap.className = 'inline-admin-controls';
+    editors = [];
+
+    readState.options.forEach((house, index) => {
+      const { wrapper, input } = createTextEditor(`House ${index + 1} Name`, house.name);
+      wrapper.classList.add('inline-match-house-editor');
+      editors.push({ id: house.id, input });
+      editorWrap?.appendChild(wrapper);
+    });
+
+    controls.after(editorWrap);
+    renderEditControls();
+  };
+
+  renderReadControls();
+};
+
 const wireFooterInline = () => {
   const footer = document.querySelector('.site-footer');
   if (!footer) return;
@@ -4055,6 +4163,11 @@ const bindInlineActions = () => {
     document.querySelectorAll('[data-editable-section="true"][data-section-type="contact-cards"]')
   );
   editableContactSections.forEach(wireContactCardsInline);
+
+  const editableMatchLogSections = Array.from(
+    document.querySelectorAll('[data-editable-section="true"][data-section-type="match-log"]')
+  );
+  editableMatchLogSections.forEach(wireMatchLogInline);
 
   const latestNewsSection = document.querySelector(
     '[data-editable-section="true"][data-section-key="latest_news"]'

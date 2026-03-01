@@ -1941,6 +1941,10 @@ body.news-read-open {
   font: inherit;
 }
 
+.inline-match-house-editor {
+  width: min(380px, 100%);
+}
+
 .match-log-shell {
   display: grid;
   gap: 10px;

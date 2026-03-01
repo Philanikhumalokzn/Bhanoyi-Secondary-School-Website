@@ -562,7 +562,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
       .join('');
 
   return `
-    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
       <div class="container">
         <h2>${section.title || 'Live Match Event Log'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
