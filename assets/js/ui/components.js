@@ -1256,6 +1256,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               </label>
               <button type="button" class="btn btn-secondary" data-fixture-generate>Generate fixtures</button>
               <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
+              <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
             </div>
           </header>
           <div class="fixture-date-rules" data-fixture-date-rules>
@@ -1516,6 +1517,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const bodyNode = fixtureNode.querySelector('[data-fixture-body]');
   const generateButton = fixtureNode.querySelector('[data-fixture-generate]');
   const exportButton = fixtureNode.querySelector('[data-fixture-export]');
+  const exportCsvButton = fixtureNode.querySelector('[data-fixture-export-csv]');
 
   if (!bodyNode || !generateButton || !exportButton) return;
 
@@ -2951,17 +2953,65 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return `"${normalized}"`;
   };
 
+  const downloadBlob = (blob, fileName) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const buildExportBaseName = () => {
+    const safeCompetition = (config.competition || 'season-fixtures')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+    return `${safeCompetition || 'season-fixtures'}-${stamp}`;
+  };
+
+  const buildFixtureCsvContent = () => {
+    const lines = [
+      ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
+      ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
+      ['Format', lastFormatLabel || ''].map(escapeCsvValue).join(','),
+      ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
+      '',
+      ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
+    ];
+
+    lastFixtures.forEach((fixture) => {
+      const fixtureId = getFixtureId(fixture);
+      const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
+      lines.push(
+        [
+          fixture.round,
+          fixture.leg,
+          `R${fixture.round}M${fixture.match}`,
+          stampValue.date || '',
+          stampValue.time || '',
+          fixture.formatLabel || '',
+          teamNameById(fixture.homeId),
+          teamNameById(fixture.awayId)
+        ]
+          .map(escapeCsvValue)
+          .join(',')
+      );
+    });
+
+    return lines.join('\n');
+  };
+
   exportButton.addEventListener('click', async () => {
     if (!lastFixtures.length) {
       generateFixtures();
       if (!lastFixtures.length) return;
     }
 
-    const safeCompetition = (config.competition || 'season-fixtures')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    const stamp = new Date().toISOString().slice(0, 10);
+    const baseName = buildExportBaseName();
 
     const formatFriendlyDate = (dateValue) => {
       const normalized = normalizeDateOnly(dateValue);
@@ -2974,17 +3024,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
         month: 'short',
         year: 'numeric'
       });
-    };
-
-    const downloadBlob = (blob, fileName) => {
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
     };
 
     try {
@@ -3174,45 +3213,31 @@ const hydrateFixtureCreator = (fixtureNode) => {
         new Blob([workbookBuffer], {
           type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         }),
-        `${safeCompetition || 'season-fixtures'}-${stamp}.xlsx`
+        `${baseName}.xlsx`
       );
       showSmartToast('Professional fixture file exported (.xlsx).', { tone: 'success' });
       return;
     } catch {
-      const lines = [
-        ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
-        ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
-        ['Format', lastFormatLabel || ''].map(escapeCsvValue).join(','),
-        ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
-        '',
-        ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
-      ];
-
-      lastFixtures.forEach((fixture) => {
-        const fixtureId = getFixtureId(fixture);
-        const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
-        lines.push(
-          [
-            fixture.round,
-            fixture.leg,
-            `R${fixture.round}M${fixture.match}`,
-            stampValue.date || '',
-            stampValue.time || '',
-            fixture.formatLabel || '',
-            teamNameById(fixture.homeId),
-            teamNameById(fixture.awayId)
-          ]
-            .map(escapeCsvValue)
-            .join(',')
-        );
-      });
-
       downloadBlob(
-        new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }),
-        `${safeCompetition || 'season-fixtures'}-${stamp}.csv`
+        new Blob([buildFixtureCsvContent()], { type: 'text/csv;charset=utf-8' }),
+        `${baseName}.csv`
       );
       showSmartToast('Exported CSV fallback.', { tone: 'info' });
     }
+  });
+
+  exportCsvButton?.addEventListener('click', () => {
+    if (!lastFixtures.length) {
+      generateFixtures();
+      if (!lastFixtures.length) return;
+    }
+
+    const baseName = buildExportBaseName();
+    downloadBlob(
+      new Blob([buildFixtureCsvContent()], { type: 'text/csv;charset=utf-8' }),
+      `${baseName}.csv`
+    );
+    showSmartToast('CSV fixture exported.', { tone: 'success' });
   });
 
   generateButton.addEventListener('click', () => {
