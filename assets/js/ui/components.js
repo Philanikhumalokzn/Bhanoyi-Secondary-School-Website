@@ -1666,6 +1666,22 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               <div class="calendar-day-overlay-list" data-calendar-day-list></div>
             </div>
           </div>
+          <div class="calendar-sports-overlay is-hidden" data-calendar-sports-overlay>
+            <div class="calendar-sports-overlay-panel" role="dialog" aria-modal="true" aria-label="Sports event options">
+              <div class="calendar-sports-overlay-header">
+                <h3>Sports Event Options</h3>
+                <button type="button" class="btn btn-secondary" data-calendar-sports-close>Close</button>
+              </div>
+              <p class="calendar-sports-overlay-text">This event is marked as Sports. Use Fixture Creator for fixture-aware scheduling, or continue with the normal calendar form.</p>
+              <div class="school-calendar-actions" data-calendar-sports-actions>
+                <button type="button" class="btn btn-primary" data-calendar-sports-open-fixture>Open Fixture Creator</button>
+                <button type="button" class="btn btn-secondary" data-calendar-sports-continue>Continue in Calendar</button>
+              </div>
+              <div class="calendar-sports-frame-wrap is-hidden" data-calendar-sports-frame-wrap>
+                <iframe class="calendar-sports-frame" data-calendar-sports-frame title="Fixture Creator" loading="lazy"></iframe>
+              </div>
+            </div>
+          </div>
         </article>
       </div>
     </section>
@@ -1703,6 +1719,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const dayOverlayTitle = calendarShell.querySelector('[data-calendar-day-title]');
   const dayOverlayList = calendarShell.querySelector('[data-calendar-day-list]');
   const dayOverlayCloseButton = calendarShell.querySelector('[data-calendar-day-close]');
+  const sportsOverlay = calendarShell.querySelector('[data-calendar-sports-overlay]');
+  const sportsOverlayCloseButton = calendarShell.querySelector('[data-calendar-sports-close]');
+  const sportsOverlayActions = calendarShell.querySelector('[data-calendar-sports-actions]');
+  const sportsOverlayOpenFixtureButton = calendarShell.querySelector('[data-calendar-sports-open-fixture]');
+  const sportsOverlayContinueButton = calendarShell.querySelector('[data-calendar-sports-continue]');
+  const sportsFrameWrap = calendarShell.querySelector('[data-calendar-sports-frame-wrap]');
+  const sportsFrame = calendarShell.querySelector('[data-calendar-sports-frame]');
   if (!calendarRoot) return;
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
@@ -1722,6 +1745,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const incomingFixtureId = (params.get('fixtureId') || '').trim();
   const incomingFixtureLabel = (params.get('fixtureLabel') || '').trim();
   const incomingDate = (params.get('date') || '').trim();
+  const fixtureCreatorOverlayUrl = withAdminQuery('sports.html');
 
   const normalizeDateString = (value) => {
     const raw = String(value || '').trim();
@@ -1771,6 +1795,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (!date) return '';
     if (!time) return date;
     return `${date}T${time}`;
+  };
+
+  const isSportsTypeSelected = () => {
+    if (!(eventTypeSelect instanceof HTMLSelectElement)) return false;
+    return normalizeEventTypeLabel(eventTypeSelect.value).toLowerCase() === 'sports';
   };
 
   const eventStartStamp = (eventEntry) => {
@@ -2260,6 +2289,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const events = loadEvents();
   let activeOverlayDate = '';
   let isReconcilingFixtures = false;
+  let sportsOverlayHandledForCurrentSelection = false;
 
   const reconcileFixtureEvents = () => {
     if (isReconcilingFixtures) return;
@@ -2416,6 +2446,47 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
   };
 
+  const hideSportsOverlay = () => {
+    if (sportsOverlay instanceof HTMLElement) {
+      sportsOverlay.classList.add('is-hidden');
+    }
+    if (sportsFrameWrap instanceof HTMLElement) {
+      sportsFrameWrap.classList.add('is-hidden');
+    }
+    if (sportsOverlayActions instanceof HTMLElement) {
+      sportsOverlayActions.classList.remove('is-hidden');
+    }
+  };
+
+  const showSportsSelectionOverlay = () => {
+    if (!(sportsOverlay instanceof HTMLElement)) return;
+    sportsOverlay.classList.remove('is-hidden');
+    if (sportsFrameWrap instanceof HTMLElement) {
+      sportsFrameWrap.classList.add('is-hidden');
+    }
+    if (sportsOverlayActions instanceof HTMLElement) {
+      sportsOverlayActions.classList.remove('is-hidden');
+    }
+    if (sportsOverlayOpenFixtureButton instanceof HTMLButtonElement) {
+      sportsOverlayOpenFixtureButton.focus();
+    }
+  };
+
+  const maybePromptSportsFixtureOverlay = () => {
+    if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
+    if (!isSportsTypeSelected()) return;
+    if (sportsOverlayHandledForCurrentSelection) return;
+
+    const idInput = form.querySelector('input[name="id"]');
+    const fixtureInput = form.querySelector('input[name="fixtureId"]');
+    const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+    const linkedFixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
+
+    if (eventId || linkedFixtureId) return;
+
+    showSportsSelectionOverlay();
+  };
+
   const writeEventToForm = (eventEntry, anchorElement = null) => {
     if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
     showColorPopover(eventEntry, anchorElement || null);
@@ -2464,6 +2535,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (statusNode) {
       statusNode.textContent = 'Editing selected event.';
     }
+
+    sportsOverlayHandledForCurrentSelection = true;
   };
 
   const renderDayOverlayList = (dateString) => {
@@ -2702,6 +2775,52 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
   });
 
+  sportsOverlayCloseButton?.addEventListener('click', () => {
+    hideSportsOverlay();
+    sportsOverlayHandledForCurrentSelection = true;
+  });
+
+  sportsOverlayContinueButton?.addEventListener('click', () => {
+    hideSportsOverlay();
+    sportsOverlayHandledForCurrentSelection = true;
+    if (statusNode) {
+      statusNode.textContent = 'Continue creating this Sports event in calendar form.';
+    }
+  });
+
+  sportsOverlayOpenFixtureButton?.addEventListener('click', () => {
+    if (sportsFrame instanceof HTMLIFrameElement) {
+      if (!sportsFrame.src) {
+        sportsFrame.src = fixtureCreatorOverlayUrl;
+      }
+    }
+    if (sportsFrameWrap instanceof HTMLElement) {
+      sportsFrameWrap.classList.remove('is-hidden');
+    }
+    if (sportsOverlayActions instanceof HTMLElement) {
+      sportsOverlayActions.classList.add('is-hidden');
+    }
+    sportsOverlayHandledForCurrentSelection = true;
+  });
+
+  sportsOverlay?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target === sportsOverlay) {
+      hideSportsOverlay();
+      sportsOverlayHandledForCurrentSelection = true;
+    }
+  });
+
+  sportsOverlay?.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      hideSportsOverlay();
+      sportsOverlayHandledForCurrentSelection = true;
+    }
+  });
+
   const hydrateTermsForm = () => {
     if (!(termsForm instanceof HTMLFormElement)) return;
     terms.forEach((term) => {
@@ -2750,6 +2869,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (eventTypeCustomInput instanceof HTMLInputElement) {
       eventTypeCustomInput.value = '';
     }
+    sportsOverlayHandledForCurrentSelection = false;
+    hideSportsOverlay();
   };
 
   if (isAdminMode && form instanceof HTMLFormElement) {
@@ -2880,6 +3001,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (eventTypeSelect instanceof HTMLSelectElement) {
       eventTypeSelect.addEventListener('change', () => {
         toggleCustomTypeField();
+        if (!isSportsTypeSelected()) {
+          sportsOverlayHandledForCurrentSelection = false;
+          hideSportsOverlay();
+          return;
+        }
+        maybePromptSportsFixtureOverlay();
       });
     }
 

@@ -2515,6 +2515,59 @@ body.news-read-open {
   color: var(--muted);
 }
 
+.calendar-sports-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--surface) 10%, #000 42%);
+  display: grid;
+  place-items: center;
+  z-index: 1210;
+  padding: 16px;
+}
+
+.calendar-sports-overlay-panel {
+  width: min(980px, 100%);
+  max-height: min(82vh, 900px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.calendar-sports-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-sports-overlay-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.calendar-sports-overlay-text {
+  margin: 0;
+  color: var(--muted);
+}
+
+.calendar-sports-frame-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  min-height: 520px;
+}
+
+.calendar-sports-frame {
+  width: 100%;
+  height: min(72vh, 760px);
+  border: 0;
+  background: var(--surface);
+}
+
 .fc .fc-toolbar-title {
   font-size: 1.1rem;
   color: var(--text);
