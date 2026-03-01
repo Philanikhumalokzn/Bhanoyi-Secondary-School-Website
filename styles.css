@@ -3869,3 +3869,117 @@ body.news-read-open {
     grid-template-columns: 1.2fr 1fr 1fr;
   }
 }
+
+:root {
+  --shadow-soft: none;
+  --shadow-elevated: none;
+  --shadow-floating: none;
+}
+
+.site-header,
+.btn,
+.panel,
+.card,
+.alert-box,
+.latest-news-slide,
+.sports-workflow-step,
+.fixture-approval-panel,
+.news-overlay-panel,
+.news-read-panel,
+.calendar-sports-frame-wrap,
+.fc .fc-button {
+  box-shadow: none !important;
+}
+
+.primary-nav a,
+.btn,
+.panel,
+.card,
+.alert-box,
+.latest-news-slide,
+.sports-workflow-step,
+.match-log-event-option,
+.fixture-autofill-toggle,
+.news-overlay-actions button,
+#news-image-dropzone,
+.fc .fc-button {
+  transition-duration: 120ms !important;
+  transition-timing-function: ease-out !important;
+}
+
+.primary-nav a:hover,
+.primary-nav a:focus-visible,
+.btn:hover,
+.btn:focus-visible,
+.btn:active,
+.panel:hover,
+.card:hover,
+.card:focus-visible,
+.latest-news-slide:hover,
+.latest-news-slide:focus-visible,
+.match-log-event-option:hover,
+.match-log-event-option:focus-within,
+.fixture-autofill-toggle:hover,
+.fixture-autofill-toggle:focus-within,
+.fixture-autofill-toggle:active,
+.fixture-creator-shell .btn:hover,
+.fixture-creator-shell .btn:focus-visible,
+.fixture-rules-preview-actions .btn:hover,
+.fixture-rules-preview-actions .btn:focus-visible,
+.fixture-date-rules .btn:hover,
+.fixture-date-rules .btn:focus-visible,
+.fixture-creator-shell .btn:active,
+.fixture-rules-preview-actions .btn:active,
+.fixture-date-rules .btn:active,
+.news-overlay-actions button:hover,
+#news-image-dropzone:hover,
+#news-image-dropzone:focus-visible,
+.fc .fc-button:hover,
+.fc .fc-button:focus-visible,
+.fc .fc-button.fc-button-active {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.primary-nav a[aria-current='page'],
+.site-header.has-header-bg .primary-nav a[aria-current='page'] {
+  box-shadow: none !important;
+}
+
+.latest-news-rail {
+  transition: transform 220ms ease-out;
+}
+
+.app-toast {
+  box-shadow: none;
+  transform: translateY(2px);
+  animation: toast-in 120ms ease-out forwards;
+}
+
+.app-toast.is-hiding {
+  animation: toast-out 120ms ease-in forwards;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
