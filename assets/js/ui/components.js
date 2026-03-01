@@ -1501,6 +1501,24 @@ const hydrateMatchLog = (matchLogNode) => {
     render();
   };
 
+  const selectFixtureById = (fixtureId, { autoOpenOverlay = false } = {}) => {
+    const normalizedFixtureId = String(fixtureId || '').trim();
+    if (!normalizedFixtureId) return false;
+    const fixture = fixtureOptions.find((entry) => entry.fixtureId === normalizedFixtureId);
+    if (!fixture) return false;
+
+    selectedDate = fixture.date;
+    selectedFixtureId = fixture.fixtureId;
+    renderFixturePickers();
+    applyFixtureSelection();
+    workflowSteps?.expandStep('log-events');
+
+    if (autoOpenOverlay) {
+      openModalForTeam(fixture.homeId);
+    }
+    return true;
+  };
+
   const refreshFromStorage = () => {
     const previousFixtureId = selectedFixtureId;
     const previousDate = selectedDate;
@@ -1674,6 +1692,22 @@ const hydrateMatchLog = (matchLogNode) => {
     logsByFixture = loadMatchLogByFixtureStore(fixtureSectionKey);
   });
 
+  window.addEventListener('bhanoyi:open-match-log', (event) => {
+    const detail = event?.detail && typeof event.detail === 'object' ? event.detail : {};
+    const sectionFromEvent = String(detail.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+
+    const requestedFixtureId = String(detail.fixtureId || '').trim();
+    const shouldOpenOverlay = detail.autoOpenOverlay === true;
+    if (!requestedFixtureId) return;
+
+    const selected = selectFixtureById(requestedFixtureId, { autoOpenOverlay: shouldOpenOverlay });
+    if (!selected) {
+      refreshFromStorage();
+      selectFixtureById(requestedFixtureId, { autoOpenOverlay: shouldOpenOverlay });
+    }
+  });
+
   const params = new URLSearchParams(window.location.search);
   const requestedFixtureId = String(params.get('logFixtureId') || '').trim();
   const requestedDate = normalizeFixtureDateOnlyGlobal(params.get('logDate') || '');
@@ -1692,10 +1726,8 @@ const hydrateMatchLog = (matchLogNode) => {
 
   if (!requestedSection || requestedSection === fixtureSectionKey) {
     if (requestedFixtureId && fixtureOptions.some((entry) => entry.fixtureId === requestedFixtureId)) {
-      selectedFixtureId = requestedFixtureId;
-      const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
-      selectedDate = matchedFixture?.date || selectedDate;
-      renderFixturePickers();
+      selectFixtureById(requestedFixtureId);
+      return;
     }
   }
 
@@ -2152,6 +2184,27 @@ const hydrateFixtureCreator = (fixtureNode) => {
     `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
 
   const fixtureSignature = (fixtures) => fixtures.map((fixture) => getFixtureId(fixture)).join('|');
+
+  const getFixtureEpoch = (fixture) => {
+    const fixtureId = getFixtureId(fixture);
+    const normalizedStamp = normalizeFixtureStamp(fixtureDates[fixtureId]);
+    if (!normalizedStamp) return Number.MAX_SAFE_INTEGER;
+    const stamp = splitFixtureStamp(normalizedStamp);
+    if (!stamp.date) return Number.MAX_SAFE_INTEGER;
+    const iso = `${stamp.date}T${stamp.time || '23:59'}`;
+    const value = new Date(iso).getTime();
+    return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+  };
+
+  const getFixturesByKickoffOrder = (fixtures = []) =>
+    [...fixtures].sort((left, right) => {
+      const leftEpoch = getFixtureEpoch(left);
+      const rightEpoch = getFixtureEpoch(right);
+      if (leftEpoch !== rightEpoch) return leftEpoch - rightEpoch;
+      if (left.round !== right.round) return left.round - right.round;
+      if (left.match !== right.match) return left.match - right.match;
+      return getFixtureId(left).localeCompare(getFixtureId(right));
+    });
 
   const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
@@ -3480,46 +3533,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const effectiveTeamOptions = houseOptions.filter((team) => effectiveTeamIds.includes(team.id));
     const logsByFixture = loadMatchLogByFixtureStore(fixtureSectionKey);
 
-    const parseFixtureEpoch = (fixtureId) => {
-      const normalizedStamp = normalizeFixtureStamp(fixtureDates[fixtureId]);
-      if (!normalizedStamp) return Number.MAX_SAFE_INTEGER;
-      const stamp = splitFixtureStamp(normalizedStamp);
-      if (!stamp.date) return Number.MAX_SAFE_INTEGER;
-      const iso = `${stamp.date}T${stamp.time || '23:59'}`;
-      const value = new Date(iso).getTime();
-      return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
-    };
-
-    const buildMatchLogHref = (fixtureId, fixtureDate) => {
-      if (typeof window === 'undefined') return '#';
-      const params = new URLSearchParams(window.location.search);
-      params.set('logFixtureSectionKey', fixtureSectionKey);
-      params.set('logFixtureId', fixtureId);
-      const normalizedDate = normalizeFixtureDateOnlyGlobal(fixtureDate || '');
-      if (normalizedDate) {
-        params.set('logDate', normalizedDate);
-      }
-      return withAdminQuery(`${window.location.pathname.split('/').pop() || 'admin.html'}?${params.toString()}`);
-    };
-
-    const renderedFixtures = fixtures
+    const renderedFixtures = getFixturesByKickoffOrder(fixtures)
       .map((fixture, index) => {
         const fixtureId = getFixtureId(fixture);
         const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
-        const epoch = parseFixtureEpoch(fixtureId);
         return {
           fixture,
-          index,
+          index: fixtures.findIndex((entry) => getFixtureId(entry) === fixtureId),
           fixtureId,
-          stamp,
-          epoch
+          stamp
         };
-      })
-      .sort((left, right) => {
-        if (left.epoch !== right.epoch) return left.epoch - right.epoch;
-        if (left.fixture.round !== right.fixture.round) return left.fixture.round - right.fixture.round;
-        if (left.fixture.match !== right.fixture.match) return left.fixture.match - right.fixture.match;
-        return left.fixtureId.localeCompare(right.fixtureId);
       });
 
     const teamOptionMarkup = (selectedId) =>
@@ -3591,11 +3614,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
                   return `<span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>`;
                 }
 
-                const href = buildMatchLogHref(fixtureId, stamp.date);
                 return `
                   <div class="fixture-date-edit-wrap">
-                    <span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>
-                    <a class="fixture-date-link" href="${escapeHtmlAttribute(href)}">${summaryMeta.eventCount > 0 ? 'Edit log' : 'Log match'}</a>
+                    <button type="button" class="btn btn-secondary" data-fixture-log-open="${escapeHtmlAttribute(fixtureId)}">Log</button>
                   </div>
                 `;
               })()}
@@ -3764,6 +3785,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const buildFixtureCsvContent = () => {
+    const sortedFixtures = getFixturesByKickoffOrder(lastFixtures);
     const lines = [
       ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
       ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
@@ -3773,7 +3795,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
     ];
 
-    lastFixtures.forEach((fixture) => {
+    sortedFixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
       const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
       lines.push(
@@ -3935,7 +3957,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       });
 
       const dataStartRow = headerRowNumber + 1;
-      lastFixtures.forEach((fixture, index) => {
+      const sortedFixtures = getFixturesByKickoffOrder(lastFixtures);
+      sortedFixtures.forEach((fixture, index) => {
         const fixtureId = getFixtureId(fixture);
         const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
         const row = sheet.getRow(dataStartRow + index);
@@ -3972,26 +3995,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         });
       });
 
-      const groupByRoundLeg = new Map();
-      lastFixtures.forEach((fixture, index) => {
-        const key = `${fixture.round}::${fixture.leg}`;
-        const rowNumber = dataStartRow + index;
-        const group = groupByRoundLeg.get(key) || [];
-        group.push(rowNumber);
-        groupByRoundLeg.set(key, group);
-      });
-
-      groupByRoundLeg.forEach((rows) => {
-        if (rows.length < 2) return;
-        const start = rows[0];
-        const end = rows[rows.length - 1];
-        sheet.mergeCells(`A${start}:A${end}`);
-        sheet.mergeCells(`B${start}:B${end}`);
-        sheet.getCell(`A${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getCell(`B${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
-      });
-
-      const noteRowNumber = dataStartRow + lastFixtures.length + 2;
+      const noteRowNumber = dataStartRow + sortedFixtures.length + 2;
       sheet.mergeCells(`A${noteRowNumber}:H${noteRowNumber}`);
       const noteCell = sheet.getCell(`A${noteRowNumber}`);
       noteCell.value = 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.';
@@ -4244,6 +4248,27 @@ const hydrateFixtureCreator = (fixtureNode) => {
             : 'Fixture updated with round-robin integrity preserved.';
         }
       }
+    }
+
+    if (target.matches('[data-fixture-log-open]')) {
+      const fixtureId = String(target.getAttribute('data-fixture-log-open') || '').trim();
+      if (!fixtureId) return;
+
+      const fixture = lastFixtures.find((entry) => getFixtureId(entry) === fixtureId);
+      if (!fixture) return;
+
+      const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
+      window.dispatchEvent(
+        new CustomEvent('bhanoyi:open-match-log', {
+          detail: {
+            fixtureSectionKey,
+            fixtureId,
+            date: stamp.date,
+            autoOpenOverlay: true
+          }
+        })
+      );
+      return;
     }
   });
 
