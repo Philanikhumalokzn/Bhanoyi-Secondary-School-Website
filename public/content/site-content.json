@@ -28,10 +28,6 @@
         "eyebrow": "Welcome to",
         "title": "Bhanoyi Secondary School",
         "lead": "Building future-ready learners through academic excellence, discipline, and community values.",
-        "cta": [
-          { "label": "Apply / Enquire", "href": "admissions.html", "variant": "primary" },
-          { "label": "Contact School", "href": "contact.html", "variant": "secondary" }
-        ],
         "notice": {
           "title": "Important Notice",
           "body": "2026 applications are open. Submit forms before 31 March 2026.",
@@ -42,7 +38,7 @@
       "sections": [
         {
           "type": "cards",
-          "title": "Latest News",
+          "title": "Read Latest News",
           "sectionKey": "latest_news",
           "editable": true,
           "alt": true,
@@ -82,7 +78,7 @@
         },
         {
           "type": "cards",
-          "title": "Quick Links",
+          "title": "Use Quick Links",
           "sectionKey": "quick_links",
           "editable": true,
           "clickable": true,
@@ -111,7 +107,7 @@
         },
         {
           "type": "announcements",
-          "title": "Notices & Announcements",
+          "title": "Check Notices & Announcements",
           "items": [
             {
               "date": "17 Feb 2026",
@@ -135,7 +131,7 @@
         },
         {
           "type": "cards",
-          "title": "Upcoming Events",
+          "title": "See Upcoming Events",
           "sectionKey": "upcoming_events",
           "editable": true,
           "columns": 3,
@@ -154,13 +150,12 @@
       "hero": {
         "eyebrow": "Who we are",
         "title": "About Our School",
-        "lead": "Bhanoyi Secondary School is committed to quality education and holistic learner development.",
-        "cta": [{ "label": "Contact Leadership", "href": "contact.html", "variant": "secondary" }]
+        "lead": "Bhanoyi Secondary School is committed to quality education and holistic learner development."
       },
       "sections": [
         {
           "type": "split",
-          "title": "Vision and Values",
+          "title": "Discover Vision and Values",
           "body": "We partner with parents and the wider community to create a safe and focused environment where every learner can succeed.",
           "panel": {
             "title": "Principal’s Message",
@@ -169,7 +164,7 @@
         },
         {
           "type": "cards",
-          "title": "School Culture",
+          "title": "Explore School Culture",
           "sectionKey": "school_culture",
           "editable": true,
           "alt": true,
@@ -198,13 +193,12 @@
       "hero": {
         "eyebrow": "Teaching and learning",
         "title": "Academics",
-        "lead": "Comprehensive subject offerings and structured support to help learners achieve excellent results.",
-        "cta": [{ "label": "View Admissions", "href": "admissions.html", "variant": "primary" }]
+        "lead": "Comprehensive subject offerings and structured support to help learners achieve excellent results."
       },
       "sections": [
         {
           "type": "cards",
-          "title": "Academic Programme",
+          "title": "Explore Academic Programmes",
           "sectionKey": "academic_programme",
           "editable": true,
           "columns": 3,
@@ -225,7 +219,7 @@
         },
         {
           "type": "split",
-          "title": "Curriculum Information",
+          "title": "Review Curriculum Information",
           "alt": true,
           "body": "Parents and guardians can request full curriculum details by grade and subject stream.",
           "panel": {
@@ -243,15 +237,14 @@
       "hero": {
         "eyebrow": "Athletics and teamwork",
         "title": "Sports",
-        "lead": "We use sport to build discipline, teamwork, leadership, and school pride across all grades.",
-        "cta": [{ "label": "Contact School", "href": "contact.html", "variant": "secondary" }]
+        "lead": "We use sport to build discipline, teamwork, leadership, and school pride across all grades."
       },
       "sections": [
         {
           "type": "match-log",
-          "title": "Log Live Match Events",
+          "title": "Follow Live Match Events",
           "sectionKey": "sports_match_log",
-          "body": "Sports committee can log live football or netball match events as they happen. Score updates automatically when goals are logged.",
+          "body": "Follow football or netball match events as they happen, with score updates shown live.",
           "sport": "Football / Netball",
           "competition": "Inter-House Friendly",
           "venue": "Main Field",
@@ -283,9 +276,9 @@
         },
         {
           "type": "fixture-creator",
-          "title": "Create Season Fixtures",
+          "title": "View Season Fixtures",
           "sectionKey": "sports_fixture_creator",
-          "body": "Generate the full home-and-away round-robin schedule for the selected houses.",
+          "body": "View the full home-and-away round-robin schedule for the selected houses.",
           "sport": "Football / Netball",
           "competition": "Inter-House League",
           "venue": "Main Field",
@@ -338,15 +331,14 @@
       "hero": {
         "eyebrow": "Schedule and events",
         "title": "School Calendar",
-        "lead": "View school events, match dates, and key activities in one place.",
-        "cta": [{ "label": "Open Sports", "href": "sports.html", "variant": "secondary" }]
+        "lead": "View school events, match dates, and key activities in one place."
       },
       "sections": [
         {
           "type": "calendar",
-          "title": "Manage School Calendar",
+          "title": "View School Calendar",
           "sectionKey": "school_calendar",
-          "body": "Admins can add and manage school events here. Fixture date edits from Sports open this calendar.",
+          "body": "Browse school events, match dates, and key activities in one place.",
           "fixtureSectionKey": "sports_fixture_creator"
         }
       ]
@@ -358,13 +350,12 @@
       "hero": {
         "eyebrow": "Join our school",
         "title": "Admissions",
-        "lead": "Apply by completing the admission form and submitting required documents before the deadline.",
-        "cta": [{ "label": "Contact Admissions", "href": "contact.html", "variant": "primary" }]
+        "lead": "Apply by completing the admission form and submitting required documents before the deadline."
       },
       "sections": [
         {
           "type": "split",
-          "title": "Application Requirements",
+          "title": "Check Application Requirements",
           "body": "Submit all required documents to the school office to complete your application.",
           "list": [
             "Certified copy of learner birth certificate or ID",
@@ -381,7 +372,7 @@
         {
           "type": "cards",
           "alt": true,
-          "title": "Admission Support",
+          "title": "Get Admission Support",
           "sectionKey": "admission_support",
           "editable": true,
           "columns": 3,
@@ -402,7 +393,7 @@
         },
         {
           "type": "downloads",
-          "title": "Admission Forms & Documents",
+          "title": "Download Admission Forms & Documents",
           "items": [
             {
               "title": "Admission Application Form",
@@ -433,13 +424,12 @@
       "hero": {
         "eyebrow": "Governance and compliance",
         "title": "Policies & Public Information",
-        "lead": "Access the core policy areas parents and learners need most.",
-        "cta": [{ "label": "Contact School Office", "href": "contact.html", "variant": "secondary" }]
+        "lead": "Access the core policy areas parents and learners need most."
       },
       "sections": [
         {
           "type": "cards",
-          "title": "Policy Categories",
+          "title": "Explore Policy Categories",
           "sectionKey": "policy_categories",
           "editable": true,
           "items": [
@@ -464,7 +454,7 @@
         {
           "type": "cards",
           "alt": true,
-          "title": "Public Information Areas",
+          "title": "View Public Information Areas",
           "sectionKey": "public_information_areas",
           "editable": true,
           "columns": 3,
@@ -479,7 +469,7 @@
         },
         {
           "type": "downloads",
-          "title": "Policy Downloads",
+          "title": "Download Policy Documents",
           "items": [
             {
               "title": "Code of Conduct (PDF)",
@@ -521,7 +511,7 @@
       "sections": [
         {
           "type": "contact-cards",
-          "title": "Contact Information",
+          "title": "Find Contact Information",
           "items": [
             { "title": "Phone", "body": "{{school.phone}}" },
             { "title": "Email", "body": "{{school.email}}" },
@@ -531,7 +521,7 @@
         {
           "type": "cards",
           "alt": true,
-          "title": "Office Hours",
+          "title": "Check Office Hours",
           "columns": 3,
           "items": [
             { "title": "Weekdays", "body": "{{school.hours.0}}" },

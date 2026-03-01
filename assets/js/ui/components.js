@@ -394,13 +394,6 @@ export const renderHero = (hero, pageKey, options = {}) => {
     return '';
   }
 
-  const cta = (hero.cta || [])
-    .map(
-      (item) =>
-        `<a class="btn ${item.variant === 'secondary' ? 'btn-secondary' : 'btn-primary'}" href="${item.href}">${item.label}</a>`
-    )
-    .join('');
-
   const notice = includeNotice ? renderHeroNoticeAside(hero.notice, pageKey) : '';
 
   return `
@@ -410,7 +403,6 @@ export const renderHero = (hero, pageKey, options = {}) => {
           <p class="eyebrow">${hero.eyebrow || ''}</p>
           <h1>${hero.title}</h1>
           <p class="lead">${hero.lead}</p>
-          <div class="hero-cta">${cta}</div>
         </div>
         ${notice}
       </div>
@@ -1312,7 +1304,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="fixture-creator" data-section-key="${fallbackSectionKey}">
       <div class="container">
-        <h2>${section.title || 'Create Season Fixtures'}</h2>
+        <h2>${section.title || 'View Season Fixtures'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-fixtures">
@@ -1402,7 +1394,6 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
             </button>
             <div class="sports-workflow-body" data-sports-workflow-body>
               <div class="fixture-date-rules" data-fixture-date-rules>
-                <h3>Set Auto-fill Date Rules</h3>
                 <div class="fixture-creator-sport-grid">
                   <label>
                     Start scheduling from
@@ -3875,7 +3866,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="calendar" data-section-key="${fallbackSectionKey}">
       <div class="container">
-        <h2>${section.title || 'Manage School Calendar'}</h2>
+        <h2>${section.title || 'View School Calendar'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
@@ -3894,7 +3885,6 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
             <div class="calendar-workflow-body" data-calendar-workflow-body>
               <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
                 <div class="calendar-editor-head">
-                  <h3>Create Event</h3>
                   <button type="button" class="btn btn-secondary" data-calendar-editor-close>Close editor</button>
                 </div>
                 <form class="school-calendar-form" data-calendar-form>

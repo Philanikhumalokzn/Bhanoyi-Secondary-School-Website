@@ -28,11 +28,7 @@ export const fallbackSiteContent = {
       hero: {
         eyebrow: 'Welcome to',
         title: 'Bhanoyi Secondary School',
-        lead: 'Building future-ready learners through academic excellence, discipline, and community values.',
-        cta: [
-          { label: 'Apply / Enquire', href: 'admissions.html', variant: 'primary' },
-          { label: 'Contact School', href: 'contact.html', variant: 'secondary' }
-        ]
+        lead: 'Building future-ready learners through academic excellence, discipline, and community values.'
       },
       sections: []
     },
@@ -44,15 +40,14 @@ export const fallbackSiteContent = {
       hero: {
         eyebrow: 'Athletics and teamwork',
         title: 'Sports',
-        lead: 'We use sport to build discipline, teamwork, leadership, and school pride across all grades.',
-        cta: [{ label: 'Contact School', href: 'contact.html', variant: 'secondary' }]
+        lead: 'We use sport to build discipline, teamwork, leadership, and school pride across all grades.'
       },
       sections: [
         {
           type: 'match-log',
-          title: 'Live Match Event Log',
+          title: 'Follow Live Match Events',
           sectionKey: 'sports_match_log',
-          body: 'Sports committee can log live football or netball match events as they happen.',
+          body: 'Follow football or netball match events as they happen, with score updates shown live.',
           sport: 'Football / Netball',
           competition: 'Inter-House Friendly',
           venue: 'Main Field',
@@ -84,9 +79,9 @@ export const fallbackSiteContent = {
         },
         {
           type: 'fixture-creator',
-          title: 'Season Fixture Creator',
+          title: 'View Season Fixtures',
           sectionKey: 'sports_fixture_creator',
-          body: 'Generate the full home-and-away round-robin schedule for the selected houses.',
+          body: 'View the full home-and-away round-robin schedule for the selected houses.',
           sport: 'Football / Netball',
           competition: 'Inter-House League',
           venue: 'Main Field',
@@ -107,15 +102,14 @@ export const fallbackSiteContent = {
       hero: {
         eyebrow: 'Schedule and events',
         title: 'School Calendar',
-        lead: 'View school events, match dates, and key activities in one place.',
-        cta: [{ label: 'Open Sports', href: 'sports.html', variant: 'secondary' }]
+        lead: 'View school events, match dates, and key activities in one place.'
       },
       sections: [
         {
           type: 'calendar',
-          title: 'School Calendar',
+          title: 'View School Calendar',
           sectionKey: 'school_calendar',
-          body: 'Admins can add and manage school events here. Fixture date edits from Sports open this calendar.',
+          body: 'Browse school events, match dates, and key activities in one place.',
           fixtureSectionKey: 'sports_fixture_creator'
         }
       ]
