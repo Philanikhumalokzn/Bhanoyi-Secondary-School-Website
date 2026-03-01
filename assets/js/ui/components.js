@@ -1674,6 +1674,29 @@ const hydrateMatchLog = (matchLogNode) => {
     logsByFixture = loadMatchLogByFixtureStore(fixtureSectionKey);
   });
 
+  window.addEventListener('bhanoyi:open-match-log-modal', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+
+    const requestedFixtureId = String(event?.detail?.fixtureId || '').trim();
+    const requestedDate = normalizeFixtureDateOnlyGlobal(event?.detail?.fixtureDate || '');
+    const preferredSide = String(event?.detail?.preferredSide || 'left').trim();
+
+    if (!requestedFixtureId) return;
+    refreshFromStorage();
+
+    const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
+    if (!matchedFixture) return;
+
+    selectedDate = requestedDate || matchedFixture.date || selectedDate;
+    selectedFixtureId = requestedFixtureId;
+    renderFixturePickers();
+    applyFixtureSelection();
+
+    const teamId = preferredSide === 'right' ? matchedFixture.awayId : matchedFixture.homeId;
+    openModalForTeam(teamId);
+  });
+
   const params = new URLSearchParams(window.location.search);
   const requestedFixtureId = String(params.get('logFixtureId') || '').trim();
   const requestedDate = normalizeFixtureDateOnlyGlobal(params.get('logDate') || '');
@@ -3490,18 +3513,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
     };
 
-    const buildMatchLogHref = (fixtureId, fixtureDate) => {
-      if (typeof window === 'undefined') return '#';
-      const params = new URLSearchParams(window.location.search);
-      params.set('logFixtureSectionKey', fixtureSectionKey);
-      params.set('logFixtureId', fixtureId);
-      const normalizedDate = normalizeFixtureDateOnlyGlobal(fixtureDate || '');
-      if (normalizedDate) {
-        params.set('logDate', normalizedDate);
-      }
-      return withAdminQuery(`${window.location.pathname.split('/').pop() || 'admin.html'}?${params.toString()}`);
-    };
-
     const renderedFixtures = fixtures
       .map((fixture, index) => {
         const fixtureId = getFixtureId(fixture);
@@ -3591,11 +3602,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
                   return `<span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>`;
                 }
 
-                const href = buildMatchLogHref(fixtureId, stamp.date);
                 return `
                   <div class="fixture-date-edit-wrap">
                     <span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>
-                    <a class="fixture-date-link" href="${escapeHtmlAttribute(href)}">${summaryMeta.eventCount > 0 ? 'Edit log' : 'Log match'}</a>
+                    <button
+                      type="button"
+                      class="fixture-date-link"
+                      data-fixture-open-log
+                      data-fixture-log-id="${escapeHtmlAttribute(fixtureId)}"
+                      data-fixture-log-date="${escapeHtmlAttribute(stamp.date || '')}"
+                    >${summaryMeta.eventCount > 0 ? 'Edit log' : 'Log match'}</button>
                   </div>
                 `;
               })()}
@@ -4245,6 +4261,30 @@ const hydrateFixtureCreator = (fixtureNode) => {
         }
       }
     }
+  });
+
+  bodyNode.addEventListener('click', (event) => {
+    if (!isAdminMode) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const trigger = target.closest('[data-fixture-open-log]');
+    if (!(trigger instanceof HTMLElement)) return;
+
+    event.preventDefault();
+    const fixtureId = String(trigger.dataset.fixtureLogId || '').trim();
+    const fixtureDate = normalizeFixtureDateOnlyGlobal(trigger.dataset.fixtureLogDate || '');
+    if (!fixtureId) return;
+
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:open-match-log-modal', {
+        detail: {
+          fixtureSectionKey,
+          fixtureId,
+          fixtureDate,
+          preferredSide: 'left'
+        }
+      })
+    );
   });
 
   const approveFixturePreview = ({ allowUnfairness = false } = {}) => {
