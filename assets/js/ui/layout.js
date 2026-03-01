@@ -1,7 +1,6 @@
 import {
   initFixtureCreators,
   initMatchEventLogs,
-  initSectionOverlays,
   initSchoolCalendars,
   initLatestNewsReaders,
   initLatestNewsRotators,
@@ -171,7 +170,6 @@ export const renderSite = (siteContent, page) => {
   }
 
   bindMobileNav();
-  initSectionOverlays();
   initLatestNewsRotators();
   initLatestNewsReaders();
   initMatchEventLogs();

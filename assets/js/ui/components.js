@@ -191,76 +191,6 @@ const showSmartToast = (message, { tone = 'info' } = {}) => {
   window.setTimeout(closeToast, timeout);
 };
 
-const initScopedSubOverlays = (rootNode) => {
-  if (!(rootNode instanceof HTMLElement)) return;
-
-  const openButtons = Array.from(rootNode.querySelectorAll('[data-open-sub-overlay]'));
-  if (!openButtons.length) return;
-
-  let activeOverlay = null;
-  let backdrop = rootNode.querySelector('[data-sub-overlay-runtime-backdrop]');
-
-  const ensureBackdrop = () => {
-    if (backdrop instanceof HTMLElement) return backdrop;
-    const node = document.createElement('div');
-    node.className = 'sub-overlay-runtime-backdrop is-hidden';
-    node.setAttribute('data-sub-overlay-runtime-backdrop', 'true');
-    rootNode.appendChild(node);
-    backdrop = node;
-    return node;
-  };
-
-  const closeOverlay = (overlay = activeOverlay) => {
-    if (!(overlay instanceof HTMLElement)) return;
-    overlay.classList.remove('is-sub-overlay-active');
-    ensureBackdrop().classList.add('is-hidden');
-    if (activeOverlay === overlay) {
-      activeOverlay = null;
-    }
-  };
-
-  const openOverlay = (overlay) => {
-    if (!(overlay instanceof HTMLElement)) return;
-    if (activeOverlay && activeOverlay !== overlay) {
-      closeOverlay(activeOverlay);
-    }
-    ensureBackdrop().classList.remove('is-hidden');
-    overlay.classList.add('is-sub-overlay-active');
-    activeOverlay = overlay;
-  };
-
-  openButtons.forEach((button) => {
-    if (!(button instanceof HTMLButtonElement)) return;
-    button.addEventListener('click', () => {
-      const overlayId = String(button.dataset.openSubOverlay || '').trim();
-      if (!overlayId) return;
-      const overlay = rootNode.querySelector(`[data-sub-overlay-content="${overlayId}"]`);
-      if (!(overlay instanceof HTMLElement)) return;
-      openOverlay(overlay);
-    });
-  });
-
-  const closeButtons = Array.from(rootNode.querySelectorAll('[data-sub-overlay-close]'));
-  closeButtons.forEach((button) => {
-    if (!(button instanceof HTMLElement)) return;
-    button.addEventListener('click', () => {
-      const overlay = button.closest('[data-sub-overlay-content]');
-      if (!(overlay instanceof HTMLElement)) return;
-      closeOverlay(overlay);
-    });
-  });
-
-  ensureBackdrop().addEventListener('click', () => {
-    closeOverlay(activeOverlay);
-  });
-
-  rootNode.addEventListener('keydown', (event) => {
-    if (!(event instanceof KeyboardEvent)) return;
-    if (event.key !== 'Escape') return;
-    closeOverlay(activeOverlay);
-  });
-};
-
 const renderSectionAttachments = (section) => {
   const attachments = Array.isArray(section.attachments) ? section.attachments : [];
   if (!attachments.length) {
@@ -679,82 +609,62 @@ const renderMatchLogSection = (section, sectionIndex) => {
       <div class="container">
         <h2>${section.title || 'Live Match Event Log'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel section-overlay-launcher" data-section-overlay-launcher="true">
-          <h3>Live Match Log</h3>
-          <p>Open the full live event workspace in an overlay.</p>
-          <div class="section-overlay-launcher-actions">
-            <button type="button" class="btn btn-secondary" data-open-section-overlay="${fallbackSectionKey}-match-log">Open Live Match Log</button>
-          </div>
-        </article>
-        <article class="panel match-log-shell is-collapsed-section" data-section-overlay-content="${fallbackSectionKey}-match-log" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        <article class="panel match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="match-log-header">
             <div>
               <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
               <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
             </div>
             <div class="match-log-header-actions">
-              <button type="button" class="btn btn-secondary section-overlay-close-btn" data-section-overlay-close>Close</button>
               <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
               <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
             </div>
           </header>
-          <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
-            <h3>Match Event Workspace</h3>
-            <p>Open team selectors, timeline table, and quick event controls.</p>
-            <div class="section-overlay-launcher-actions">
-              <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-match-workspace">Start logging</button>
-            </div>
-          </article>
-          <div class="sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-match-workspace">
-            <div class="sub-overlay-inline-head">
-              <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Workspace</button>
-            </div>
-            <div class="match-log-team-pickers">
-              <label>
-                Left column
-                <select data-team-select="left">
-                  ${renderHouseOptions(leftTeam.id)}
-                </select>
-              </label>
-              <label>
-                Right column
-                <select data-team-select="right">
-                  ${renderHouseOptions(rightTeam.id)}
-                </select>
-              </label>
-            </div>
-            <div class="match-log-table-wrap">
-              <table class="match-log-table">
-                <thead>
-                  <tr>
-                    <th class="match-log-team-col">
-                      <div class="match-log-team-head">
-                        <h3 class="match-log-team-title">
-                          <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
-                          <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
-                        </h3>
-                        <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
-                      </div>
-                    </th>
-                    <th class="match-log-minute-col">Minute</th>
-                    <th class="match-log-team-col">
-                      <div class="match-log-team-head match-log-team-head-right">
-                        <h3 class="match-log-team-title">
-                          <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
-                          <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
-                        </h3>
-                        <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
-                      </div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody data-match-table-body>
-                  <tr>
-                    <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          <div class="match-log-team-pickers">
+            <label>
+              Left column
+              <select data-team-select="left">
+                ${renderHouseOptions(leftTeam.id)}
+              </select>
+            </label>
+            <label>
+              Right column
+              <select data-team-select="right">
+                ${renderHouseOptions(rightTeam.id)}
+              </select>
+            </label>
+          </div>
+          <div class="match-log-table-wrap">
+            <table class="match-log-table">
+              <thead>
+                <tr>
+                  <th class="match-log-team-col">
+                    <div class="match-log-team-head">
+                      <h3 class="match-log-team-title">
+                        <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
+                        <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
+                      </h3>
+                      <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
+                    </div>
+                  </th>
+                  <th class="match-log-minute-col">Minute</th>
+                  <th class="match-log-team-col">
+                    <div class="match-log-team-head match-log-team-head-right">
+                      <h3 class="match-log-team-title">
+                        <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
+                        <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
+                      </h3>
+                      <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody data-match-table-body>
+                <tr>
+                  <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
           <div class="match-log-modal is-hidden" data-match-modal>
             <div class="match-log-modal-backdrop" data-match-close-modal></div>
@@ -858,8 +768,6 @@ const renderMatchEventItem = (event, definition) => {
 const hydrateMatchLog = (matchLogNode) => {
   const rawConfig = (matchLogNode.dataset.matchLogConfig || '').trim();
   if (!rawConfig) return;
-
-  initScopedSubOverlays(matchLogNode);
 
   let config;
   try {
@@ -1338,18 +1246,10 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
       <div class="container">
         <h2>${section.title || 'Season Fixture Creator'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel section-overlay-launcher" data-section-overlay-launcher="true">
-          <h3>Season Fixture</h3>
-          <p>Open the full fixture planner and sync workflow in an overlay.</p>
-          <div class="section-overlay-launcher-actions">
-            <button type="button" class="btn btn-secondary" data-open-section-overlay="${fallbackSectionKey}-fixture-creator">Open Season Fixture</button>
-          </div>
-        </article>
-        <article class="panel fixture-creator-shell is-collapsed-section" data-section-overlay-content="${fallbackSectionKey}-fixture-creator" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="fixture-creator-header">
             <p class="fixture-creator-meta" data-fixture-meta>Choose a sport format to begin.</p>
             <div class="fixture-creator-actions">
-              <button type="button" class="btn btn-secondary section-overlay-close-btn" data-section-overlay-close>Close</button>
               <label class="fixture-autofill-toggle">
                 <input type="checkbox" data-fixture-auto-fill />
                 <span>Auto-fill dates (use rules)</span>
@@ -1360,17 +1260,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
             </div>
           </header>
           <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
-          <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
-            <h3>Date Rules</h3>
-            <p>Open scheduling rules, weekday limits, exclusions, and date preview tools.</p>
-            <div class="section-overlay-launcher-actions">
-              <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-fixture-rules">Open Date Rules</button>
-            </div>
-          </article>
-          <div class="fixture-date-rules sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-fixture-rules" data-fixture-date-rules>
-            <div class="sub-overlay-inline-head">
-              <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Date Rules</button>
-            </div>
+          <div class="fixture-date-rules" data-fixture-date-rules>
             <h3>Date Rules for Auto-fill</h3>
             <div class="fixture-creator-sport-grid">
               <label>
@@ -1593,8 +1483,6 @@ const buildSingleRoundRobin = (teamIds = []) => {
 const hydrateFixtureCreator = (fixtureNode) => {
   const rawConfig = (fixtureNode.dataset.fixtureConfig || '').trim();
   if (!rawConfig) return;
-
-  initScopedSubOverlays(fixtureNode);
 
   let config;
   try {
@@ -3894,17 +3782,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
       <div class="container">
         <h2>${section.title || 'School Calendar'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel section-overlay-launcher" data-section-overlay-launcher="true">
-          <h3>Calendar Workspace</h3>
-          <p>Open the full calendar workspace in an overlay.</p>
-          <div class="section-overlay-launcher-actions">
-            <button type="button" class="btn btn-secondary" data-open-section-overlay="${fallbackSectionKey}-calendar-workspace">Open Calendar</button>
-          </div>
-        </article>
-        <article class="panel school-calendar-shell is-collapsed-section" data-section-overlay-content="${fallbackSectionKey}-calendar-workspace" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
-          <div class="section-overlay-inline-head">
-            <button type="button" class="btn btn-secondary section-overlay-close-btn" data-section-overlay-close>Close</button>
-          </div>
+        <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
           <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
             <div class="calendar-editor-head">
@@ -3959,80 +3837,58 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               </div>
             </form>
             <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
-            <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
-              <h3>Event Types</h3>
-              <p>Manage event categories and icons used in calendar entries.</p>
-              <div class="section-overlay-launcher-actions">
-                <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-calendar-event-types">Open Event Types</button>
+            <hr class="school-calendar-divider" />
+            <h3>Event Types</h3>
+            <div class="school-event-types-editor" data-event-types-editor>
+              <div class="school-event-types-list" data-event-types-list></div>
+              <div class="school-calendar-actions">
+                <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
+                <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
               </div>
-            </article>
-            <div class="sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-calendar-event-types">
-              <div class="sub-overlay-inline-head">
-                <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Event Types</button>
-              </div>
-              <h3>Event Types</h3>
-              <div class="school-event-types-editor" data-event-types-editor>
-                <div class="school-event-types-list" data-event-types-list></div>
-                <div class="school-calendar-actions">
-                  <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
-                  <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
-                </div>
-                <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
-              </div>
+              <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
             </div>
-            <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
-              <h3>School Terms</h3>
-              <p>Configure term ranges used for fixture constraints and calendar snapping.</p>
-              <div class="section-overlay-launcher-actions">
-                <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-calendar-terms">Open Terms</button>
+            <hr class="school-calendar-divider" />
+            <h3>School Terms</h3>
+            <form class="school-terms-form" data-terms-form>
+              <div class="school-terms-grid">
+                <label>
+                  Term 1 Start
+                  <input type="date" name="term_1_start" />
+                </label>
+                <label>
+                  Term 1 End
+                  <input type="date" name="term_1_end" />
+                </label>
+                <label>
+                  Term 2 Start
+                  <input type="date" name="term_2_start" />
+                </label>
+                <label>
+                  Term 2 End
+                  <input type="date" name="term_2_end" />
+                </label>
+                <label>
+                  Term 3 Start
+                  <input type="date" name="term_3_start" />
+                </label>
+                <label>
+                  Term 3 End
+                  <input type="date" name="term_3_end" />
+                </label>
+                <label>
+                  Term 4 Start
+                  <input type="date" name="term_4_start" />
+                </label>
+                <label>
+                  Term 4 End
+                  <input type="date" name="term_4_end" />
+                </label>
               </div>
-            </article>
-            <div class="sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-calendar-terms">
-              <div class="sub-overlay-inline-head">
-                <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Terms</button>
+              <div class="school-calendar-actions">
+                <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
               </div>
-              <h3>School Terms</h3>
-              <form class="school-terms-form" data-terms-form>
-                <div class="school-terms-grid">
-                  <label>
-                    Term 1 Start
-                    <input type="date" name="term_1_start" />
-                  </label>
-                  <label>
-                    Term 1 End
-                    <input type="date" name="term_1_end" />
-                  </label>
-                  <label>
-                    Term 2 Start
-                    <input type="date" name="term_2_start" />
-                  </label>
-                  <label>
-                    Term 2 End
-                    <input type="date" name="term_2_end" />
-                  </label>
-                  <label>
-                    Term 3 Start
-                    <input type="date" name="term_3_start" />
-                  </label>
-                  <label>
-                    Term 3 End
-                    <input type="date" name="term_3_end" />
-                  </label>
-                  <label>
-                    Term 4 Start
-                    <input type="date" name="term_4_start" />
-                  </label>
-                  <label>
-                    Term 4 End
-                    <input type="date" name="term_4_end" />
-                  </label>
-                </div>
-                <div class="school-calendar-actions">
-                  <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
-                </div>
-              </form>
-              <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
-            </div>
+            </form>
+            <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
           </div>
           <div class="school-calendar-root" data-school-calendar></div>
           <div class="calendar-day-overlay is-hidden" data-calendar-day-overlay>
@@ -4069,8 +3925,6 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
 const hydrateSchoolCalendar = (calendarShell) => {
   const rawConfig = (calendarShell.dataset.schoolCalendarConfig || '').trim();
   if (!rawConfig) return;
-
-  initScopedSubOverlays(calendarShell);
 
   let config;
   try {
@@ -6565,79 +6419,6 @@ export const initLatestNewsReaders = () => {
       event.preventDefault();
       openLatestNewsReadOverlay(slide);
     });
-  });
-};
-
-export const initSectionOverlays = () => {
-  const openButtons = Array.from(document.querySelectorAll('[data-open-section-overlay]'));
-  if (!openButtons.length) return;
-
-  let activeOverlay = null;
-  let backdrop = document.querySelector('[data-section-overlay-runtime-backdrop]');
-
-  const ensureBackdrop = () => {
-    if (backdrop instanceof HTMLElement) return backdrop;
-    const node = document.createElement('div');
-    node.className = 'section-overlay-runtime-backdrop is-hidden';
-    node.setAttribute('data-section-overlay-runtime-backdrop', 'true');
-    document.body.appendChild(node);
-    backdrop = node;
-    return node;
-  };
-
-  const closeOverlay = (overlay = activeOverlay) => {
-    if (!(overlay instanceof HTMLElement)) return;
-    overlay.classList.remove('is-section-overlay-active');
-    const backdropNode = ensureBackdrop();
-    backdropNode.classList.add('is-hidden');
-    document.body.classList.remove('section-overlay-open');
-    if (activeOverlay === overlay) {
-      activeOverlay = null;
-    }
-  };
-
-  const openOverlay = (overlay) => {
-    if (!(overlay instanceof HTMLElement)) return;
-    if (activeOverlay && activeOverlay !== overlay) {
-      closeOverlay(activeOverlay);
-    }
-    const backdropNode = ensureBackdrop();
-    overlay.classList.add('is-section-overlay-active');
-    backdropNode.classList.remove('is-hidden');
-    document.body.classList.add('section-overlay-open');
-    activeOverlay = overlay;
-  };
-
-  openButtons.forEach((button) => {
-    if (!(button instanceof HTMLButtonElement)) return;
-    button.addEventListener('click', () => {
-      const overlayId = String(button.dataset.openSectionOverlay || '').trim();
-      if (!overlayId) return;
-      const overlay = document.querySelector(`[data-section-overlay-content="${overlayId}"]`);
-      if (!(overlay instanceof HTMLElement)) return;
-      openOverlay(overlay);
-    });
-  });
-
-  const closeButtons = Array.from(document.querySelectorAll('[data-section-overlay-close]'));
-  closeButtons.forEach((button) => {
-    if (!(button instanceof HTMLElement)) return;
-    button.addEventListener('click', () => {
-      const overlay = button.closest('[data-section-overlay-content]');
-      if (!(overlay instanceof HTMLElement)) return;
-      closeOverlay(overlay);
-    });
-  });
-
-  ensureBackdrop().addEventListener('click', () => {
-    closeOverlay(activeOverlay);
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (!(event instanceof KeyboardEvent)) return;
-    if (event.key !== 'Escape') return;
-    if (!activeOverlay) return;
-    closeOverlay(activeOverlay);
   });
 };
 
