@@ -3545,13 +3545,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       });
 
-    const teamOptionMarkup = (selectedId) =>
-      (effectiveTeamOptions.length ? effectiveTeamOptions : houseOptions)
-        .map(
-          (team) => `<option value="${escapeHtmlAttribute(team.id)}" ${team.id === selectedId ? 'selected' : ''}>${escapeHtmlText(team.name)}</option>`
-        )
-        .join('');
-
     bodyNode.innerHTML = renderedFixtures
       .map(
         ({ fixture, index, fixtureId, stamp }) => `
@@ -3599,7 +3592,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
               ${isAdminMode
                 ? `<div class="fixture-date-edit-wrap">
                     <button type="button" class="fixture-date-link" data-fixture-invert-sides title="Click to swap home and away teams">${escapeHtmlText(teamNameById(fixture.homeId))}</button>
-                    <select class="fixture-inline-select" data-fixture-home-select>${teamOptionMarkup(fixture.homeId)}</select>
                   </div>`
                 : escapeHtmlText(teamNameById(fixture.homeId))}
             </td>
@@ -3607,7 +3599,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
               ${isAdminMode
                 ? `<div class="fixture-date-edit-wrap">
                     <button type="button" class="fixture-date-link" data-fixture-invert-sides title="Click to swap home and away teams">${escapeHtmlText(teamNameById(fixture.awayId))}</button>
-                    <select class="fixture-inline-select" data-fixture-away-select>${teamOptionMarkup(fixture.awayId)}</select>
                   </div>`
                 : escapeHtmlText(teamNameById(fixture.awayId))}
             </td>
@@ -3987,10 +3978,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
             horizontal: columnIndex <= 5 ? 'center' : 'left',
             wrapText: columnIndex === 6
           };
+          const rowFill = index % 2 === 0 ? white : `FF${lightBlue}`;
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: `FF${index % 2 === 0 ? white : lightBlue}` }
+            fgColor: { argb: rowFill }
           };
           cell.border = {
             top: { style: 'thin', color: { argb: `FF${borderColor}` } },
@@ -4209,23 +4201,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-    if (target.matches('[data-fixture-home-select]') && target instanceof HTMLSelectElement) {
-      const homeSelect = row.querySelector('[data-fixture-home-select]');
-      const awaySelect = row.querySelector('[data-fixture-away-select]');
-      const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
-      const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
-      tryUpdateFixtureTeams(rowIndex, nextHome, nextAway);
-      return;
-    }
-
-    if (target.matches('[data-fixture-away-select]') && target instanceof HTMLSelectElement) {
-      const homeSelect = row.querySelector('[data-fixture-home-select]');
-      const awaySelect = row.querySelector('[data-fixture-away-select]');
-      const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
-      const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
-      tryUpdateFixtureTeams(rowIndex, nextHome, nextAway);
-      return;
-    }
   });
 
   bodyNode.addEventListener('click', (event) => {
