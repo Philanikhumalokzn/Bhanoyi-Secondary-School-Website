@@ -238,7 +238,7 @@ const renderLatestNewsSection = (section, sectionIndex) => {
       <div class="container">
         <div class="latest-news-header">
           <h2>${section.title}</h2>
-          <button type="button" class="latest-news-post-btn" data-post-news>Post new article</button>
+          ${isAdminModeEnabled() ? '<button type="button" class="latest-news-post-btn" data-post-news>Post new article</button>' : ''}
         </div>
         <div class="latest-news-layout ${hasSidePanel ? 'has-side-panel' : ''}">
           <div class="latest-news-grid">
@@ -521,6 +521,11 @@ const resolveAudienceSectionCopy = (section, context = {}) => {
     title: nextTitle,
     body: nextBody
   };
+};
+
+const isAdminOnlySectionForPublic = (section) => {
+  const type = String(section?.type || '').trim().toLowerCase();
+  return type === 'match-log' || type === 'fixture-creator';
 };
 
 const getOrderedSectionEntries = (sections, context = {}) => {
@@ -3922,6 +3927,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
 const renderSchoolCalendarSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const adminMode = isAdminModeEnabled();
   const config = {
     sectionKey: fallbackSectionKey,
     fixtureSectionKey: (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'
@@ -3942,6 +3948,9 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               <div class="school-calendar-root" data-school-calendar></div>
             </div>
           </section>
+          ${
+            adminMode
+              ? `
           <section class="calendar-workflow-step is-collapsed" data-calendar-workflow-step data-calendar-admin-only>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="false">
               <span>Create Event</span>
@@ -4064,6 +4073,9 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
             </div>
           </section>
+              `
+              : ''
+          }
           <div class="calendar-day-overlay is-hidden" data-calendar-day-overlay>
             <div class="calendar-day-overlay-panel" role="dialog" aria-modal="true" aria-label="Events for selected day">
               <div class="calendar-day-overlay-header">
@@ -5814,6 +5826,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
 };
 
 const renderSectionByType = (section, sectionIndex, context = {}) => {
+  if (!isAdminModeEnabled() && isAdminOnlySectionForPublic(section)) {
+    return '';
+  }
+
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const effectiveSection = resolveAudienceSectionCopy(
     resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context),
@@ -6683,7 +6699,11 @@ export const renderFooter = (siteContent) => `
     </div>
     <div class="container footer-bottom">
       <p>© 2026 ${siteContent.school.name}. All rights reserved.</p>
-      <p><a class="footer-utility-link" href="${withAdminQuery('email-tester.html')}">Email Tester</a></p>
+      ${
+        isAdminModeEnabled()
+          ? `<p><a class="footer-utility-link" href="${withAdminQuery('email-tester.html')}">Email Tester</a></p>`
+          : ''
+      }
     </div>
     ${
       isAdminModeEnabled()
