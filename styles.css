@@ -2345,6 +2345,7 @@ body.news-read-open {
 }
 
 .school-calendar-form input,
+.school-calendar-form select,
 .school-calendar-form textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2370,6 +2371,31 @@ body.news-read-open {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 4px 0;
+}
+
+.school-event-types-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.school-event-types-list {
+  display: grid;
+  gap: 8px;
+}
+
+.school-event-type-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.school-event-type-row input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
 }
 
 .school-terms-form {

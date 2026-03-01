@@ -1492,6 +1492,16 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               </label>
               <div class="school-calendar-form-grid">
                 <label>
+                  Event Type
+                  <select name="eventType" data-calendar-event-type></select>
+                </label>
+                <label data-calendar-event-type-custom-row class="is-hidden">
+                  Custom Event Type
+                  <input type="text" name="eventTypeCustom" maxlength="60" placeholder="e.g. Community Outreach" />
+                </label>
+              </div>
+              <div class="school-calendar-form-grid">
+                <label>
                   Start Date
                   <input type="date" name="start" required />
                 </label>
@@ -1515,6 +1525,16 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               </div>
             </form>
             <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
+            <hr class="school-calendar-divider" />
+            <h3>Event Types</h3>
+            <div class="school-event-types-editor" data-event-types-editor>
+              <div class="school-event-types-list" data-event-types-list></div>
+              <div class="school-calendar-actions">
+                <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
+                <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
+              </div>
+              <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
+            </div>
             <hr class="school-calendar-divider" />
             <h3>School Terms</h3>
             <form class="school-terms-form" data-terms-form>
@@ -1580,6 +1600,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const adminPanel = calendarShell.querySelector('[data-calendar-admin-panel]');
   const form = calendarShell.querySelector('[data-calendar-form]');
   const statusNode = calendarShell.querySelector('[data-calendar-status]');
+  const eventTypeSelect = calendarShell.querySelector('[data-calendar-event-type]');
+  const eventTypeCustomRow = calendarShell.querySelector('[data-calendar-event-type-custom-row]');
+  const eventTypeCustomInput = form?.querySelector('input[name="eventTypeCustom"]');
+  const eventTypesListNode = calendarShell.querySelector('[data-event-types-list]');
+  const eventTypeAddButton = calendarShell.querySelector('[data-event-type-add]');
+  const eventTypesSaveButton = calendarShell.querySelector('[data-event-types-save]');
+  const eventTypesStatusNode = calendarShell.querySelector('[data-event-types-status]');
   const termsForm = calendarShell.querySelector('[data-terms-form]');
   const termsStatusNode = calendarShell.querySelector('[data-terms-status]');
   const termsSaveButton = calendarShell.querySelector('[data-terms-save]');
@@ -1596,6 +1623,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const eventsStorageKey = `bhanoyi.schoolCalendarEvents.${sectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
+  const eventTypesStorageKey = `bhanoyi.schoolCalendarEventTypes.${sectionKey}`;
   const termsStorageKey = `bhanoyi.schoolTerms.${sectionKey}`;
 
   const params = new URLSearchParams(window.location.search);
@@ -1624,6 +1652,100 @@ const hydrateSchoolCalendar = (calendarShell) => {
     const date = new Date(`${normalized}T00:00:00`);
     date.setDate(date.getDate() + days);
     return date.toISOString().slice(0, 10);
+  };
+
+  const defaultEventTypes = ['Sports', 'Religious', 'Cultural', 'Entertainment', 'Academic'];
+
+  const normalizeEventTypeLabel = (value) => {
+    const raw = String(value || '').trim();
+    return raw.replace(/\s+/g, ' ');
+  };
+
+  const loadEventTypes = () => {
+    try {
+      const raw = localStorage.getItem(eventTypesStorageKey);
+      if (!raw) return [...defaultEventTypes];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [...defaultEventTypes];
+      const normalized = parsed
+        .map((entry) => normalizeEventTypeLabel(entry))
+        .filter(Boolean);
+      return normalized.length ? Array.from(new Set(normalized)) : [...defaultEventTypes];
+    } catch {
+      return [...defaultEventTypes];
+    }
+  };
+
+  const saveEventTypes = (types) => {
+    const normalized = Array.from(
+      new Set((types || []).map((entry) => normalizeEventTypeLabel(entry)).filter(Boolean))
+    );
+    localStorage.setItem(eventTypesStorageKey, JSON.stringify(normalized));
+    return normalized;
+  };
+
+  let eventTypes = loadEventTypes();
+
+  const ensureEventType = (value) => {
+    const label = normalizeEventTypeLabel(value);
+    if (!label) return '';
+    if (!eventTypes.includes(label)) {
+      eventTypes.push(label);
+      eventTypes = saveEventTypes(eventTypes);
+      renderEventTypeOptions();
+      renderEventTypesEditor();
+    }
+    return label;
+  };
+
+  const renderEventTypeOptions = () => {
+    if (!(eventTypeSelect instanceof HTMLSelectElement)) return;
+    const existing = eventTypeSelect.value;
+    eventTypeSelect.innerHTML = [
+      ...eventTypes.map((type) => `<option value="${escapeHtmlAttribute(type)}">${escapeHtmlText(type)}</option>`),
+      '<option value="__custom__">Other (create new type)</option>'
+    ].join('');
+    if (eventTypes.includes(existing)) {
+      eventTypeSelect.value = existing;
+    } else if (existing === '__custom__') {
+      eventTypeSelect.value = '__custom__';
+    } else if (eventTypes.length) {
+      eventTypeSelect.value = eventTypes[0];
+    }
+    toggleCustomTypeField();
+  };
+
+  const toggleCustomTypeField = () => {
+    if (!(eventTypeSelect instanceof HTMLSelectElement)) return;
+    const isCustom = eventTypeSelect.value === '__custom__';
+    if (eventTypeCustomRow instanceof HTMLElement) {
+      eventTypeCustomRow.classList.toggle('is-hidden', !isCustom);
+    }
+  };
+
+  const resolveEventTypeFromForm = () => {
+    if (!(eventTypeSelect instanceof HTMLSelectElement)) return '';
+    if (eventTypeSelect.value === '__custom__') {
+      const custom = normalizeEventTypeLabel(
+        eventTypeCustomInput instanceof HTMLInputElement ? eventTypeCustomInput.value : ''
+      );
+      return ensureEventType(custom);
+    }
+    return ensureEventType(eventTypeSelect.value);
+  };
+
+  const renderEventTypesEditor = () => {
+    if (!(eventTypesListNode instanceof HTMLElement)) return;
+    eventTypesListNode.innerHTML = eventTypes
+      .map(
+        (type, index) => `
+          <div class="school-event-type-row" data-event-type-row="${index}">
+            <input type="text" value="${escapeHtmlAttribute(type)}" data-event-type-input="${index}" maxlength="60" />
+            <button type="button" class="btn btn-secondary" data-event-type-delete="${index}">Delete</button>
+          </div>
+        `
+      )
+      .join('');
   };
 
   const defaultTerms = [
@@ -1746,6 +1868,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
           borderColor: String(entry.borderColor || '').trim() || undefined,
           textColor: String(entry.textColor || '').trim() || undefined,
           extendedProps: {
+            eventType: normalizeEventTypeLabel(entry.eventType || ''),
             fixtureId: String(entry.fixtureId || ''),
             notes: String(entry.notes || '')
           }
@@ -1766,6 +1889,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       backgroundColor: String(entry.backgroundColor || '').trim(),
       borderColor: String(entry.borderColor || '').trim(),
       textColor: String(entry.textColor || '').trim(),
+      eventType: normalizeEventTypeLabel(entry.extendedProps?.eventType || ''),
       fixtureId: String(entry.extendedProps?.fixtureId || ''),
       notes: String(entry.extendedProps?.notes || '')
     }));
@@ -1942,6 +2066,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
     plugins: [dayGridPlugin, interactionPlugin],
     initialView: 'dayGridMonth',
     height: 'auto',
+    editable: isAdminMode,
+    eventStartEditable: isAdminMode,
     events,
     eventClick: (info) => {
       if (info.event.display === 'background') return;
@@ -1953,15 +2079,20 @@ const hydrateSchoolCalendar = (calendarShell) => {
       formData.set('title', String(info.event.title || ''));
       formData.set('start', normalizeDateString(info.event.startStr || ''));
       formData.set('end', normalizeDateString(info.event.endStr || ''));
+      formData.set('eventType', ensureEventType(info.event.extendedProps?.eventType || '') || (eventTypes[0] || ''));
       formData.set('fixtureId', String(info.event.extendedProps?.fixtureId || ''));
       formData.set('notes', String(info.event.extendedProps?.notes || ''));
 
       Array.from(form.elements).forEach((field) => {
-        if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
+        if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement)) return;
         const name = field.name;
         if (!name) return;
         field.value = String(formData.get(name) || '');
       });
+      toggleCustomTypeField();
+      if (eventTypeCustomInput instanceof HTMLInputElement) {
+        eventTypeCustomInput.value = '';
+      }
 
       if (statusNode) {
         statusNode.textContent = 'Editing selected event.';
@@ -1972,6 +2103,52 @@ const hydrateSchoolCalendar = (calendarShell) => {
       const startInput = form.querySelector('input[name="start"]');
       if (startInput instanceof HTMLInputElement) {
         startInput.value = info.dateStr;
+      }
+    },
+    eventDrop: (info) => {
+      if (!isAdminMode) {
+        info.revert();
+        return;
+      }
+
+      const fixtureId = String(info.event.extendedProps?.fixtureId || '').trim();
+      const rawStart = normalizeDateString(info.event.startStr || '');
+      if (!rawStart) {
+        info.revert();
+        if (statusNode) statusNode.textContent = 'Unable to move event to an invalid date.';
+        return;
+      }
+
+      if (fixtureId && !hasConfiguredActiveTerms()) {
+        info.revert();
+        if (statusNode) {
+          statusNode.textContent = 'Save at least one school term range before moving fixture events.';
+        }
+        return;
+      }
+
+      const snappedStart = fixtureId ? snapDateToActiveTerms(rawStart) : rawStart;
+      if (fixtureId && snappedStart !== rawStart) {
+        info.event.setStart(snappedStart);
+      }
+
+      saveEvents(calendar.getEvents());
+
+      if (form instanceof HTMLFormElement) {
+        const idInput = form.querySelector('input[name="id"]');
+        const selectedId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+        if (selectedId && selectedId === String(info.event.id || '').trim()) {
+          const startInput = form.querySelector('input[name="start"]');
+          if (startInput instanceof HTMLInputElement) {
+            startInput.value = snappedStart;
+          }
+        }
+      }
+
+      if (statusNode) {
+        statusNode.textContent = fixtureId && snappedStart !== rawStart
+          ? `Event moved. Date snapped to active term (${snappedStart}).`
+          : 'Event date updated.';
       }
     }
   });
@@ -2018,6 +2195,15 @@ const hydrateSchoolCalendar = (calendarShell) => {
         titleInput.value = incomingFixtureLabel;
       }
     }
+    if (eventTypeSelect instanceof HTMLSelectElement) {
+      if (eventTypes.length) {
+        eventTypeSelect.value = eventTypes[0];
+      }
+      toggleCustomTypeField();
+    }
+    if (eventTypeCustomInput instanceof HTMLInputElement) {
+      eventTypeCustomInput.value = '';
+    }
   };
 
   if (isAdminMode && form instanceof HTMLFormElement) {
@@ -2038,14 +2224,15 @@ const hydrateSchoolCalendar = (calendarShell) => {
       const title = (titleInput instanceof HTMLInputElement ? titleInput.value : '').trim();
       const rawStart = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
       const end = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
+      const eventType = resolveEventTypeFromForm();
       const fixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
       const notes = (notesInput instanceof HTMLTextAreaElement ? notesInput.value : '').trim();
       const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
 
       const start = fixtureId ? snapDateToActiveTerms(rawStart) : rawStart;
 
-      if (!title || !start) {
-        if (statusNode) statusNode.textContent = 'Title and start date are required.';
+      if (!title || !start || !eventType) {
+        if (statusNode) statusNode.textContent = 'Title, event type, and start date are required.';
         return;
       }
 
@@ -2065,6 +2252,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
           end: end || undefined,
           allDay: true,
           extendedProps: {
+            eventType,
             fixtureId,
             notes
           }
@@ -2074,6 +2262,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
         eventEntry.setProp('title', title);
         eventEntry.setStart(start);
         eventEntry.setEnd(end || null);
+        eventEntry.setExtendedProp('eventType', eventType);
         eventEntry.setExtendedProp('fixtureId', fixtureId);
         eventEntry.setExtendedProp('notes', notes);
       }
@@ -2110,6 +2299,65 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (statusNode) statusNode.textContent = 'Event deleted.';
     });
 
+    if (eventTypeSelect instanceof HTMLSelectElement) {
+      eventTypeSelect.addEventListener('change', () => {
+        toggleCustomTypeField();
+      });
+    }
+
+    if (eventTypeAddButton instanceof HTMLButtonElement) {
+      eventTypeAddButton.addEventListener('click', () => {
+        const created = ensureEventType(`New Type ${eventTypes.length + 1}`);
+        renderEventTypesEditor();
+        if (eventTypeSelect instanceof HTMLSelectElement && created) {
+          eventTypeSelect.value = created;
+          toggleCustomTypeField();
+        }
+        if (eventTypesStatusNode) {
+          eventTypesStatusNode.textContent = 'Type added. Rename it and click Save types.';
+        }
+      });
+    }
+
+    eventTypesListNode?.addEventListener('click', (event) => {
+      const button = event.target instanceof HTMLElement
+        ? event.target.closest('[data-event-type-delete]')
+        : null;
+      if (!(button instanceof HTMLButtonElement)) return;
+      const index = Number.parseInt(button.dataset.eventTypeDelete || '', 10);
+      if (!Number.isInteger(index) || index < 0 || index >= eventTypes.length) return;
+      eventTypes.splice(index, 1);
+      eventTypes = saveEventTypes(eventTypes);
+      renderEventTypeOptions();
+      renderEventTypesEditor();
+      if (eventTypesStatusNode) {
+        eventTypesStatusNode.textContent = 'Type removed.';
+      }
+    });
+
+    if (eventTypesSaveButton instanceof HTMLButtonElement) {
+      eventTypesSaveButton.addEventListener('click', () => {
+        const nextTypes = Array.from(
+          calendarShell.querySelectorAll('[data-event-type-input]')
+        )
+          .map((input) => (input instanceof HTMLInputElement ? input.value : ''))
+          .map((value) => normalizeEventTypeLabel(value))
+          .filter(Boolean);
+
+        eventTypes = saveEventTypes(nextTypes);
+        renderEventTypeOptions();
+        renderEventTypesEditor();
+        if (eventTypeCustomInput instanceof HTMLInputElement) {
+          eventTypeCustomInput.value = '';
+        }
+        if (eventTypesStatusNode) {
+          eventTypesStatusNode.textContent = 'Event types saved.';
+        }
+      });
+    }
+
+    renderEventTypeOptions();
+    renderEventTypesEditor();
     clearForm();
   }
 
