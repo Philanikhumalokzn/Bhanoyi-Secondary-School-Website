@@ -3849,7 +3849,26 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return `${safeCompetition || 'season-fixtures'}-${stamp}`;
   };
 
+  const getFixtureEpochForExport = (fixture) => {
+    const fixtureId = getFixtureId(fixture);
+    const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
+    if (!stamp.date) return Number.MAX_SAFE_INTEGER;
+    const parsed = new Date(`${stamp.date}T${stamp.time || '23:59'}`).getTime();
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+  };
+
+  const getExportFixtures = () =>
+    [...lastFixtures].sort((left, right) => {
+      const leftEpoch = getFixtureEpochForExport(left);
+      const rightEpoch = getFixtureEpochForExport(right);
+      if (leftEpoch !== rightEpoch) return leftEpoch - rightEpoch;
+      if (left.round !== right.round) return left.round - right.round;
+      if (left.match !== right.match) return left.match - right.match;
+      return getFixtureId(left).localeCompare(getFixtureId(right));
+    });
+
   const buildFixtureCsvContent = () => {
+    const exportFixtures = getExportFixtures();
     const lines = [
       ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
       ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
@@ -3859,7 +3878,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
     ];
 
-    lastFixtures.forEach((fixture) => {
+    exportFixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
       const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
       lines.push(
@@ -3938,9 +3957,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       const primaryBlue = '0B5CAB';
       const deepBlue = '0D2238';
-      const lightBlue = 'EEF3FB';
-      const white = 'FFFFFFFF';
-      const borderColor = 'D6E0EA';
+      const lightBlue = 'EAF3FF';
+      const white = 'FFFFFF';
+      const borderColor = 'D7E5F3';
 
       sheet.mergeCells('A1:H1');
       sheet.mergeCells('A2:H2');
@@ -3960,7 +3979,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           name: 'Calibri',
           size: index === 0 ? 18 : index === 1 ? 14 : 11,
           bold: index <= 2,
-          color: { argb: index <= 2 ? white : `FF${deepBlue}` }
+          color: { argb: index <= 2 ? `FF${white}` : `FF${deepBlue}` }
         };
         if (index <= 2) {
           cell.fill = {
@@ -4004,7 +4023,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           name: 'Calibri',
           size: 11,
           bold: true,
-          color: { argb: white }
+          color: { argb: `FF${white}` }
         };
         cell.fill = {
           type: 'pattern',
@@ -4021,7 +4040,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       });
 
       const dataStartRow = headerRowNumber + 1;
-      lastFixtures.forEach((fixture, index) => {
+      const exportFixtures = getExportFixtures();
+      exportFixtures.forEach((fixture, index) => {
         const fixtureId = getFixtureId(fixture);
         const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
         const row = sheet.getRow(dataStartRow + index);
@@ -4058,26 +4078,31 @@ const hydrateFixtureCreator = (fixtureNode) => {
         });
       });
 
-      const groupByRoundLeg = new Map();
-      lastFixtures.forEach((fixture, index) => {
-        const key = `${fixture.round}::${fixture.leg}`;
-        const rowNumber = dataStartRow + index;
-        const group = groupByRoundLeg.get(key) || [];
-        group.push(rowNumber);
-        groupByRoundLeg.set(key, group);
-      });
+      let runStart = 0;
+      while (runStart < exportFixtures.length) {
+        const runFixture = exportFixtures[runStart];
+        const runKey = `${runFixture.round}::${runFixture.leg}`;
+        let runEnd = runStart;
+        while (runEnd + 1 < exportFixtures.length) {
+          const nextFixture = exportFixtures[runEnd + 1];
+          const nextKey = `${nextFixture.round}::${nextFixture.leg}`;
+          if (nextKey !== runKey) break;
+          runEnd += 1;
+        }
 
-      groupByRoundLeg.forEach((rows) => {
-        if (rows.length < 2) return;
-        const start = rows[0];
-        const end = rows[rows.length - 1];
-        sheet.mergeCells(`A${start}:A${end}`);
-        sheet.mergeCells(`B${start}:B${end}`);
-        sheet.getCell(`A${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getCell(`B${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
-      });
+        if (runEnd > runStart) {
+          const startRow = dataStartRow + runStart;
+          const endRow = dataStartRow + runEnd;
+          sheet.mergeCells(`A${startRow}:A${endRow}`);
+          sheet.mergeCells(`B${startRow}:B${endRow}`);
+          sheet.getCell(`A${startRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+          sheet.getCell(`B${startRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+        }
 
-      const noteRowNumber = dataStartRow + lastFixtures.length + 2;
+        runStart = runEnd + 1;
+      }
+
+      const noteRowNumber = dataStartRow + exportFixtures.length + 2;
       sheet.mergeCells(`A${noteRowNumber}:H${noteRowNumber}`);
       const noteCell = sheet.getCell(`A${noteRowNumber}`);
       noteCell.value = 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.';
