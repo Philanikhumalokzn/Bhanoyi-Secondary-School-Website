@@ -1981,6 +1981,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const selected = [];
       const selectedTeams = new Set();
 
+      const sortedRemaining = [...remainingFixtures].sort((left, right) => {
+        const leftRound = parsePositiveInt(left?.round, 1);
+        const rightRound = parsePositiveInt(right?.round, 1);
+        if (leftRound !== rightRound) return leftRound - rightRound;
+        const leftMatch = parsePositiveInt(left?.match, 1);
+        const rightMatch = parsePositiveInt(right?.match, 1);
+        return leftMatch - rightMatch;
+      });
+      const earliestRound = sortedRemaining.length ? parsePositiveInt(sortedRemaining[0]?.round, 1) : null;
+
+      const fixturesForEarliestRound =
+        earliestRound === null
+          ? []
+          : sortedRemaining.filter((fixture) => parsePositiveInt(fixture?.round, 1) === earliestRound);
+
       const pickBestFixture = (candidates, { preferPriorityTeams, isFirstSlot }) => {
         let best = null;
         let bestScore = Number.NEGATIVE_INFINITY;
@@ -2007,7 +2022,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       };
 
       while (selected.length < matchesPerDay) {
-        const nonConflicting = remainingFixtures.filter((fixture) => {
+        const currentPool = fixturesForEarliestRound.length ? fixturesForEarliestRound : sortedRemaining;
+        const nonConflicting = currentPool.filter((fixture) => {
           const homeId = String(fixture.homeId || '').trim();
           const awayId = String(fixture.awayId || '').trim();
           if (!homeId || !awayId || homeId === awayId) return false;
