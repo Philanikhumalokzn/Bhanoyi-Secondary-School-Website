@@ -3779,7 +3779,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (!normalized) return '';
     const date = new Date(`${normalized}T00:00:00`);
     date.setDate(date.getDate() + days);
-    return date.toISOString().slice(0, 10);
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${month}-${day}`;
   };
 
   const defaultEventTypes = ['Sports', 'Religious', 'Cultural', 'Entertainment', 'Academic'];
@@ -4310,83 +4312,52 @@ const hydrateSchoolCalendar = (calendarShell) => {
             String(entry.extendedProps?.fixtureId || '').trim().startsWith(`${fixtureSectionKey}:`)
         );
 
-      const fixturesById = new Map();
+      const existingStyleByFixtureId = new Map();
       fixtureEvents.forEach((entry) => {
         const fixtureId = String(entry.extendedProps?.fixtureId || '').trim();
-        if (!fixtureId) return;
-        const existing = fixturesById.get(fixtureId) || [];
-        existing.push(entry);
-        fixturesById.set(fixtureId, existing);
+        if (!fixtureId || existingStyleByFixtureId.has(fixtureId)) return;
+        existingStyleByFixtureId.set(fixtureId, {
+          backgroundColor: String(entry.backgroundColor || '').trim(),
+          borderColor: String(entry.borderColor || '').trim(),
+          textColor: String(entry.textColor || '').trim(),
+          eventType: normalizeEventTypeLabel(entry.extendedProps?.eventType || 'Sports'),
+          notes: String(entry.extendedProps?.notes || '')
+        });
       });
 
-      let hasChanges = false;
+      const hasChanges = fixtureEvents.length > 0 || expectedFixtureIds.size > 0;
+
+      if (fixtureEvents.length) {
+        fixtureEvents.forEach((entry) => entry.remove());
+      }
 
       fixtureDateEntries.forEach(([fixtureId, fixtureStamp]) => {
-        const linkedEntries = fixturesById.get(fixtureId) || [];
-        const primaryEntry = linkedEntries[0] || null;
-
-        if (linkedEntries.length > 1) {
-          linkedEntries.slice(1).forEach((duplicate) => duplicate.remove());
-          hasChanges = true;
-        }
-
         const eventTitle = buildFixtureEventTitle(fixtureId, fixtureCatalog);
-
         const fixtureDate = normalizeDateString(fixtureStamp);
         const fixtureTime = normalizeTimeString(fixtureStamp);
         const fixtureStart = fixtureTime ? `${fixtureDate}T${fixtureTime}` : fixtureDate;
         const isTimedFixture = Boolean(fixtureTime);
 
-        if (!primaryEntry) {
-          const newEntry = calendar.addEvent({
-            id: `${fixtureId}:event`,
-            title: eventTitle,
-            start: fixtureStart,
-            allDay: !isTimedFixture,
-            extendedProps: {
-              eventType: 'Sports',
-              fixtureId,
-              notes: '',
-              fixtureAuto: true
-            }
-          });
+        const existingStyle = existingStyleByFixtureId.get(fixtureId) || {};
+
+        const newEntry = calendar.addEvent({
+          id: `${fixtureId}:event`,
+          title: eventTitle,
+          start: fixtureStart,
+          allDay: !isTimedFixture,
+          backgroundColor: existingStyle.backgroundColor || undefined,
+          borderColor: existingStyle.borderColor || undefined,
+          textColor: existingStyle.textColor || undefined,
+          extendedProps: {
+            eventType: existingStyle.eventType || 'Sports',
+            fixtureId,
+            notes: existingStyle.notes || '',
+            fixtureAuto: true
+          }
+        });
+
+        if (!existingStyle.backgroundColor && !existingStyle.borderColor && !existingStyle.textColor) {
           applyEventTheme(newEntry, defaultCalendarTheme);
-          hasChanges = true;
-          return;
-        }
-
-        const currentStartDate = normalizeDateString(primaryEntry.startStr || primaryEntry.start || '');
-        const currentStartTime = normalizeTimeString(primaryEntry.startStr || primaryEntry.start || '');
-        const currentStamp = currentStartDate ? (currentStartTime ? `${currentStartDate}T${currentStartTime}` : currentStartDate) : '';
-        if (currentStamp !== fixtureStart || primaryEntry.allDay === isTimedFixture) {
-          primaryEntry.setAllDay(!isTimedFixture);
-          primaryEntry.setStart(fixtureStart);
-          hasChanges = true;
-        }
-
-        if (!String(primaryEntry.title || '').trim()) {
-          primaryEntry.setProp('title', eventTitle);
-          hasChanges = true;
-        }
-
-        const existingType = normalizeEventTypeLabel(primaryEntry.extendedProps?.eventType || '');
-        if (!existingType) {
-          primaryEntry.setExtendedProp('eventType', ensureEventType('Sports'));
-          hasChanges = true;
-        }
-
-        if (!primaryEntry.extendedProps?.fixtureAuto) {
-          primaryEntry.setExtendedProp('fixtureAuto', true);
-          hasChanges = true;
-        }
-      });
-
-      fixtureEvents.forEach((entry) => {
-        const fixtureId = String(entry.extendedProps?.fixtureId || '').trim();
-        if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return;
-        if (!expectedFixtureIds.has(fixtureId)) {
-          entry.remove();
-          hasChanges = true;
         }
       });
 
