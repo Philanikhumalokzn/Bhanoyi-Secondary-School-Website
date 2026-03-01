@@ -1501,24 +1501,6 @@ const hydrateMatchLog = (matchLogNode) => {
     render();
   };
 
-  const selectFixtureById = (fixtureId, { autoOpenOverlay = false } = {}) => {
-    const normalizedFixtureId = String(fixtureId || '').trim();
-    if (!normalizedFixtureId) return false;
-    const fixture = fixtureOptions.find((entry) => entry.fixtureId === normalizedFixtureId);
-    if (!fixture) return false;
-
-    selectedDate = fixture.date;
-    selectedFixtureId = fixture.fixtureId;
-    renderFixturePickers();
-    applyFixtureSelection();
-    workflowSteps?.expandStep('log-events');
-
-    if (autoOpenOverlay) {
-      openModalForTeam(fixture.homeId);
-    }
-    return true;
-  };
-
   const refreshFromStorage = () => {
     const previousFixtureId = selectedFixtureId;
     const previousDate = selectedDate;
@@ -1692,22 +1674,6 @@ const hydrateMatchLog = (matchLogNode) => {
     logsByFixture = loadMatchLogByFixtureStore(fixtureSectionKey);
   });
 
-  window.addEventListener('bhanoyi:open-match-log', (event) => {
-    const detail = event?.detail && typeof event.detail === 'object' ? event.detail : {};
-    const sectionFromEvent = String(detail.fixtureSectionKey || '').trim();
-    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
-
-    const requestedFixtureId = String(detail.fixtureId || '').trim();
-    const shouldOpenOverlay = detail.autoOpenOverlay === true;
-    if (!requestedFixtureId) return;
-
-    const selected = selectFixtureById(requestedFixtureId, { autoOpenOverlay: shouldOpenOverlay });
-    if (!selected) {
-      refreshFromStorage();
-      selectFixtureById(requestedFixtureId, { autoOpenOverlay: shouldOpenOverlay });
-    }
-  });
-
   const params = new URLSearchParams(window.location.search);
   const requestedFixtureId = String(params.get('logFixtureId') || '').trim();
   const requestedDate = normalizeFixtureDateOnlyGlobal(params.get('logDate') || '');
@@ -1726,8 +1692,10 @@ const hydrateMatchLog = (matchLogNode) => {
 
   if (!requestedSection || requestedSection === fixtureSectionKey) {
     if (requestedFixtureId && fixtureOptions.some((entry) => entry.fixtureId === requestedFixtureId)) {
-      selectFixtureById(requestedFixtureId);
-      return;
+      selectedFixtureId = requestedFixtureId;
+      const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
+      selectedDate = matchedFixture?.date || selectedDate;
+      renderFixturePickers();
     }
   }
 
@@ -2184,27 +2152,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
     `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
 
   const fixtureSignature = (fixtures) => fixtures.map((fixture) => getFixtureId(fixture)).join('|');
-
-  const getFixtureEpoch = (fixture) => {
-    const fixtureId = getFixtureId(fixture);
-    const normalizedStamp = normalizeFixtureStamp(fixtureDates[fixtureId]);
-    if (!normalizedStamp) return Number.MAX_SAFE_INTEGER;
-    const stamp = splitFixtureStamp(normalizedStamp);
-    if (!stamp.date) return Number.MAX_SAFE_INTEGER;
-    const iso = `${stamp.date}T${stamp.time || '23:59'}`;
-    const value = new Date(iso).getTime();
-    return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
-  };
-
-  const getFixturesByKickoffOrder = (fixtures = []) =>
-    [...fixtures].sort((left, right) => {
-      const leftEpoch = getFixtureEpoch(left);
-      const rightEpoch = getFixtureEpoch(right);
-      if (leftEpoch !== rightEpoch) return leftEpoch - rightEpoch;
-      if (left.round !== right.round) return left.round - right.round;
-      if (left.match !== right.match) return left.match - right.match;
-      return getFixtureId(left).localeCompare(getFixtureId(right));
-    });
 
   const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
@@ -3533,17 +3480,54 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const effectiveTeamOptions = houseOptions.filter((team) => effectiveTeamIds.includes(team.id));
     const logsByFixture = loadMatchLogByFixtureStore(fixtureSectionKey);
 
-    const renderedFixtures = getFixturesByKickoffOrder(fixtures)
+    const parseFixtureEpoch = (fixtureId) => {
+      const normalizedStamp = normalizeFixtureStamp(fixtureDates[fixtureId]);
+      if (!normalizedStamp) return Number.MAX_SAFE_INTEGER;
+      const stamp = splitFixtureStamp(normalizedStamp);
+      if (!stamp.date) return Number.MAX_SAFE_INTEGER;
+      const iso = `${stamp.date}T${stamp.time || '23:59'}`;
+      const value = new Date(iso).getTime();
+      return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+    };
+
+    const buildMatchLogHref = (fixtureId, fixtureDate) => {
+      if (typeof window === 'undefined') return '#';
+      const params = new URLSearchParams(window.location.search);
+      params.set('logFixtureSectionKey', fixtureSectionKey);
+      params.set('logFixtureId', fixtureId);
+      const normalizedDate = normalizeFixtureDateOnlyGlobal(fixtureDate || '');
+      if (normalizedDate) {
+        params.set('logDate', normalizedDate);
+      }
+      return withAdminQuery(`${window.location.pathname.split('/').pop() || 'admin.html'}?${params.toString()}`);
+    };
+
+    const renderedFixtures = fixtures
       .map((fixture, index) => {
         const fixtureId = getFixtureId(fixture);
         const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
+        const epoch = parseFixtureEpoch(fixtureId);
         return {
           fixture,
-          index: fixtures.findIndex((entry) => getFixtureId(entry) === fixtureId),
+          index,
           fixtureId,
-          stamp
+          stamp,
+          epoch
         };
+      })
+      .sort((left, right) => {
+        if (left.epoch !== right.epoch) return left.epoch - right.epoch;
+        if (left.fixture.round !== right.fixture.round) return left.fixture.round - right.fixture.round;
+        if (left.fixture.match !== right.fixture.match) return left.fixture.match - right.fixture.match;
+        return left.fixtureId.localeCompare(right.fixtureId);
       });
+
+    const teamOptionMarkup = (selectedId) =>
+      (effectiveTeamOptions.length ? effectiveTeamOptions : houseOptions)
+        .map(
+          (team) => `<option value="${escapeHtmlAttribute(team.id)}" ${team.id === selectedId ? 'selected' : ''}>${escapeHtmlText(team.name)}</option>`
+        )
+        .join('');
 
     bodyNode.innerHTML = renderedFixtures
       .map(
@@ -3590,16 +3574,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
             <td>${escapeHtmlText(fixture.formatLabel || '')}</td>
             <td>
               ${isAdminMode
-                ? `<div class="fixture-date-edit-wrap">
-                    <button type="button" class="fixture-date-link" data-fixture-invert-sides title="Click to swap home and away teams">${escapeHtmlText(teamNameById(fixture.homeId))}</button>
-                  </div>`
+                ? `<select class="fixture-inline-select" data-fixture-home-select>${teamOptionMarkup(fixture.homeId)}</select>`
                 : escapeHtmlText(teamNameById(fixture.homeId))}
             </td>
             <td>
               ${isAdminMode
-                ? `<div class="fixture-date-edit-wrap">
-                    <button type="button" class="fixture-date-link" data-fixture-invert-sides title="Click to swap home and away teams">${escapeHtmlText(teamNameById(fixture.awayId))}</button>
-                  </div>`
+                ? `<select class="fixture-inline-select" data-fixture-away-select>${teamOptionMarkup(fixture.awayId)}</select>`
                 : escapeHtmlText(teamNameById(fixture.awayId))}
             </td>
             <td>
@@ -3611,9 +3591,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
                   return `<span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>`;
                 }
 
+                const href = buildMatchLogHref(fixtureId, stamp.date);
                 return `
                   <div class="fixture-date-edit-wrap">
-                    <button type="button" class="btn btn-secondary" data-fixture-log-open="${escapeHtmlAttribute(fixtureId)}">Log</button>
+                    <span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>
+                    <a class="fixture-date-link" href="${escapeHtmlAttribute(href)}">${summaryMeta.eventCount > 0 ? 'Edit log' : 'Log match'}</a>
                   </div>
                 `;
               })()}
@@ -3782,7 +3764,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const buildFixtureCsvContent = () => {
-    const sortedFixtures = getFixturesByKickoffOrder(lastFixtures);
     const lines = [
       ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
       ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
@@ -3792,7 +3773,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
     ];
 
-    sortedFixtures.forEach((fixture) => {
+    lastFixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
       const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
       lines.push(
@@ -3954,8 +3935,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       });
 
       const dataStartRow = headerRowNumber + 1;
-      const sortedFixtures = getFixturesByKickoffOrder(lastFixtures);
-      sortedFixtures.forEach((fixture, index) => {
+      lastFixtures.forEach((fixture, index) => {
         const fixtureId = getFixtureId(fixture);
         const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
         const row = sheet.getRow(dataStartRow + index);
@@ -3978,11 +3958,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
             horizontal: columnIndex <= 5 ? 'center' : 'left',
             wrapText: columnIndex === 6
           };
-          const rowFill = index % 2 === 0 ? white : `FF${lightBlue}`;
           cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: rowFill }
+            fgColor: { argb: `FF${index % 2 === 0 ? white : lightBlue}` }
           };
           cell.border = {
             top: { style: 'thin', color: { argb: `FF${borderColor}` } },
@@ -3993,7 +3972,26 @@ const hydrateFixtureCreator = (fixtureNode) => {
         });
       });
 
-      const noteRowNumber = dataStartRow + sortedFixtures.length + 2;
+      const groupByRoundLeg = new Map();
+      lastFixtures.forEach((fixture, index) => {
+        const key = `${fixture.round}::${fixture.leg}`;
+        const rowNumber = dataStartRow + index;
+        const group = groupByRoundLeg.get(key) || [];
+        group.push(rowNumber);
+        groupByRoundLeg.set(key, group);
+      });
+
+      groupByRoundLeg.forEach((rows) => {
+        if (rows.length < 2) return;
+        const start = rows[0];
+        const end = rows[rows.length - 1];
+        sheet.mergeCells(`A${start}:A${end}`);
+        sheet.mergeCells(`B${start}:B${end}`);
+        sheet.getCell(`A${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+        sheet.getCell(`B${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+
+      const noteRowNumber = dataStartRow + lastFixtures.length + 2;
       sheet.mergeCells(`A${noteRowNumber}:H${noteRowNumber}`);
       const noteCell = sheet.getCell(`A${noteRowNumber}`);
       noteCell.value = 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.';
@@ -4080,72 +4078,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   });
 
-  const tryUpdateFixtureTeams = (
-    rowIndex,
-    nextHomeId,
-    nextAwayId,
-    {
-      singleUpdateMessage = 'Fixture updated with round-robin integrity preserved.',
-      adjustedUpdateMessage = null
-    } = {}
-  ) => {
-    const safeHomeId = String(nextHomeId || '').trim();
-    const safeAwayId = String(nextAwayId || '').trim();
-    if (!safeHomeId || !safeAwayId) return false;
-
-    const repairResult = reconcileRoundRobinAfterManualEdit({
-      fixtures: lastFixtures,
-      teamIds: selectedTeamIds(),
-      editedIndex: rowIndex,
-      nextHomeId: safeHomeId,
-      nextAwayId: safeAwayId
-    });
-
-    if (!repairResult.ok) {
-      if (statusNode) statusNode.textContent = repairResult.message;
-      renderFixtures(lastFixtures);
-      return false;
-    }
-
-    if (repairResult.affectedOtherCount > 0) {
-      const proceed = window.confirm(
-        `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
-      );
-      if (!proceed) {
-        renderFixtures(lastFixtures);
-        return false;
-      }
-    }
-
-    lastFixtures = repairResult.fixtures;
-    refreshCurrentUnfairnessReport(lastFixtures);
-    if (isAdminMode) {
-      pendingFixtureApproval = true;
-      approvedWithUnfairness = false;
-    } else {
-      pendingFixtureApproval = false;
-      approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-      saveFixtureCatalog(lastFixtures);
-      persistActiveSportState();
-    }
-    renderFixtures(lastFixtures);
-
-    if (statusNode) {
-      if (pendingFixtureApproval) {
-        statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-          : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
-      } else {
-        const adjustedMessage =
-          adjustedUpdateMessage ||
-          `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`;
-        statusNode.textContent = repairResult.affectedOtherCount > 0 ? adjustedMessage : singleUpdateMessage;
-      }
-    }
-
-    return true;
-  };
-
   bodyNode.addEventListener('change', (event) => {
     if (!isAdminMode) return;
     const target = event.target;
@@ -4201,54 +4133,118 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-  });
+    if (target.matches('[data-fixture-home-select]') && target instanceof HTMLSelectElement) {
+      const homeSelect = row.querySelector('[data-fixture-home-select]');
+      const awaySelect = row.querySelector('[data-fixture-away-select]');
+      const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
+      const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
+      if (!nextHome || !nextAway) return;
 
-  bodyNode.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
+      const repairResult = reconcileRoundRobinAfterManualEdit({
+        fixtures: lastFixtures,
+        teamIds: selectedTeamIds(),
+        editedIndex: rowIndex,
+        nextHomeId: nextHome,
+        nextAwayId: nextAway
+      });
 
-    const logButton = target.closest('[data-fixture-log-open]');
-    if (logButton instanceof HTMLElement) {
-      const fixtureId = String(logButton.getAttribute('data-fixture-log-open') || '').trim();
-      if (!fixtureId) return;
+      if (!repairResult.ok) {
+        if (statusNode) statusNode.textContent = repairResult.message;
+        renderFixtures(lastFixtures);
+        return;
+      }
 
-      const fixture = lastFixtures.find((entry) => getFixtureId(entry) === fixtureId);
-      if (!fixture) return;
+      if (repairResult.affectedOtherCount > 0) {
+        const proceed = window.confirm(
+          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+        );
+        if (!proceed) {
+          renderFixtures(lastFixtures);
+          return;
+        }
+      }
 
-      const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
-      window.dispatchEvent(
-        new CustomEvent('bhanoyi:open-match-log', {
-          detail: {
-            fixtureSectionKey,
-            fixtureId,
-            date: stamp.date,
-            autoOpenOverlay: true
-          }
-        })
-      );
+      lastFixtures = repairResult.fixtures;
+      refreshCurrentUnfairnessReport(lastFixtures);
+      if (isAdminMode) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      } else {
+        pendingFixtureApproval = false;
+        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+        saveFixtureCatalog(lastFixtures);
+        persistActiveSportState();
+      }
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        if (pendingFixtureApproval) {
+          statusNode.textContent = currentUnfairnessReport.hasUnfairness
+            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
+            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+        } else {
+          statusNode.textContent = repairResult.affectedOtherCount > 0
+            ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
+            : 'Fixture updated with round-robin integrity preserved.';
+        }
+      }
       return;
     }
 
-    if (!isAdminMode) return;
+    if (target.matches('[data-fixture-away-select]') && target instanceof HTMLSelectElement) {
+      const homeSelect = row.querySelector('[data-fixture-home-select]');
+      const awaySelect = row.querySelector('[data-fixture-away-select]');
+      const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
+      const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
+      if (!nextHome || !nextAway) return;
 
-    const invertTrigger = target.closest('[data-fixture-invert-sides]');
-    if (!(invertTrigger instanceof HTMLElement)) return;
+      const repairResult = reconcileRoundRobinAfterManualEdit({
+        fixtures: lastFixtures,
+        teamIds: selectedTeamIds(),
+        editedIndex: rowIndex,
+        nextHomeId: nextHome,
+        nextAwayId: nextAway
+      });
 
-    const row = invertTrigger.closest('[data-fixture-row]');
-    if (!(row instanceof HTMLElement)) return;
-    const rowIndex = Number.parseInt(row.dataset.fixtureRow || '', 10);
-    if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= lastFixtures.length) return;
+      if (!repairResult.ok) {
+        if (statusNode) statusNode.textContent = repairResult.message;
+        renderFixtures(lastFixtures);
+        return;
+      }
 
-    const fixture = lastFixtures[rowIndex];
-    const currentHome = String(fixture?.homeId || '').trim();
-    const currentAway = String(fixture?.awayId || '').trim();
-    if (!currentHome || !currentAway || currentHome === currentAway) return;
+      if (repairResult.affectedOtherCount > 0) {
+        const proceed = window.confirm(
+          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+        );
+        if (!proceed) {
+          renderFixtures(lastFixtures);
+          return;
+        }
+      }
 
-    tryUpdateFixtureTeams(rowIndex, currentAway, currentHome, {
-      singleUpdateMessage: 'Fixture home/away sides swapped.',
-      adjustedUpdateMessage:
-        'Fixture sides swapped and additional fixtures auto-adjusted to preserve round-robin rules.'
-    });
+      lastFixtures = repairResult.fixtures;
+      refreshCurrentUnfairnessReport(lastFixtures);
+      if (isAdminMode) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      } else {
+        pendingFixtureApproval = false;
+        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+        saveFixtureCatalog(lastFixtures);
+        persistActiveSportState();
+      }
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        if (pendingFixtureApproval) {
+          statusNode.textContent = currentUnfairnessReport.hasUnfairness
+            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
+            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+        } else {
+          statusNode.textContent = repairResult.affectedOtherCount > 0
+            ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
+            : 'Fixture updated with round-robin integrity preserved.';
+        }
+      }
+    }
   });
 
   const approveFixturePreview = ({ allowUnfairness = false } = {}) => {
@@ -6007,13 +6003,133 @@ const hydrateSchoolCalendar = (calendarShell) => {
         eventTypeSelect.value = eventTypes[0];
       }
       toggleCustomTypeField();
-      if (isSportsTypeSelected()) {
-        maybePromptSportsFixtureOverlay();
-      }
     }
+    if (eventTypeCustomInput instanceof HTMLInputElement) {
+      eventTypeCustomInput.value = '';
+    }
+    sportsOverlayHandledForCurrentSelection = false;
+    hideSportsOverlay();
   };
 
   if (isAdminMode && form instanceof HTMLFormElement) {
+    const hiddenId = document.createElement('input');
+    hiddenId.type = 'hidden';
+    hiddenId.name = 'id';
+    form.appendChild(hiddenId);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const titleInput = form.querySelector('input[name="title"]');
+      const startInput = form.querySelector('input[name="start"]');
+      const startTimeInput = form.querySelector('input[name="startTime"]');
+      const endInput = form.querySelector('input[name="end"]');
+      const endTimeInput = form.querySelector('input[name="endTime"]');
+      const fixtureInput = form.querySelector('input[name="fixtureId"]');
+      const notesInput = form.querySelector('textarea[name="notes"]');
+      const idInput = form.querySelector('input[name="id"]');
+
+      const title = (titleInput instanceof HTMLInputElement ? titleInput.value : '').trim();
+      const startDate = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
+      const startTime = normalizeTimeString(startTimeInput instanceof HTMLInputElement ? startTimeInput.value : '');
+      const endDateInput = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
+      const endTime = normalizeTimeString(endTimeInput instanceof HTMLInputElement ? endTimeInput.value : '');
+      const eventType = resolveEventTypeFromForm();
+      const fixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
+      const notes = (notesInput instanceof HTMLTextAreaElement ? notesInput.value : '').trim();
+      const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+
+      const snappedStartDate = fixtureId ? snapDateToActiveTerms(startDate) : startDate;
+      const effectiveStartDate = snappedStartDate || startDate;
+
+      const isTimedEvent = Boolean(startTime);
+      const start = combineDateAndTime(effectiveStartDate, startTime);
+
+      let end = '';
+      if (isTimedEvent) {
+        const effectiveEndDate = endDateInput || effectiveStartDate;
+        const effectiveEndTime = endTime || startTime;
+        end = combineDateAndTime(effectiveEndDate, effectiveEndTime);
+        if (end && start) {
+          const startStamp = new Date(start).getTime();
+          const endStamp = new Date(end).getTime();
+          if (Number.isFinite(startStamp) && Number.isFinite(endStamp) && endStamp < startStamp) {
+            end = '';
+          }
+        }
+      } else if (endDateInput) {
+        const clampedEnd = toEpochDay(endDateInput) < toEpochDay(effectiveStartDate)
+          ? effectiveStartDate
+          : endDateInput;
+        end = addDays(clampedEnd, 1);
+      }
+
+      if (!title || !start || !eventType) {
+        if (statusNode) statusNode.textContent = 'Title, event type, and start date are required.';
+        showSmartToast('Title, event type, and start date are required.', { tone: 'error' });
+        return;
+      }
+
+      if (fixtureId && !hasConfiguredActiveTerms()) {
+        if (statusNode) {
+          statusNode.textContent = 'Save at least one school term range before scheduling fixture events.';
+        }
+        showSmartToast('Save at least one school term range before scheduling fixture events.', { tone: 'error' });
+        return;
+      }
+
+      let eventEntry = eventId ? calendar.getEventById(eventId) : null;
+      if (!eventEntry) {
+        eventEntry = calendar.addEvent({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          title,
+          start,
+          end: end || undefined,
+          allDay: !isTimedEvent,
+          extendedProps: {
+            eventType,
+            fixtureId,
+            notes
+          }
+        });
+        applyEventTheme(eventEntry, defaultCalendarTheme);
+      } else {
+        eventEntry.setProp('title', title);
+        eventEntry.setStart(start);
+        eventEntry.setEnd(end || null);
+        eventEntry.setAllDay(!isTimedEvent);
+        eventEntry.setExtendedProp('eventType', eventType);
+        eventEntry.setExtendedProp('fixtureId', fixtureId);
+        eventEntry.setExtendedProp('notes', notes);
+      }
+
+      saveEvents(calendar.getEvents());
+      refreshDayOverlay();
+      if (statusNode) {
+        statusNode.textContent = fixtureId && effectiveStartDate !== startDate
+          ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
+          : 'Event saved.';
+      }
+      showSmartToast(
+        fixtureId && effectiveStartDate !== startDate
+          ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
+          : 'Event saved.',
+        { tone: 'success' }
+      );
+      clearForm();
+    });
+
+    newButton?.addEventListener('click', () => {
+      clearForm();
+      if (statusNode) statusNode.textContent = 'Ready for a new event.';
+      showSmartToast('Ready for a new event.', { tone: 'info' });
+    });
+
+    deleteButton?.addEventListener('click', () => {
+      const idInput = form.querySelector('input[name="id"]');
+      const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+      deleteCalendarEventById(eventId, { closeEditor: false });
+    });
+
     if (eventTypeSelect instanceof HTMLSelectElement) {
       eventTypeSelect.addEventListener('change', () => {
         toggleCustomTypeField();
