@@ -102,7 +102,7 @@ const initCollapsiblePageSections = (pageKey) => {
       heading.classList.add('page-section-collapsible-heading');
       body.style.maxHeight = '0px';
 
-      return { section, body };
+      return { section, body, heading, container };
     })
     .filter(Boolean);
 
@@ -132,16 +132,32 @@ const initCollapsiblePageSections = (pageKey) => {
     });
   };
 
+  const toggleSection = (entry) => {
+    if (entry.section.classList.contains('is-expanded')) {
+      collapseSection(entry);
+      return;
+    }
+    openOnly(entry.section);
+  };
+
   preparedSections.forEach((entry) => {
-    entry.section.addEventListener('click', () => {
-      openOnly(entry.section);
+    entry.section.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      const clickedInBody = entry.body.contains(target);
+      if (clickedInBody) {
+        return;
+      }
+
+      toggleSection(entry);
     });
 
     entry.section.addEventListener('keydown', (event) => {
       if (!(event instanceof KeyboardEvent)) return;
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
-      openOnly(entry.section);
+      toggleSection(entry);
     });
   });
 
