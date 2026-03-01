@@ -3597,12 +3597,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
             <td>${escapeHtmlText(fixture.formatLabel || '')}</td>
             <td>
               ${isAdminMode
-                ? `<select class="fixture-inline-select" data-fixture-home-select>${teamOptionMarkup(fixture.homeId)}</select>`
+                ? `<div class="fixture-date-edit-wrap">
+                    <button type="button" class="fixture-date-link" data-fixture-invert-sides title="Click to swap home and away teams">${escapeHtmlText(teamNameById(fixture.homeId))}</button>
+                    <select class="fixture-inline-select" data-fixture-home-select>${teamOptionMarkup(fixture.homeId)}</select>
+                  </div>`
                 : escapeHtmlText(teamNameById(fixture.homeId))}
             </td>
             <td>
               ${isAdminMode
-                ? `<select class="fixture-inline-select" data-fixture-away-select>${teamOptionMarkup(fixture.awayId)}</select>`
+                ? `<div class="fixture-date-edit-wrap">
+                    <button type="button" class="fixture-date-link" data-fixture-invert-sides title="Click to swap home and away teams">${escapeHtmlText(teamNameById(fixture.awayId))}</button>
+                    <select class="fixture-inline-select" data-fixture-away-select>${teamOptionMarkup(fixture.awayId)}</select>
+                  </div>`
                 : escapeHtmlText(teamNameById(fixture.awayId))}
             </td>
             <td>
@@ -4082,6 +4088,72 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   });
 
+  const tryUpdateFixtureTeams = (
+    rowIndex,
+    nextHomeId,
+    nextAwayId,
+    {
+      singleUpdateMessage = 'Fixture updated with round-robin integrity preserved.',
+      adjustedUpdateMessage = null
+    } = {}
+  ) => {
+    const safeHomeId = String(nextHomeId || '').trim();
+    const safeAwayId = String(nextAwayId || '').trim();
+    if (!safeHomeId || !safeAwayId) return false;
+
+    const repairResult = reconcileRoundRobinAfterManualEdit({
+      fixtures: lastFixtures,
+      teamIds: selectedTeamIds(),
+      editedIndex: rowIndex,
+      nextHomeId: safeHomeId,
+      nextAwayId: safeAwayId
+    });
+
+    if (!repairResult.ok) {
+      if (statusNode) statusNode.textContent = repairResult.message;
+      renderFixtures(lastFixtures);
+      return false;
+    }
+
+    if (repairResult.affectedOtherCount > 0) {
+      const proceed = window.confirm(
+        `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+      );
+      if (!proceed) {
+        renderFixtures(lastFixtures);
+        return false;
+      }
+    }
+
+    lastFixtures = repairResult.fixtures;
+    refreshCurrentUnfairnessReport(lastFixtures);
+    if (isAdminMode) {
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+    } else {
+      pendingFixtureApproval = false;
+      approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+      persistActiveSportState();
+    }
+    renderFixtures(lastFixtures);
+
+    if (statusNode) {
+      if (pendingFixtureApproval) {
+        statusNode.textContent = currentUnfairnessReport.hasUnfairness
+          ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
+          : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+      } else {
+        const adjustedMessage =
+          adjustedUpdateMessage ||
+          `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`;
+        statusNode.textContent = repairResult.affectedOtherCount > 0 ? adjustedMessage : singleUpdateMessage;
+      }
+    }
+
+    return true;
+  };
+
   bodyNode.addEventListener('change', (event) => {
     if (!isAdminMode) return;
     const target = event.target;
@@ -4142,55 +4214,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const awaySelect = row.querySelector('[data-fixture-away-select]');
       const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
       const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
-      if (!nextHome || !nextAway) return;
-
-      const repairResult = reconcileRoundRobinAfterManualEdit({
-        fixtures: lastFixtures,
-        teamIds: selectedTeamIds(),
-        editedIndex: rowIndex,
-        nextHomeId: nextHome,
-        nextAwayId: nextAway
-      });
-
-      if (!repairResult.ok) {
-        if (statusNode) statusNode.textContent = repairResult.message;
-        renderFixtures(lastFixtures);
-        return;
-      }
-
-      if (repairResult.affectedOtherCount > 0) {
-        const proceed = window.confirm(
-          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
-        );
-        if (!proceed) {
-          renderFixtures(lastFixtures);
-          return;
-        }
-      }
-
-      lastFixtures = repairResult.fixtures;
-      refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode) {
-        pendingFixtureApproval = true;
-        approvedWithUnfairness = false;
-      } else {
-        pendingFixtureApproval = false;
-        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-        saveFixtureCatalog(lastFixtures);
-        persistActiveSportState();
-      }
-      renderFixtures(lastFixtures);
-      if (statusNode) {
-        if (pendingFixtureApproval) {
-          statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
-        } else {
-          statusNode.textContent = repairResult.affectedOtherCount > 0
-            ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
-            : 'Fixture updated with round-robin integrity preserved.';
-        }
-      }
+      tryUpdateFixtureTeams(rowIndex, nextHome, nextAway);
       return;
     }
 
@@ -4199,59 +4223,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const awaySelect = row.querySelector('[data-fixture-away-select]');
       const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
       const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
-      if (!nextHome || !nextAway) return;
-
-      const repairResult = reconcileRoundRobinAfterManualEdit({
-        fixtures: lastFixtures,
-        teamIds: selectedTeamIds(),
-        editedIndex: rowIndex,
-        nextHomeId: nextHome,
-        nextAwayId: nextAway
-      });
-
-      if (!repairResult.ok) {
-        if (statusNode) statusNode.textContent = repairResult.message;
-        renderFixtures(lastFixtures);
-        return;
-      }
-
-      if (repairResult.affectedOtherCount > 0) {
-        const proceed = window.confirm(
-          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
-        );
-        if (!proceed) {
-          renderFixtures(lastFixtures);
-          return;
-        }
-      }
-
-      lastFixtures = repairResult.fixtures;
-      refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode) {
-        pendingFixtureApproval = true;
-        approvedWithUnfairness = false;
-      } else {
-        pendingFixtureApproval = false;
-        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-        saveFixtureCatalog(lastFixtures);
-        persistActiveSportState();
-      }
-      renderFixtures(lastFixtures);
-      if (statusNode) {
-        if (pendingFixtureApproval) {
-          statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
-        } else {
-          statusNode.textContent = repairResult.affectedOtherCount > 0
-            ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
-            : 'Fixture updated with round-robin integrity preserved.';
-        }
-      }
+      tryUpdateFixtureTeams(rowIndex, nextHome, nextAway);
+      return;
     }
+  });
 
-    if (target.matches('[data-fixture-log-open]')) {
-      const fixtureId = String(target.getAttribute('data-fixture-log-open') || '').trim();
+  bodyNode.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const logButton = target.closest('[data-fixture-log-open]');
+    if (logButton instanceof HTMLElement) {
+      const fixtureId = String(logButton.getAttribute('data-fixture-log-open') || '').trim();
       if (!fixtureId) return;
 
       const fixture = lastFixtures.find((entry) => getFixtureId(entry) === fixtureId);
@@ -4270,6 +4253,27 @@ const hydrateFixtureCreator = (fixtureNode) => {
       );
       return;
     }
+
+    if (!isAdminMode) return;
+
+    const invertTrigger = target.closest('[data-fixture-invert-sides]');
+    if (!(invertTrigger instanceof HTMLElement)) return;
+
+    const row = invertTrigger.closest('[data-fixture-row]');
+    if (!(row instanceof HTMLElement)) return;
+    const rowIndex = Number.parseInt(row.dataset.fixtureRow || '', 10);
+    if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= lastFixtures.length) return;
+
+    const fixture = lastFixtures[rowIndex];
+    const currentHome = String(fixture?.homeId || '').trim();
+    const currentAway = String(fixture?.awayId || '').trim();
+    if (!currentHome || !currentAway || currentHome === currentAway) return;
+
+    tryUpdateFixtureTeams(rowIndex, currentAway, currentHome, {
+      singleUpdateMessage: 'Fixture home/away sides swapped.',
+      adjustedUpdateMessage:
+        'Fixture sides swapped and additional fixtures auto-adjusted to preserve round-robin rules.'
+    });
   });
 
   const approveFixturePreview = ({ allowUnfairness = false } = {}) => {
@@ -6028,133 +6032,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
         eventTypeSelect.value = eventTypes[0];
       }
       toggleCustomTypeField();
+      if (isSportsTypeSelected()) {
+        maybePromptSportsFixtureOverlay();
+      }
     }
-    if (eventTypeCustomInput instanceof HTMLInputElement) {
-      eventTypeCustomInput.value = '';
-    }
-    sportsOverlayHandledForCurrentSelection = false;
-    hideSportsOverlay();
   };
 
   if (isAdminMode && form instanceof HTMLFormElement) {
-    const hiddenId = document.createElement('input');
-    hiddenId.type = 'hidden';
-    hiddenId.name = 'id';
-    form.appendChild(hiddenId);
-
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const titleInput = form.querySelector('input[name="title"]');
-      const startInput = form.querySelector('input[name="start"]');
-      const startTimeInput = form.querySelector('input[name="startTime"]');
-      const endInput = form.querySelector('input[name="end"]');
-      const endTimeInput = form.querySelector('input[name="endTime"]');
-      const fixtureInput = form.querySelector('input[name="fixtureId"]');
-      const notesInput = form.querySelector('textarea[name="notes"]');
-      const idInput = form.querySelector('input[name="id"]');
-
-      const title = (titleInput instanceof HTMLInputElement ? titleInput.value : '').trim();
-      const startDate = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
-      const startTime = normalizeTimeString(startTimeInput instanceof HTMLInputElement ? startTimeInput.value : '');
-      const endDateInput = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
-      const endTime = normalizeTimeString(endTimeInput instanceof HTMLInputElement ? endTimeInput.value : '');
-      const eventType = resolveEventTypeFromForm();
-      const fixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
-      const notes = (notesInput instanceof HTMLTextAreaElement ? notesInput.value : '').trim();
-      const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
-
-      const snappedStartDate = fixtureId ? snapDateToActiveTerms(startDate) : startDate;
-      const effectiveStartDate = snappedStartDate || startDate;
-
-      const isTimedEvent = Boolean(startTime);
-      const start = combineDateAndTime(effectiveStartDate, startTime);
-
-      let end = '';
-      if (isTimedEvent) {
-        const effectiveEndDate = endDateInput || effectiveStartDate;
-        const effectiveEndTime = endTime || startTime;
-        end = combineDateAndTime(effectiveEndDate, effectiveEndTime);
-        if (end && start) {
-          const startStamp = new Date(start).getTime();
-          const endStamp = new Date(end).getTime();
-          if (Number.isFinite(startStamp) && Number.isFinite(endStamp) && endStamp < startStamp) {
-            end = '';
-          }
-        }
-      } else if (endDateInput) {
-        const clampedEnd = toEpochDay(endDateInput) < toEpochDay(effectiveStartDate)
-          ? effectiveStartDate
-          : endDateInput;
-        end = addDays(clampedEnd, 1);
-      }
-
-      if (!title || !start || !eventType) {
-        if (statusNode) statusNode.textContent = 'Title, event type, and start date are required.';
-        showSmartToast('Title, event type, and start date are required.', { tone: 'error' });
-        return;
-      }
-
-      if (fixtureId && !hasConfiguredActiveTerms()) {
-        if (statusNode) {
-          statusNode.textContent = 'Save at least one school term range before scheduling fixture events.';
-        }
-        showSmartToast('Save at least one school term range before scheduling fixture events.', { tone: 'error' });
-        return;
-      }
-
-      let eventEntry = eventId ? calendar.getEventById(eventId) : null;
-      if (!eventEntry) {
-        eventEntry = calendar.addEvent({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          title,
-          start,
-          end: end || undefined,
-          allDay: !isTimedEvent,
-          extendedProps: {
-            eventType,
-            fixtureId,
-            notes
-          }
-        });
-        applyEventTheme(eventEntry, defaultCalendarTheme);
-      } else {
-        eventEntry.setProp('title', title);
-        eventEntry.setStart(start);
-        eventEntry.setEnd(end || null);
-        eventEntry.setAllDay(!isTimedEvent);
-        eventEntry.setExtendedProp('eventType', eventType);
-        eventEntry.setExtendedProp('fixtureId', fixtureId);
-        eventEntry.setExtendedProp('notes', notes);
-      }
-
-      saveEvents(calendar.getEvents());
-      refreshDayOverlay();
-      if (statusNode) {
-        statusNode.textContent = fixtureId && effectiveStartDate !== startDate
-          ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
-          : 'Event saved.';
-      }
-      showSmartToast(
-        fixtureId && effectiveStartDate !== startDate
-          ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
-          : 'Event saved.',
-        { tone: 'success' }
-      );
-      clearForm();
-    });
-
-    newButton?.addEventListener('click', () => {
-      clearForm();
-      if (statusNode) statusNode.textContent = 'Ready for a new event.';
-      showSmartToast('Ready for a new event.', { tone: 'info' });
-    });
-
-    deleteButton?.addEventListener('click', () => {
-      const idInput = form.querySelector('input[name="id"]');
-      const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
-      deleteCalendarEventById(eventId, { closeEditor: false });
-    });
-
     if (eventTypeSelect instanceof HTMLSelectElement) {
       eventTypeSelect.addEventListener('change', () => {
         toggleCustomTypeField();
