@@ -1266,9 +1266,11 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               <textarea rows="3" data-fixture-rule-exclusions placeholder="One range per line, e.g. 2026-04-01 to 2026-04-05"></textarea>
             </label>
             <div class="fixture-creator-actions">
+              <button type="button" class="btn btn-secondary" data-fixture-rules-preview>Preview candidate dates</button>
               <button type="button" class="btn btn-secondary" data-fixture-rules-save>Save rules</button>
             </div>
             <p class="fixture-creator-status" data-fixture-rules-status aria-live="polite"></p>
+            <div class="fixture-rules-preview is-hidden" data-fixture-rules-preview-output></div>
           </div>
           <div class="fixture-creator-sport-grid">
             <label>
@@ -1441,7 +1443,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const ruleUseTermsInput = fixtureNode.querySelector('[data-fixture-rule-use-terms]');
   const ruleAvoidAcademicInput = fixtureNode.querySelector('[data-fixture-rule-avoid-academic]');
   const ruleExclusionsInput = fixtureNode.querySelector('[data-fixture-rule-exclusions]');
+  const rulesPreviewButton = fixtureNode.querySelector('[data-fixture-rules-preview]');
   const rulesSaveButton = fixtureNode.querySelector('[data-fixture-rules-save]');
+  const rulesPreviewNode = fixtureNode.querySelector('[data-fixture-rules-preview-output]');
   const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
@@ -1747,19 +1751,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return true;
   };
 
-  const autoFillFixtureDates = (fixtures) => {
+  const buildAutoFillDateMap = (inputFixtures) => {
     const collected = collectDateRules();
     if (!collected.ok) {
-      if (statusNode) statusNode.textContent = collected.message;
-      if (rulesStatusNode) rulesStatusNode.textContent = collected.message;
-      return false;
+      return { ok: false, message: collected.message };
     }
 
     const rules = collected.rules;
     let cursor = rules.startDate;
     const nextDates = {};
 
-    for (let index = 0; index < fixtures.length; index += 1) {
+    for (let index = 0; index < inputFixtures.length; index += 1) {
       let probe = cursor;
       let guard = 0;
       while (guard < 2000 && !isDateAllowedByRules(probe, rules)) {
@@ -1768,20 +1770,80 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
 
       if (guard >= 2000 || !probe) {
-        const message = 'Could not find enough valid dates for all fixtures with the current rules.';
-        if (statusNode) statusNode.textContent = message;
-        if (rulesStatusNode) rulesStatusNode.textContent = message;
-        return false;
+        return {
+          ok: false,
+          message: 'Could not find enough valid dates for all fixtures with the current rules.'
+        };
       }
 
-      const fixtureId = getFixtureId(fixtures[index]);
+      const fixtureId = getFixtureId(inputFixtures[index]);
       nextDates[fixtureId] = probe;
       cursor = addDays(probe, Math.max(1, rules.gapDays));
     }
 
+    return { ok: true, dateMap: nextDates };
+  };
+
+  const renderAutoFillPreview = (inputFixtures, dateMap) => {
+    if (!(rulesPreviewNode instanceof HTMLElement)) return;
+    const rows = inputFixtures
+      .map((fixture) => {
+        const fixtureId = getFixtureId(fixture);
+        const date = String(dateMap[fixtureId] || '').trim();
+        const matchup = `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`;
+        return `<tr><td>R${fixture.round}M${fixture.match}</td><td>${escapeHtmlText(matchup)}</td><td>${escapeHtmlText(date)}</td></tr>`;
+      })
+      .join('');
+
+    rulesPreviewNode.innerHTML = `
+      <p class="fixture-creator-status">Preview only: dates are not saved until auto-fill is applied.</p>
+      <div class="fixture-table-wrap">
+        <table class="fixture-table">
+          <thead>
+            <tr>
+              <th>Match</th>
+              <th>Fixture</th>
+              <th>Candidate Date</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+    rulesPreviewNode.classList.remove('is-hidden');
+  };
+
+  const buildAutoFillPreview = () => {
+    if (!lastFixtures.length) {
+      if (rulesStatusNode) {
+        rulesStatusNode.textContent = 'Generate fixtures first, then preview candidate dates.';
+      }
+      return;
+    }
+
+    const result = buildAutoFillDateMap(lastFixtures);
+    if (!result.ok) {
+      if (rulesStatusNode) rulesStatusNode.textContent = result.message;
+      return;
+    }
+
+    renderAutoFillPreview(lastFixtures, result.dateMap);
+    if (rulesStatusNode) {
+      rulesStatusNode.textContent = 'Candidate dates previewed. Apply by generating with auto-fill enabled.';
+    }
+  };
+
+  const autoFillFixtureDates = (fixtures) => {
+    const result = buildAutoFillDateMap(fixtures);
+    if (!result.ok) {
+      if (statusNode) statusNode.textContent = result.message;
+      if (rulesStatusNode) rulesStatusNode.textContent = result.message;
+      return false;
+    }
+
     fixtureDates = {
       ...fixtureDates,
-      ...nextDates
+      ...result.dateMap
     };
     localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
     window.dispatchEvent(
@@ -1798,6 +1860,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (rulesStatusNode) {
       rulesStatusNode.textContent = 'Auto-fill completed with current date rules.';
     }
+    renderAutoFillPreview(fixtures, result.dateMap);
     return true;
   };
 
@@ -2231,6 +2294,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   rulesSaveButton?.addEventListener('click', () => {
     saveDateRules();
+  });
+
+  rulesPreviewButton?.addEventListener('click', () => {
+    buildAutoFillPreview();
   });
 
   bodyNode.addEventListener('change', (event) => {

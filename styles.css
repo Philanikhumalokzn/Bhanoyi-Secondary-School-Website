@@ -2296,6 +2296,15 @@ body.news-read-open {
   font-size: 0.84rem;
 }
 
+.fixture-rules-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
 .fixture-creator-sport-grid {
   display: grid;
   gap: 8px;
