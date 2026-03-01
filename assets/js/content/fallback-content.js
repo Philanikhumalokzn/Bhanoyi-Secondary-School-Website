@@ -55,13 +55,21 @@ export const fallbackSiteContent = {
           sport: 'Football / Netball',
           competition: 'Inter-House Friendly',
           venue: 'Main Field',
-          teams: [
-            { id: 'cheetahs', name: 'Cheetahs' },
-            { id: 'jaguars', name: 'Jaguars' }
+          houseOptions: [
+            { id: 'house_1', name: 'House 1' },
+            { id: 'house_2', name: 'House 2' },
+            { id: 'house_3', name: 'House 3' },
+            { id: 'house_4', name: 'House 4' },
+            { id: 'house_5', name: 'House 5' }
           ],
+          leftTeamId: 'house_1',
+          rightTeamId: 'house_2',
           initialScores: {
-            cheetahs: 0,
-            jaguars: 0
+            house_1: 0,
+            house_2: 0,
+            house_3: 0,
+            house_4: 0,
+            house_5: 0
           },
           eventTypes: [
             { key: 'goal', label: 'Goal', icon: '⚽', scoreFor: 'self', allowAssist: true, playerLabel: 'Scorer' },

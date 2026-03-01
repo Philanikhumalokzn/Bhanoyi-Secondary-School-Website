@@ -513,11 +513,30 @@ const normalizeMatchEventTypes = (sectionEventTypes = []) => {
   return normalized.length ? normalized : DEFAULT_MATCH_EVENT_TYPES;
 };
 
+const getDefaultMatchPair = (teams = [], leftCandidate = '', rightCandidate = '') => {
+  const fallbackLeft = teams[0]?.id || '';
+  const resolvedLeft = teams.some((team) => team.id === leftCandidate) ? leftCandidate : fallbackLeft;
+  const firstDifferentTeam = teams.find((team) => team.id !== resolvedLeft)?.id || resolvedLeft;
+  const resolvedRight = teams.some((team) => team.id === rightCandidate) && rightCandidate !== resolvedLeft
+    ? rightCandidate
+    : firstDifferentTeam;
+
+  return {
+    leftTeamId: resolvedLeft,
+    rightTeamId: resolvedRight
+  };
+};
+
 const renderMatchLogSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
-  const teams = normalizeMatchTeams(section.teams);
+  const houseOptions = normalizeMatchTeams(
+    Array.isArray(section.houseOptions) && section.houseOptions.length
+      ? section.houseOptions
+      : section.teams
+  );
+  const teamPair = getDefaultMatchPair(houseOptions, section.leftTeamId || '', section.rightTeamId || '');
   const eventTypes = normalizeMatchEventTypes(section.eventTypes);
-  const initialScores = teams.reduce((acc, team) => {
+  const initialScores = houseOptions.reduce((acc, team) => {
     const raw = Number(section.initialScores?.[team.id]);
     acc[team.id] = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
     return acc;
@@ -528,10 +547,19 @@ const renderMatchLogSection = (section, sectionIndex) => {
     sport: (section.sport || 'Football').trim() || 'Football',
     competition: (section.competition || 'Friendly Match').trim() || 'Friendly Match',
     venue: (section.venue || '').trim(),
-    teams,
+    houseOptions,
+    leftTeamId: teamPair.leftTeamId,
+    rightTeamId: teamPair.rightTeamId,
     eventTypes,
     initialScores
   };
+
+  const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
+  const rightTeam = houseOptions.find((team) => team.id === teamPair.rightTeamId) || houseOptions[1] || leftTeam;
+  const renderHouseOptions = (selectedId) =>
+    houseOptions
+      .map((team) => `<option value="${team.id}"${team.id === selectedId ? ' selected' : ''}>${team.name}</option>`)
+      .join('');
 
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
@@ -544,25 +572,56 @@ const renderMatchLogSection = (section, sectionIndex) => {
               <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
               <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
             </div>
-            <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
+            <div class="match-log-header-actions">
+              <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
+              <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
+            </div>
           </header>
-          <div class="match-log-teams" data-match-teams>
-            ${teams
-              .map(
-                (team) => `
-                  <article class="match-log-team" data-team-id="${team.id}">
+          <div class="match-log-team-pickers">
+            <label>
+              Left column
+              <select data-team-select="left">
+                ${renderHouseOptions(leftTeam.id)}
+              </select>
+            </label>
+            <label>
+              Right column
+              <select data-team-select="right">
+                ${renderHouseOptions(rightTeam.id)}
+              </select>
+            </label>
+          </div>
+          <div class="match-log-table-wrap">
+            <table class="match-log-table">
+              <thead>
+                <tr>
+                  <th class="match-log-team-col">
                     <div class="match-log-team-head">
                       <h3 class="match-log-team-title">
-                        <span class="match-log-team-name">${team.name}</span>
-                        <span class="match-log-team-score">(<span data-team-score>${initialScores[team.id] || 0}</span>)</span>
+                        <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
+                        <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
                       </h3>
-                      <button type="button" class="btn btn-secondary" data-match-open-event data-team-id="${team.id}">Add event</button>
+                      <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
                     </div>
-                    <ol class="match-log-events" data-team-events></ol>
-                  </article>
-                `
-              )
-              .join('')}
+                  </th>
+                  <th class="match-log-minute-col">Minute</th>
+                  <th class="match-log-team-col">
+                    <div class="match-log-team-head match-log-team-head-right">
+                      <h3 class="match-log-team-title">
+                        <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
+                        <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
+                      </h3>
+                      <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody data-match-table-body>
+                <tr>
+                  <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
           <div class="match-log-modal is-hidden" data-match-modal>
             <div class="match-log-modal-backdrop" data-match-close-modal></div>
@@ -652,14 +711,14 @@ const renderMatchEventItem = (event, definition) => {
   ].filter(Boolean);
 
   return `
-    <li class="match-log-event-item" data-event-type="${event.type}">
+    <div class="match-log-event-item" data-event-type="${event.type}">
       <div class="match-log-event-main">
         <span class="match-log-event-icon" aria-hidden="true">${escapeHtmlText(definition?.icon || '•')}</span>
         <strong class="match-log-event-type">${escapeHtmlText(definition?.label || event.type)}</strong>
         ${minute ? `<span class="match-log-event-minute">${minute}</span>` : ''}
       </div>
       ${detailParts.length ? `<p class="match-log-event-detail">${escapeHtmlText(detailParts.join(' · '))}</p>` : ''}
-    </li>
+    </div>
   `;
 };
 
@@ -674,7 +733,9 @@ const hydrateMatchLog = (matchLogNode) => {
     return;
   }
 
-  const teams = normalizeMatchTeams(config.teams);
+  const teams = normalizeMatchTeams(config.houseOptions || config.teams);
+  if (teams.length < 2) return;
+  const persistedPair = getDefaultMatchPair(teams, config.leftTeamId || '', config.rightTeamId || '');
   const eventTypes = normalizeMatchEventTypes(config.eventTypes);
   const eventTypeByKey = new Map(eventTypes.map((entry) => [entry.key, entry]));
   const initialScores = teams.reduce((acc, team) => {
@@ -683,18 +744,17 @@ const hydrateMatchLog = (matchLogNode) => {
     return acc;
   }, {});
 
-  const scoreNodes = new Map();
-  const eventsNodes = new Map();
-  teams.forEach((team) => {
-    const teamNode = matchLogNode.querySelector(`[data-team-id="${team.id}"]`);
-    if (!teamNode) return;
-    scoreNodes.set(team.id, teamNode.querySelector('[data-team-score]'));
-    eventsNodes.set(team.id, teamNode.querySelector('[data-team-events]'));
-  });
-
   const statusNode = matchLogNode.querySelector('[data-match-status]');
+  const leftNameNode = matchLogNode.querySelector('[data-left-team-name]');
+  const rightNameNode = matchLogNode.querySelector('[data-right-team-name]');
+  const leftScoreNode = matchLogNode.querySelector('[data-left-team-score]');
+  const rightScoreNode = matchLogNode.querySelector('[data-right-team-score]');
+  const tableBodyNode = matchLogNode.querySelector('[data-match-table-body]');
+  const leftTeamSelect = matchLogNode.querySelector('[data-team-select="left"]');
+  const rightTeamSelect = matchLogNode.querySelector('[data-team-select="right"]');
   const modal = matchLogNode.querySelector('[data-match-modal]');
   const teamLabel = matchLogNode.querySelector('[data-match-modal-team]');
+  const exportButton = matchLogNode.querySelector('[data-match-export]');
   const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
   const detailsStep = matchLogNode.querySelector('[data-match-step="details"]');
   const typeListNode = matchLogNode.querySelector('[data-match-event-types]');
@@ -718,9 +778,11 @@ const hydrateMatchLog = (matchLogNode) => {
 
   const storageKey = getMatchStorageKey(matchLogNode.dataset.matchLogId || config.sectionKey || 'sports_log');
   let state = {
-    events: []
+    events: [],
+    leftTeamId: persistedPair.leftTeamId,
+    rightTeamId: persistedPair.rightTeamId
   };
-  let activeTeamId = teams[0]?.id || '';
+  let activeTeamId = state.leftTeamId;
   let selectedTypeKey = '';
 
   const saveState = () => {
@@ -737,7 +799,10 @@ const hydrateMatchLog = (matchLogNode) => {
       if (!stored) return;
       const parsed = JSON.parse(stored);
       if (!parsed || !Array.isArray(parsed.events)) return;
+      const pair = getDefaultMatchPair(teams, parsed.leftTeamId || state.leftTeamId, parsed.rightTeamId || state.rightTeamId);
       state = {
+        leftTeamId: pair.leftTeamId,
+        rightTeamId: pair.rightTeamId,
         events: parsed.events
           .filter((entry) => entry && typeof entry === 'object' && eventTypeByKey.has(entry.type))
           .map((entry) => ({
@@ -754,13 +819,29 @@ const hydrateMatchLog = (matchLogNode) => {
           }))
       };
     } catch {
-      state = { events: [] };
+      state = {
+        events: [],
+        leftTeamId: persistedPair.leftTeamId,
+        rightTeamId: persistedPair.rightTeamId
+      };
     }
   };
 
-  const computeScores = () => {
+  const getCurrentTeams = () => {
+    const pair = getDefaultMatchPair(teams, state.leftTeamId, state.rightTeamId);
+    const leftTeam = teams.find((team) => team.id === pair.leftTeamId) || teams[0];
+    const rightTeam = teams.find((team) => team.id === pair.rightTeamId) || teams.find((team) => team.id !== leftTeam.id) || leftTeam;
+    return {
+      leftTeam,
+      rightTeam
+    };
+  };
+
+  const computeScores = (leftTeamId, rightTeamId) => {
     const scores = { ...initialScores };
+    const selectedTeamIds = new Set([leftTeamId, rightTeamId]);
     state.events.forEach((event) => {
+      if (!selectedTeamIds.has(event.teamId)) return;
       const definition = eventTypeByKey.get(event.type);
       if (!definition) return;
 
@@ -770,42 +851,121 @@ const hydrateMatchLog = (matchLogNode) => {
       }
 
       if (definition.scoreFor === 'opponent') {
-        const opponentTeamId = getOtherTeamId(event.teamId, teams);
+        const opponentTeamId = getOtherTeamId(event.teamId, [
+          { id: leftTeamId },
+          { id: rightTeamId }
+        ]);
         scores[opponentTeamId] = (scores[opponentTeamId] || 0) + 1;
       }
     });
     return scores;
   };
 
-  const render = () => {
-    const scores = computeScores();
+  const escapeCsvValue = (value) => {
+    const normalized = String(value ?? '').replace(/"/g, '""');
+    return `"${normalized}"`;
+  };
 
-    teams.forEach((team) => {
-      const scoreNode = scoreNodes.get(team.id);
-      if (scoreNode) {
-        scoreNode.textContent = String(scores[team.id] || 0);
+  const buildMatchExportCsv = () => {
+    const { leftTeam, rightTeam } = getCurrentTeams();
+    const scores = computeScores(leftTeam.id, rightTeam.id);
+    const teamSummary = `${leftTeam.name} ${scores[leftTeam.id] || 0} - ${scores[rightTeam.id] || 0} ${rightTeam.name}`;
+
+    const lines = [
+      ['Sport', config.sport || ''].map(escapeCsvValue).join(','),
+      ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
+      ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
+      ['Score', teamSummary].map(escapeCsvValue).join(','),
+      '',
+      ['Team', 'Minute', 'Event', 'Player', 'Jersey', 'Assist', 'Notes'].map(escapeCsvValue).join(',')
+    ];
+
+    const events = state.events
+      .filter((event) => event.teamId === leftTeam.id || event.teamId === rightTeam.id)
+      .sort((left, right) => {
+      const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+      const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+      if (leftMinute === rightMinute) {
+        return (left.createdAt || 0) - (right.createdAt || 0);
       }
+      return leftMinute - rightMinute;
+      });
 
-      const eventListNode = eventsNodes.get(team.id);
-      if (!eventListNode) return;
-
-      const teamEvents = state.events
-        .filter((entry) => entry.teamId === team.id)
-        .sort((left, right) => {
-          const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
-          const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
-          if (leftMinute === rightMinute) {
-            return (left.createdAt || 0) - (right.createdAt || 0);
-          }
-          return leftMinute - rightMinute;
-        });
-
-      eventListNode.innerHTML = teamEvents.length
-        ? teamEvents.map((entry) => renderMatchEventItem(entry, eventTypeByKey.get(entry.type))).join('')
-        : '<li class="match-log-empty">No events logged yet.</li>';
+    events.forEach((event) => {
+      const definition = eventTypeByKey.get(event.type);
+      const teamName = event.teamId === leftTeam.id ? leftTeam.name : rightTeam.name;
+      const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
+      const row = [
+        teamName,
+        minute,
+        definition?.label || event.type,
+        event.playerName || '',
+        event.jerseyNumber || '',
+        event.assistName || '',
+        event.notes || ''
+      ];
+      lines.push(row.map(escapeCsvValue).join(','));
     });
 
-    const eventCount = state.events.length;
+    return lines.join('\n');
+  };
+
+  const render = () => {
+    const { leftTeam, rightTeam } = getCurrentTeams();
+    state.leftTeamId = leftTeam.id;
+    state.rightTeamId = rightTeam.id;
+    const scores = computeScores(leftTeam.id, rightTeam.id);
+
+    if (leftNameNode) leftNameNode.textContent = leftTeam.name;
+    if (rightNameNode) rightNameNode.textContent = rightTeam.name;
+    if (leftScoreNode) leftScoreNode.textContent = String(scores[leftTeam.id] || 0);
+    if (rightScoreNode) rightScoreNode.textContent = String(scores[rightTeam.id] || 0);
+
+    if (leftTeamSelect instanceof HTMLSelectElement && leftTeamSelect.value !== leftTeam.id) {
+      leftTeamSelect.value = leftTeam.id;
+    }
+    if (rightTeamSelect instanceof HTMLSelectElement && rightTeamSelect.value !== rightTeam.id) {
+      rightTeamSelect.value = rightTeam.id;
+    }
+
+    const sortedEvents = state.events
+      .filter((event) => event.teamId === leftTeam.id || event.teamId === rightTeam.id)
+      .sort((left, right) => {
+        const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+        const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+        if (leftMinute === rightMinute) {
+          return (left.createdAt || 0) - (right.createdAt || 0);
+        }
+        return leftMinute - rightMinute;
+      });
+
+    const leftEvents = sortedEvents.filter((event) => event.teamId === leftTeam.id);
+    const rightEvents = sortedEvents.filter((event) => event.teamId === rightTeam.id);
+
+    if (tableBodyNode) {
+      const rowCount = Math.max(leftEvents.length, rightEvents.length);
+      if (!rowCount) {
+        tableBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="3">No events logged yet.</td></tr>';
+      } else {
+        const rows = [];
+        for (let index = 0; index < rowCount; index += 1) {
+          const leftEvent = leftEvents[index] || null;
+          const rightEvent = rightEvents[index] || null;
+          const referenceEvent = leftEvent || rightEvent;
+          const minuteLabel = referenceEvent ? formatMatchMinuteLabel(referenceEvent.minute, referenceEvent.stoppage) : '';
+          rows.push(`
+            <tr>
+              <td>${leftEvent ? renderMatchEventItem(leftEvent, eventTypeByKey.get(leftEvent.type)) : ''}</td>
+              <td class="match-log-minute-cell">${escapeHtmlText(minuteLabel || '—')}</td>
+              <td>${rightEvent ? renderMatchEventItem(rightEvent, eventTypeByKey.get(rightEvent.type)) : ''}</td>
+            </tr>
+          `);
+        }
+        tableBodyNode.innerHTML = rows.join('');
+      }
+    }
+
+    const eventCount = sortedEvents.length;
     if (statusNode) {
       statusNode.textContent = eventCount ? `${eventCount} event${eventCount === 1 ? '' : 's'} logged.` : 'No events logged yet.';
     }
@@ -921,18 +1081,78 @@ const hydrateMatchLog = (matchLogNode) => {
     }
   });
 
-  matchLogNode.querySelectorAll('[data-match-open-event]').forEach((button) => {
+  const openButtons = Array.from(matchLogNode.querySelectorAll('[data-match-open-event-side]'));
+  openButtons.forEach((button) => {
     button.addEventListener('click', () => {
-      const teamId = (button.dataset.teamId || '').trim();
+      const side = (button.dataset.matchOpenEventSide || '').trim();
+      const teamId = side === 'right' ? state.rightTeamId : state.leftTeamId;
       if (!teamId) return;
       openModalForTeam(teamId);
     });
+  });
+
+  const syncTeamPair = (side, selectedTeamId) => {
+    if (!teams.some((team) => team.id === selectedTeamId)) return;
+
+    const previousLeft = state.leftTeamId;
+    const previousRight = state.rightTeamId;
+
+    if (side === 'left') {
+      state.leftTeamId = selectedTeamId;
+      if (selectedTeamId === previousRight) {
+        state.rightTeamId = previousLeft === selectedTeamId
+          ? (teams.find((team) => team.id !== selectedTeamId)?.id || selectedTeamId)
+          : previousLeft;
+      }
+    } else {
+      state.rightTeamId = selectedTeamId;
+      if (selectedTeamId === previousLeft) {
+        state.leftTeamId = previousRight === selectedTeamId
+          ? (teams.find((team) => team.id !== selectedTeamId)?.id || selectedTeamId)
+          : previousRight;
+      }
+    }
+
+    const normalizedPair = getDefaultMatchPair(teams, state.leftTeamId, state.rightTeamId);
+    state.leftTeamId = normalizedPair.leftTeamId;
+    state.rightTeamId = normalizedPair.rightTeamId;
+    saveState();
+    render();
+  };
+
+  leftTeamSelect?.addEventListener('change', () => {
+    if (!(leftTeamSelect instanceof HTMLSelectElement)) return;
+    syncTeamPair('left', leftTeamSelect.value);
+  });
+
+  rightTeamSelect?.addEventListener('change', () => {
+    if (!(rightTeamSelect instanceof HTMLSelectElement)) return;
+    syncTeamPair('right', rightTeamSelect.value);
   });
 
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
     state = { events: [] };
     saveState();
     render();
+  });
+
+  exportButton?.addEventListener('click', () => {
+    const csv = buildMatchExportCsv();
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const safeCompetition = (config.competition || 'match')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    anchor.href = url;
+    anchor.download = `${safeCompetition || 'match'}-event-log-${stamp}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   });
 
   loadState();
