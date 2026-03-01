@@ -4863,6 +4863,23 @@ const hydrateSchoolCalendar = (calendarShell) => {
     renderDayOverlayList(activeOverlayDate);
   };
 
+  const handleDaySelection = (dateString) => {
+    const normalized = normalizeDateString(dateString);
+    if (!normalized) return;
+
+    showDayOverlay(normalized);
+    if (isAdminMode && form instanceof HTMLFormElement) {
+      clearForm();
+      const startInput = form.querySelector('input[name="start"]');
+      if (startInput instanceof HTMLInputElement) {
+        startInput.value = normalized;
+      }
+      if (statusNode) {
+        statusNode.textContent = 'Ready to add a new event for selected date.';
+      }
+    }
+  };
+
   swatchWrap?.addEventListener('click', (event) => {
     const button = (event.target instanceof HTMLElement)
       ? event.target.closest('.calendar-color-swatch')
@@ -4904,6 +4921,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
     plugins: [dayGridPlugin, interactionPlugin],
     initialView: 'dayGridMonth',
     height: 'auto',
+    dayMaxEvents: 3,
+    eventOrder: 'start,-duration,allDay,title',
     editable: isAdminMode,
     eventStartEditable: isAdminMode,
     events,
@@ -4937,17 +4956,27 @@ const hydrateSchoolCalendar = (calendarShell) => {
       writeEventToForm(info.event, info.el);
     },
     dateClick: (info) => {
-      showDayOverlay(info.dateStr);
-      if (isAdminMode && form instanceof HTMLFormElement) {
-        clearForm();
-        const startInput = form.querySelector('input[name="start"]');
-        if (startInput instanceof HTMLInputElement) {
-          startInput.value = info.dateStr;
-        }
-        if (statusNode) {
-          statusNode.textContent = 'Ready to add a new event for selected date.';
-        }
-      }
+      handleDaySelection(info.dateStr);
+    },
+    dayCellDidMount: (info) => {
+      const top = info.el.querySelector('.fc-daygrid-day-top');
+      if (!(top instanceof HTMLElement)) return;
+      top.classList.add('calendar-day-click-zone');
+      top.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handleDaySelection(info.date);
+      });
+    },
+    moreLinkClick: (info) => {
+      handleDaySelection(info.date);
+      return 'none';
+    },
+    datesSet: () => {
+      renderDayEventCountBadges();
+    },
+    eventsSet: () => {
+      renderDayEventCountBadges();
     },
     eventDrop: (info) => {
       if (!isAdminMode) {
@@ -5005,9 +5034,39 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
   });
 
+  const renderDayEventCountBadges = () => {
+    const allEvents = calendar
+      .getEvents()
+      .filter((entry) => entry.display !== 'background');
+
+    const dayCells = Array.from(calendarRoot.querySelectorAll('.fc-daygrid-day[data-date]'));
+    dayCells.forEach((cell) => {
+      if (!(cell instanceof HTMLElement)) return;
+      const dateString = String(cell.dataset.date || '').trim();
+      const frame = cell.querySelector('.fc-daygrid-day-frame');
+      if (!dateString || !(frame instanceof HTMLElement)) return;
+
+      const existing = frame.querySelector('[data-calendar-day-total-badge]');
+      if (existing instanceof HTMLElement) {
+        existing.remove();
+      }
+
+      const totalForDay = allEvents.filter((entry) => eventOccursOnDate(entry, dateString)).length;
+      if (totalForDay <= 3) return;
+
+      const badge = document.createElement('span');
+      badge.className = 'calendar-day-total-badge';
+      badge.setAttribute('data-calendar-day-total-badge', 'true');
+      badge.setAttribute('aria-label', `${totalForDay} events scheduled for this day`);
+      badge.textContent = String(totalForDay);
+      frame.appendChild(badge);
+    });
+  };
+
   calendar.render();
   renderTermBackgroundEvents(calendar);
   reconcileFixtureEvents();
+  renderDayEventCountBadges();
 
   window.addEventListener('storage', (event) => {
     if (!event.key) return;

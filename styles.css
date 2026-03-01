@@ -2873,6 +2873,36 @@ body.news-read-open {
   color: var(--text);
 }
 
+.fc .fc-daygrid-day-frame {
+  position: relative;
+  overflow: visible;
+}
+
+.fc .fc-daygrid-day-top.calendar-day-click-zone {
+  min-height: 20px;
+  padding-right: 20px;
+  cursor: pointer;
+}
+
+.calendar-day-total-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--primary);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+  z-index: 3;
+  pointer-events: none;
+}
+
 .calendar-event-content {
   display: flex;
   align-items: center;
