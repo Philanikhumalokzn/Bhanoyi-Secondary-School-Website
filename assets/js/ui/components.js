@@ -1492,6 +1492,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const fixtureRulesStorageKey = `bhanoyi.fixtureDateRules.${fixtureSectionKey}`;
+  const defaultRulesBucket = 'default';
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   let fixtureDates = {};
 
@@ -1525,6 +1526,46 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
     return parsed;
+  };
+
+  const activeRulesBucket = () => {
+    const sportValue = String(sportSelect instanceof HTMLSelectElement ? sportSelect.value : '').trim();
+    return sportValue === 'soccer' || sportValue === 'netball' ? sportValue : defaultRulesBucket;
+  };
+
+  const loadRulesBundle = () => {
+    try {
+      const raw = localStorage.getItem(fixtureRulesStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const saveRulesBundle = (bundle) => {
+    const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
+    localStorage.setItem(fixtureRulesStorageKey, JSON.stringify(safeBundle));
+  };
+
+  const buildDateRulesPayload = (rules) => ({
+    startDate: rules.startDate,
+    gapDays: rules.gapDays,
+    matchesPerDay: rules.matchesPerDay,
+    kickoffTime: rules.kickoffTime,
+    kickoffGapMinutes: rules.kickoffGapMinutes,
+    weekdays: rules.weekdays,
+    useTerms: rules.useTerms,
+    avoidAcademic: rules.avoidAcademic,
+    exclusionRaw: rules.exclusionRaw
+  });
+
+  const persistDateRulesForBucket = (bucket, rules) => {
+    const normalizedBucket = String(bucket || '').trim() || defaultRulesBucket;
+    const bundle = loadRulesBundle();
+    bundle[normalizedBucket] = buildDateRulesPayload(rules);
+    saveRulesBundle(bundle);
   };
 
   const normalizeDateOnly = (value) => {
@@ -1755,28 +1796,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return false;
     }
 
-    const payload = {
-      startDate: collected.rules.startDate,
-      gapDays: collected.rules.gapDays,
-      matchesPerDay: collected.rules.matchesPerDay,
-      kickoffTime: collected.rules.kickoffTime,
-      kickoffGapMinutes: collected.rules.kickoffGapMinutes,
-      weekdays: collected.rules.weekdays,
-      useTerms: collected.rules.useTerms,
-      avoidAcademic: collected.rules.avoidAcademic,
-      exclusionRaw: collected.rules.exclusionRaw
-    };
-
-    localStorage.setItem(fixtureRulesStorageKey, JSON.stringify(payload));
+    persistDateRulesForBucket(activeRulesBucket(), collected.rules);
     if (rulesStatusNode) rulesStatusNode.textContent = 'Date rules saved.';
     return true;
   };
 
-  const hydrateDateRules = () => {
+  const hydrateDateRules = (bucket = activeRulesBucket()) => {
     try {
-      const raw = localStorage.getItem(fixtureRulesStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
+      const bundle = loadRulesBundle();
+      const normalizedBucket = String(bucket || '').trim() || defaultRulesBucket;
+      const parsed = bundle[normalizedBucket] || bundle[defaultRulesBucket];
       if (!parsed || typeof parsed !== 'object') return;
 
       if (ruleStartDateInput instanceof HTMLInputElement) {
@@ -1848,6 +1877,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!collected.ok) {
       return { ok: false, message: collected.message };
     }
+
+    persistDateRulesForBucket(activeRulesBucket(), collected.rules);
 
     const rules = collected.rules;
     let cursor = rules.startDate;
@@ -2923,6 +2954,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   sportSelect?.addEventListener('change', () => {
+    hydrateDateRules(activeRulesBucket());
     refreshSportPanelState();
     generateFixtures();
   });
