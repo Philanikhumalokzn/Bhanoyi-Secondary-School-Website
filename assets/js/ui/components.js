@@ -444,11 +444,6 @@ const resolveContactInformationSection = (section, context = {}) => {
     return section;
   }
 
-  const title = (section.title || '').trim().toLowerCase();
-  if (title !== 'contact information') {
-    return section;
-  }
-
   return {
     ...section,
     editable: false,
@@ -465,6 +460,66 @@ const resolveContactInformationSection = (section, context = {}) => {
       }
       return item;
     })
+  };
+};
+
+const ADMIN_SECTION_COPY_BY_KEY = Object.freeze({
+  latest_news: { title: 'Manage Latest News' },
+  quick_links: { title: 'Manage Quick Links' },
+  upcoming_events: { title: 'Manage Upcoming Events' },
+  school_culture: { title: 'Manage School Culture' },
+  academic_programme: { title: 'Manage Academic Programmes' },
+  sports_match_log: {
+    title: 'Log Live Match Events',
+    body: 'Sports committee can log live football or netball match events as they happen. Score updates automatically when goals are logged.'
+  },
+  sports_fixture_creator: {
+    title: 'Create Season Fixtures',
+    body: 'Generate the full home-and-away round-robin schedule for the selected houses.'
+  },
+  sporting_codes: { title: 'Manage Sporting Codes' },
+  school_calendar: {
+    title: 'Manage School Calendar',
+    body: 'Admins can add and manage school events here. Fixture date edits from Sports open this calendar.'
+  },
+  admission_support: { title: 'Manage Admission Support' },
+  policy_categories: { title: 'Manage Policy Categories' },
+  public_information_areas: { title: 'Manage Public Information Areas' }
+});
+
+const ADMIN_SECTION_TITLE_BY_PUBLIC = Object.freeze({
+  'check notices & announcements': 'Manage Notices & Announcements',
+  'discover vision and values': 'Manage Vision and Values',
+  'review curriculum information': 'Manage Curriculum Information',
+  'plan training and fixtures': 'Manage Training and Fixtures',
+  'check application requirements': 'Manage Application Requirements',
+  'download admission forms & documents': 'Manage Admission Documents',
+  'download policy documents': 'Manage Policy Documents',
+  'find contact information': 'Manage Contact Information',
+  'check office hours': 'Manage Office Hours'
+});
+
+const resolveAudienceSectionCopy = (section, context = {}) => {
+  if (!isAdminModeEnabled()) {
+    return section;
+  }
+
+  const sectionKey = String(section.sectionKey || '').trim();
+  const byKey = sectionKey ? ADMIN_SECTION_COPY_BY_KEY[sectionKey] : null;
+  const normalizedTitle = String(section.title || '').trim().toLowerCase();
+  const titleByPublic = normalizedTitle ? ADMIN_SECTION_TITLE_BY_PUBLIC[normalizedTitle] : '';
+
+  const nextTitle = byKey?.title || titleByPublic || section.title;
+  const nextBody = byKey?.body || section.body;
+
+  if (nextTitle === section.title && nextBody === section.body) {
+    return section;
+  }
+
+  return {
+    ...section,
+    title: nextTitle,
+    body: nextBody
   };
 };
 
@@ -5751,7 +5806,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
 const renderSectionByType = (section, sectionIndex, context = {}) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
-  const effectiveSection = resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context);
+  const effectiveSection = resolveAudienceSectionCopy(
+    resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context),
+    context
+  );
 
   if (effectiveSection.type === 'calendar') {
     return renderSchoolCalendarSection(effectiveSection, sectionIndex);
