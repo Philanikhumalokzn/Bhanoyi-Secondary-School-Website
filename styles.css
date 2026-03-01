@@ -323,25 +323,30 @@ h1 {
 
 .section-overlay-launcher {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border-style: dashed;
   background: color-mix(in srgb, var(--surface-alt) 58%, var(--surface));
+  padding: 16px;
 }
 
 .section-overlay-launcher h3 {
   margin: 0;
-  font-size: 1.02rem;
+  font-size: 1.06rem;
+  line-height: 1.25;
 }
 
 .section-overlay-launcher p {
   margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .section-overlay-launcher-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
 .is-collapsed-section {
@@ -358,6 +363,10 @@ h1 {
   max-height: min(86vh, 960px);
   overflow: auto;
   z-index: 1110;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 14px;
   box-shadow: 0 16px 30px rgba(13, 34, 56, 0.22);
 }
 
@@ -375,24 +384,29 @@ body.section-overlay-open {
 .section-overlay-inline-head {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
 .sub-overlay-launcher-card {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border-style: dashed;
   background: color-mix(in srgb, var(--surface-alt) 62%, var(--surface));
+  padding: 14px;
 }
 
 .sub-overlay-launcher-card h3 {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 1rem;
+  line-height: 1.25;
 }
 
 .sub-overlay-launcher-card p {
   margin: 0;
   color: var(--muted);
   font-size: 0.86rem;
+  line-height: 1.42;
 }
 
 .sub-overlay-panel {
@@ -412,8 +426,38 @@ body.section-overlay-open {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
-  padding: 12px;
+  padding: 14px;
   box-shadow: 0 14px 28px rgba(13, 34, 56, 0.2);
+}
+
+.sub-overlay-inline-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-overlay-close-btn,
+.sub-overlay-inline-head .btn,
+.section-overlay-launcher-actions .btn {
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.section-overlay-close-btn:hover,
+.section-overlay-close-btn:focus-visible,
+.sub-overlay-inline-head .btn:hover,
+.sub-overlay-inline-head .btn:focus-visible,
+.section-overlay-launcher-actions .btn:hover,
+.section-overlay-launcher-actions .btn:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(13, 34, 56, 0.12);
+}
+
+.section-overlay-close-btn:active,
+.sub-overlay-inline-head .btn:active,
+.section-overlay-launcher-actions .btn:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: 0 2px 6px rgba(13, 34, 56, 0.14);
 }
 
 .sub-overlay-runtime-backdrop {
