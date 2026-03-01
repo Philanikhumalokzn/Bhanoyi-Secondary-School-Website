@@ -1595,6 +1595,103 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const teamNameById = (teamId) => houseOptions.find((team) => team.id === teamId)?.name || teamId;
 
+  const orderedPairKey = (homeId, awayId) => `${homeId}__${awayId}`;
+
+  const splitOrderedPairKey = (key) => {
+    const [homeId, awayId] = String(key || '').split('__');
+    return { homeId: String(homeId || '').trim(), awayId: String(awayId || '').trim() };
+  };
+
+  const reconcileRoundRobinAfterManualEdit = ({ fixtures, teamIds, editedIndex, nextHomeId, nextAwayId }) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (normalizedTeams.length < 2) {
+      return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
+    }
+
+    if (!normalizedTeams.includes(nextHomeId) || !normalizedTeams.includes(nextAwayId)) {
+      return { ok: false, message: 'Selected teams must be from the active fixture team list.' };
+    }
+
+    if (nextHomeId === nextAwayId) {
+      return { ok: false, message: 'Home and away teams must be different.' };
+    }
+
+    const allOrderedPairs = [];
+    normalizedTeams.forEach((homeId) => {
+      normalizedTeams.forEach((awayId) => {
+        if (homeId === awayId) return;
+        allOrderedPairs.push(orderedPairKey(homeId, awayId));
+      });
+    });
+
+    if (fixtures.length !== allOrderedPairs.length) {
+      return {
+        ok: false,
+        message: 'Fixture count does not match a full home-and-away round-robin for selected teams.'
+      };
+    }
+
+    const availablePairs = new Set(allOrderedPairs);
+    const editedPairKey = orderedPairKey(nextHomeId, nextAwayId);
+    if (!availablePairs.has(editedPairKey)) {
+      return { ok: false, message: 'Unable to apply this edit while preserving round-robin rules.' };
+    }
+
+    const repairedFixtures = fixtures.map((entry) => ({ ...entry }));
+    repairedFixtures[editedIndex] = {
+      ...repairedFixtures[editedIndex],
+      homeId: nextHomeId,
+      awayId: nextAwayId
+    };
+    availablePairs.delete(editedPairKey);
+
+    for (let index = 0; index < repairedFixtures.length; index += 1) {
+      if (index === editedIndex) continue;
+
+      const currentPairKey = orderedPairKey(repairedFixtures[index].homeId, repairedFixtures[index].awayId);
+      let resolvedPairKey = '';
+
+      if (availablePairs.has(currentPairKey)) {
+        resolvedPairKey = currentPairKey;
+      } else {
+        resolvedPairKey = availablePairs.values().next().value || '';
+      }
+
+      if (!resolvedPairKey) {
+        return { ok: false, message: 'Could not auto-adjust fixtures to a valid round-robin schedule.' };
+      }
+
+      availablePairs.delete(resolvedPairKey);
+      const resolvedPair = splitOrderedPairKey(resolvedPairKey);
+      repairedFixtures[index] = {
+        ...repairedFixtures[index],
+        homeId: resolvedPair.homeId,
+        awayId: resolvedPair.awayId
+      };
+    }
+
+    if (availablePairs.size) {
+      return { ok: false, message: 'Round-robin auto-adjustment left unmatched fixture pairs.' };
+    }
+
+    const changedIndexes = repairedFixtures
+      .map((entry, index) => ({
+        index,
+        changed: entry.homeId !== fixtures[index].homeId || entry.awayId !== fixtures[index].awayId
+      }))
+      .filter((entry) => entry.changed)
+      .map((entry) => entry.index);
+
+    const affectedOtherCount = changedIndexes.filter((index) => index !== editedIndex).length;
+
+    return {
+      ok: true,
+      fixtures: repairedFixtures,
+      affectedOtherCount,
+      changedCount: changedIndexes.length
+    };
+  };
+
   const renderFixtures = (fixtures) => {
     if (!fixtures.length) {
       bodyNode.innerHTML = '<tr><td colspan="7" class="fixture-empty">Select sport and at least two teams to generate fixtures.</td></tr>';
@@ -1606,8 +1703,15 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
+    const activeTeamIds = Array.from(new Set(selectedTeamIds()));
+    const fallbackFixtureTeamIds = Array.from(
+      new Set(fixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))
+    );
+    const effectiveTeamIds = activeTeamIds.length ? activeTeamIds : fallbackFixtureTeamIds;
+    const effectiveTeamOptions = houseOptions.filter((team) => effectiveTeamIds.includes(team.id));
+
     const teamOptionMarkup = (selectedId) =>
-      houseOptions
+      (effectiveTeamOptions.length ? effectiveTeamOptions : houseOptions)
         .map(
           (team) => `<option value="${escapeHtmlAttribute(team.id)}" ${team.id === selectedId ? 'selected' : ''}>${escapeHtmlText(team.name)}</option>`
         )
@@ -1778,32 +1882,86 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     if (target.matches('[data-fixture-home-select]') && target instanceof HTMLSelectElement) {
-      const nextHome = String(target.value || '').trim();
-      if (!nextHome) return;
-      if (nextHome === fixture.awayId) {
-        if (statusNode) statusNode.textContent = 'Home and away teams must be different.';
+      const homeSelect = row.querySelector('[data-fixture-home-select]');
+      const awaySelect = row.querySelector('[data-fixture-away-select]');
+      const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
+      const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
+      if (!nextHome || !nextAway) return;
+
+      const repairResult = reconcileRoundRobinAfterManualEdit({
+        fixtures: lastFixtures,
+        teamIds: selectedTeamIds(),
+        editedIndex: rowIndex,
+        nextHomeId: nextHome,
+        nextAwayId: nextAway
+      });
+
+      if (!repairResult.ok) {
+        if (statusNode) statusNode.textContent = repairResult.message;
         renderFixtures(lastFixtures);
         return;
       }
-      fixture.homeId = nextHome;
+
+      if (repairResult.affectedOtherCount > 0) {
+        const proceed = window.confirm(
+          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+        );
+        if (!proceed) {
+          renderFixtures(lastFixtures);
+          return;
+        }
+      }
+
+      lastFixtures = repairResult.fixtures;
       saveFixtureCatalog(lastFixtures);
       renderFixtures(lastFixtures);
-      if (statusNode) statusNode.textContent = 'Fixture home team updated.';
+      if (statusNode) {
+        statusNode.textContent = repairResult.affectedOtherCount > 0
+          ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
+          : 'Fixture updated with round-robin integrity preserved.';
+      }
       return;
     }
 
     if (target.matches('[data-fixture-away-select]') && target instanceof HTMLSelectElement) {
-      const nextAway = String(target.value || '').trim();
-      if (!nextAway) return;
-      if (nextAway === fixture.homeId) {
-        if (statusNode) statusNode.textContent = 'Home and away teams must be different.';
+      const homeSelect = row.querySelector('[data-fixture-home-select]');
+      const awaySelect = row.querySelector('[data-fixture-away-select]');
+      const nextHome = String(homeSelect instanceof HTMLSelectElement ? homeSelect.value : '').trim();
+      const nextAway = String(awaySelect instanceof HTMLSelectElement ? awaySelect.value : '').trim();
+      if (!nextHome || !nextAway) return;
+
+      const repairResult = reconcileRoundRobinAfterManualEdit({
+        fixtures: lastFixtures,
+        teamIds: selectedTeamIds(),
+        editedIndex: rowIndex,
+        nextHomeId: nextHome,
+        nextAwayId: nextAway
+      });
+
+      if (!repairResult.ok) {
+        if (statusNode) statusNode.textContent = repairResult.message;
         renderFixtures(lastFixtures);
         return;
       }
-      fixture.awayId = nextAway;
+
+      if (repairResult.affectedOtherCount > 0) {
+        const proceed = window.confirm(
+          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+        );
+        if (!proceed) {
+          renderFixtures(lastFixtures);
+          return;
+        }
+      }
+
+      lastFixtures = repairResult.fixtures;
       saveFixtureCatalog(lastFixtures);
       renderFixtures(lastFixtures);
-      if (statusNode) statusNode.textContent = 'Fixture away team updated.';
+      if (statusNode) {
+        statusNode.textContent = repairResult.affectedOtherCount > 0
+          ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
+          : 'Fixture updated with round-robin integrity preserved.';
+      }
     }
   });
 
