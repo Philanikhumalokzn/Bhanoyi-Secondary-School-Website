@@ -356,15 +356,21 @@ h1 {
   overflow: visible;
 }
 
-.page-section-collapsible.is-expanded {
-  position: relative;
-  z-index: 40;
-}
-
 .page-section-collapsible.is-expanded .container,
 .page-section-collapsible.is-expanded .page-section-collapsible-body,
 .page-section-collapsible.is-expanded .page-section-collapsible-body > * {
   overflow: visible;
+}
+
+:where(
+  .page-section-collapsible.is-expanded,
+  .sports-workflow-step.is-expanded,
+  .calendar-workflow-step.is-expanded
+) {
+  position: relative;
+  z-index: 200;
+  overflow: visible;
+  isolation: isolate;
 }
 
 .section-alt {
@@ -2400,7 +2406,6 @@ body.news-read-open {
 }
 
 .sports-workflow-step.is-expanded {
-  z-index: 80;
   overflow: visible;
 }
 
@@ -2422,7 +2427,7 @@ body.news-read-open {
   overflow-y: auto;
   overscroll-behavior: contain;
   position: relative;
-  z-index: 81;
+  z-index: 201;
 }
 
 .fixture-creator-actions {
@@ -2746,7 +2751,6 @@ body.news-read-open {
 }
 
 .calendar-workflow-step.is-expanded {
-  z-index: 80;
   overflow: visible;
 }
 
@@ -2768,7 +2772,7 @@ body.news-read-open {
   overflow-y: auto;
   overscroll-behavior: contain;
   position: relative;
-  z-index: 81;
+  z-index: 201;
 }
 
 .school-calendar-admin {
