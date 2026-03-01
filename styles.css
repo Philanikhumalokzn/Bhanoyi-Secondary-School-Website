@@ -2286,6 +2286,12 @@ body.news-read-open {
   color: var(--muted);
 }
 
+.fixture-creator-flow {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .fixture-creator-status {
   font-size: 0.86rem;
 }

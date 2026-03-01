@@ -1254,11 +1254,12 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                 <input type="checkbox" data-fixture-auto-fill />
                 <span>Auto-fill dates (use rules)</span>
               </label>
-              <button type="button" class="btn btn-secondary" data-fixture-generate>Generate fixtures</button>
+              <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate draft fixtures</button>
               <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
               <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
             </div>
           </header>
+          <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
           <div class="fixture-date-rules" data-fixture-date-rules>
             <h3>Date Rules for Auto-fill</h3>
             <div class="fixture-creator-sport-grid">
@@ -1318,7 +1319,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               <textarea rows="3" data-fixture-rule-exclusions placeholder="One range per line, e.g. 2026-04-01 to 2026-04-05"></textarea>
             </label>
             <div class="fixture-creator-actions">
-              <button type="button" class="btn btn-secondary" data-fixture-rules-preview>Preview candidate dates</button>
+              <button type="button" class="btn btn-secondary" data-fixture-rules-preview>2) Preview candidate dates</button>
               <button type="button" class="btn btn-secondary" data-fixture-rules-save>Save rules</button>
             </div>
             <p class="fixture-creator-status" data-fixture-rules-status aria-live="polite"></p>
@@ -1388,8 +1389,8 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
           <div class="fixture-approval-panel is-hidden" data-fixture-approval-panel>
             <p class="fixture-creator-status" data-fixture-approval-status aria-live="polite"></p>
             <div class="fixture-creator-actions">
-              <button type="button" class="btn btn-secondary" data-fixture-approve-resolved>Approve after fixes</button>
-              <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>Approve with unfairnesses</button>
+              <button type="button" class="btn btn-secondary" data-fixture-approve-resolved>4) Finalize & sync (after fixes)</button>
+              <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>4) Finalize & sync (approve with unfairnesses)</button>
             </div>
           </div>
           <div class="fixture-table-wrap">
@@ -1606,6 +1607,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
     } catch {
       return;
     }
+  };
+
+  const dispatchFixtureSyncEvent = () => {
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:fixtures-updated', {
+        detail: {
+          sectionKey: fixtureSectionKey
+        }
+      })
+    );
+  };
+
+  const persistFixtureDatesToStorage = () => {
+    localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+    dispatchFixtureSyncEvent();
   };
 
   const getFixtureId = (fixture) =>
@@ -2212,7 +2228,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     renderAutoFillPreview(lastFixtures, result.dateMap, result.matchesPerDay);
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = `Candidate dates previewed (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Apply by generating with auto-fill enabled.`;
+      rulesStatusNode.textContent = `Candidate dates previewed (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Click "Apply previewed dates" to stage them in draft.`;
     }
   };
 
@@ -2228,20 +2244,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ...fixtureDates,
       ...result.dateMap
     };
-    localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
-    window.dispatchEvent(
-      new CustomEvent('bhanoyi:fixtures-updated', {
-        detail: {
-          sectionKey: fixtureSectionKey
-        }
-      })
-    );
+
+    const isDraftOnly = isAdminMode && pendingFixtureApproval;
+    if (!isDraftOnly) {
+      persistFixtureDatesToStorage();
+    }
 
     if (statusNode) {
-      statusNode.textContent = `Fixtures generated and ${fixtures.length} dates auto-filled using rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      statusNode.textContent = isDraftOnly
+        ? `Draft fixtures updated: ${fixtures.length} dates auto-filled (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync calendar.`
+        : `Fixtures generated and ${fixtures.length} dates auto-filled using rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      rulesStatusNode.textContent = isDraftOnly
+        ? `Auto-fill completed in draft mode (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync.`
+        : `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     renderAutoFillPreview(fixtures, result.dateMap, result.matchesPerDay);
     return true;
@@ -2267,20 +2284,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ...fixtureDates,
       ...lastPreviewDateMap
     };
-    localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
-    window.dispatchEvent(
-      new CustomEvent('bhanoyi:fixtures-updated', {
-        detail: {
-          sectionKey: fixtureSectionKey
-        }
-      })
-    );
+
+    const isDraftOnly = isAdminMode && pendingFixtureApproval;
+    if (!isDraftOnly) {
+      persistFixtureDatesToStorage();
+    }
 
     if (statusNode) {
-      statusNode.textContent = `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      statusNode.textContent = isDraftOnly
+        ? `Draft dates applied to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync calendar.`
+        : `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      rulesStatusNode.textContent = isDraftOnly
+        ? `Previewed dates applied in draft mode (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync.`
+        : `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     renderFixtures(lastFixtures);
   };
@@ -2495,13 +2513,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-    window.dispatchEvent(
-      new CustomEvent('bhanoyi:fixtures-updated', {
-        detail: {
-          sectionKey: fixtureSectionKey
-        }
-      })
-    );
+    dispatchFixtureSyncEvent();
   };
 
   const fixtureDateLabel = (fixtureId) => {
@@ -2739,9 +2751,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!shouldShow) return;
 
     if (currentUnfairnessReport.hasUnfairness) {
-      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) are highlighted with fairness concerns. Hover highlighted rows for details, then approve after fixes or approve with unfairnesses.`;
+      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) are highlighted with fairness concerns. Hover rows for details, then use a Finalize & sync button to push to calendar.`;
     } else {
-      approvalStatusNode.textContent = 'All detected fairness concerns are resolved. Approve after fixes to finalize this fixture set.';
+      approvalStatusNode.textContent = 'Draft is ready. Use Finalize & sync to publish fixtures to the calendar.';
     }
 
     if (approveResolvedButton instanceof HTMLButtonElement) {
@@ -2998,8 +3010,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (statusNode) {
       if (isAdminMode && pendingFixtureApproval) {
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Preview state: ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows for details and approve when ready.`
-          : 'Preview state: fairness concerns resolved. Click "Approve after fixes" to finalize this fixture set.';
+          ? `Draft only (not synced): ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows and finalize when ready.`
+          : 'Draft only (not synced): fairness checks passed. Click "Finalize & sync" to publish fixtures to calendar.';
       } else if (isAdminMode && approvedWithUnfairness && currentUnfairnessReport.hasUnfairness) {
         statusNode.textContent = `Fixtures approved with fairness warnings (${currentUnfairnessReport.affectedFixtureCount} highlighted fixture${currentUnfairnessReport.affectedFixtureCount === 1 ? '' : 's'}).`;
       } else {
@@ -3044,16 +3056,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     refreshCurrentUnfairnessReport(lastFixtures);
-    if (isAdminMode && currentUnfairnessReport.hasUnfairness) {
+    if (isAdminMode) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
       loadFixtureDates();
       if (autoFillDates) {
         autoFillFixtureDates(lastFixtures);
-        loadFixtureDates();
       }
+      persistActiveSportState();
       renderFixtures(lastFixtures);
-      showSmartToast('Fixtures generated in preview mode: fairness concerns detected.', { tone: 'info' });
+      if (statusNode) {
+        statusNode.textContent = currentUnfairnessReport.hasUnfairness
+          ? `Draft generated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
+          : 'Draft generated. Review/edit fixtures, then click Finalize & sync to publish to calendar.';
+      }
+      showSmartToast('Draft fixtures generated. Calendar sync happens only on Finalize & sync.', { tone: 'info' });
       return;
     }
 
@@ -3486,14 +3503,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
       } else {
         fixtureDates[fixtureId] = nextStamp;
       }
-      localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
-      window.dispatchEvent(
-        new CustomEvent('bhanoyi:fixtures-updated', {
-          detail: {
-            sectionKey: fixtureSectionKey
-          }
-        })
-      );
+      if (isAdminMode) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      } else {
+        persistFixtureDatesToStorage();
+      }
       renderFixtures(lastFixtures);
       return;
     }
@@ -3509,14 +3524,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
       } else {
         fixtureDates[fixtureId] = nextStamp;
       }
-      localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
-      window.dispatchEvent(
-        new CustomEvent('bhanoyi:fixtures-updated', {
-          detail: {
-            sectionKey: fixtureSectionKey
-          }
-        })
-      );
+      if (isAdminMode) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      } else {
+        persistFixtureDatesToStorage();
+      }
       renderFixtures(lastFixtures);
       return;
     }
@@ -3554,7 +3567,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       lastFixtures = repairResult.fixtures;
       refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode && (pendingFixtureApproval || currentUnfairnessReport.hasUnfairness)) {
+      if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
       } else {
@@ -3567,8 +3580,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (statusNode) {
         if (pendingFixtureApproval) {
           statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Preview state: fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
-            : 'Preview state: fairness concerns resolved. Click "Approve after fixes" to finalize.';
+            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
+            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
         } else {
           statusNode.textContent = repairResult.affectedOtherCount > 0
             ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
@@ -3611,7 +3624,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       lastFixtures = repairResult.fixtures;
       refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode && (pendingFixtureApproval || currentUnfairnessReport.hasUnfairness)) {
+      if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
       } else {
@@ -3624,8 +3637,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (statusNode) {
         if (pendingFixtureApproval) {
           statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Preview state: fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
-            : 'Preview state: fairness concerns resolved. Click "Approve after fixes" to finalize.';
+            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
+            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
         } else {
           statusNode.textContent = repairResult.affectedOtherCount > 0
             ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
@@ -3647,7 +3660,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       approvedWithUnfairness = false;
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = 'Resolve highlighted fairness concerns, then click "Approve after fixes".';
+        statusNode.textContent = 'Resolve highlighted fairness concerns, then click "Finalize & sync (after fixes)".';
       }
       showSmartToast('Resolve highlighted fairness concerns before approval.', { tone: 'info' });
       return;
@@ -3655,6 +3668,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     pendingFixtureApproval = false;
     approvedWithUnfairness = hasUnfairness && allowUnfairness;
+    persistFixtureDatesToStorage();
     saveFixtureCatalog(lastFixtures);
     persistActiveSportState();
     renderFixtures(lastFixtures);
@@ -3666,7 +3680,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     showSmartToast(
-      approvedWithUnfairness ? 'Fixtures approved with fairness warnings.' : 'Fixtures approved.',
+      approvedWithUnfairness
+        ? 'Fixtures approved with fairness warnings and synced to calendar.'
+        : 'Fixtures approved and synced to calendar.',
       { tone: approvedWithUnfairness ? 'info' : 'success' }
     );
   };
