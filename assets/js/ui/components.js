@@ -1314,6 +1314,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
+  const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   let fixtureDates = {};
 
@@ -1332,6 +1333,59 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const getFixtureId = (fixture) =>
     `${fixtureSectionKey}:${fixture.round}:${fixture.leg}:${fixture.match}:${fixture.homeId}:${fixture.awayId}`;
+
+  const saveFixtureCatalog = (fixtures) => {
+    const catalog = {};
+    fixtures.forEach((fixture) => {
+      const fixtureId = getFixtureId(fixture);
+      catalog[fixtureId] = {
+        id: fixtureId,
+        round: fixture.round,
+        leg: fixture.leg,
+        match: fixture.match,
+        homeId: fixture.homeId,
+        awayId: fixture.awayId,
+        homeName: teamNameById(fixture.homeId),
+        awayName: teamNameById(fixture.awayId),
+        title: `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`,
+        sport: String(config.sport || '').trim(),
+        competition: String(config.competition || '').trim(),
+        venue: String(config.venue || '').trim()
+      };
+    });
+
+    try {
+      localStorage.setItem(fixtureCatalogStorageKey, JSON.stringify(catalog));
+
+      const rawDates = localStorage.getItem(fixtureDateStorageKey);
+      const parsedDates = rawDates ? JSON.parse(rawDates) : {};
+      const fixtureDatesMap = parsedDates && typeof parsedDates === 'object' ? parsedDates : {};
+      const catalogIds = new Set(Object.keys(catalog));
+      let datesChanged = false;
+
+      Object.keys(fixtureDatesMap).forEach((fixtureId) => {
+        if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return;
+        if (!catalogIds.has(fixtureId)) {
+          delete fixtureDatesMap[fixtureId];
+          datesChanged = true;
+        }
+      });
+
+      if (datesChanged) {
+        localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDatesMap));
+      }
+    } catch {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:fixtures-updated', {
+        detail: {
+          sectionKey: fixtureSectionKey
+        }
+      })
+    );
+  };
 
   const fixtureDateLabel = (fixtureId) => {
     const value = String(fixtureDates[fixtureId] || '').trim();
@@ -1406,6 +1460,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const generateFixtures = () => {
     const teams = selectedTeamIds();
     lastFixtures = buildSingleRoundRobin(teams);
+    saveFixtureCatalog(lastFixtures);
+    loadFixtureDates();
     renderFixtures(lastFixtures);
   };
 
@@ -1464,6 +1520,20 @@ const hydrateFixtureCreator = (fixtureNode) => {
   generateButton.addEventListener('click', generateFixtures);
   teamPickInputs.forEach((input) => {
     input.addEventListener('change', generateFixtures);
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (!event.key) return;
+    if (event.key !== fixtureDateStorageKey) return;
+    loadFixtureDates();
+    renderFixtures(lastFixtures);
+  });
+
+  window.addEventListener('bhanoyi:fixtures-updated', (event) => {
+    const sectionKey = String(event?.detail?.sectionKey || '').trim();
+    if (sectionKey && sectionKey !== fixtureSectionKey) return;
+    loadFixtureDates();
+    renderFixtures(lastFixtures);
   });
 
   loadFixtureDates();
@@ -1644,6 +1714,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const eventsStorageKey = `bhanoyi.schoolCalendarEvents.${sectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
+  const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const eventTypesStorageKey = `bhanoyi.schoolCalendarEventTypes.${sectionKey}`;
   const termsStorageKey = `bhanoyi.schoolTerms.${sectionKey}`;
 
@@ -2031,6 +2102,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
       });
 
       localStorage.setItem(fixtureDateStorageKey, JSON.stringify(nextMap));
+      window.dispatchEvent(
+        new CustomEvent('bhanoyi:fixtures-updated', {
+          detail: {
+            sectionKey: fixtureSectionKey
+          }
+        })
+      );
     } catch {
       return;
     }
@@ -2055,6 +2133,46 @@ const hydrateSchoolCalendar = (calendarShell) => {
   };
 
   const hasConfiguredActiveTerms = () => getActiveTermRanges().length > 0;
+
+  const loadFixtureDateMap = () => {
+    try {
+      const raw = localStorage.getItem(fixtureDateStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {};
+      return parsed;
+    } catch {
+      return {};
+    }
+  };
+
+  const loadFixtureCatalog = () => {
+    try {
+      const raw = localStorage.getItem(fixtureCatalogStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return {};
+      return parsed;
+    } catch {
+      return {};
+    }
+  };
+
+  const buildFixtureEventTitle = (fixtureId, fixtureCatalog) => {
+    const entry = fixtureCatalog?.[fixtureId];
+    if (entry && typeof entry === 'object') {
+      const title = String(entry.title || '').trim();
+      if (title) return title;
+      const home = String(entry.homeName || '').trim();
+      const away = String(entry.awayName || '').trim();
+      if (home && away) return `${home} vs ${away}`;
+    }
+    const [section, round, leg, match, homeId, awayId] = String(fixtureId || '').split(':');
+    if (section && round && leg && match && homeId && awayId) {
+      return `${homeId} vs ${awayId}`;
+    }
+    return `Fixture ${fixtureId}`;
+  };
 
   const getContrastTextColor = (hexColor) => {
     const raw = String(hexColor || '').trim().replace('#', '');
@@ -2141,6 +2259,113 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   const events = loadEvents();
   let activeOverlayDate = '';
+  let isReconcilingFixtures = false;
+
+  const reconcileFixtureEvents = () => {
+    if (isReconcilingFixtures) return;
+    isReconcilingFixtures = true;
+
+    try {
+      const fixtureMapRaw = loadFixtureDateMap();
+      const fixtureCatalog = loadFixtureCatalog();
+      const fixtureDateEntries = Object.entries(fixtureMapRaw)
+        .map(([fixtureId, dateValue]) => [String(fixtureId || '').trim(), normalizeDateString(dateValue)])
+        .filter(([fixtureId, dateValue]) => fixtureId.startsWith(`${fixtureSectionKey}:`) && Boolean(dateValue));
+
+      const expectedFixtureIds = new Set(fixtureDateEntries.map(([fixtureId]) => fixtureId));
+      const fixtureEvents = calendar
+        .getEvents()
+        .filter(
+          (entry) =>
+            entry.display !== 'background' &&
+            String(entry.extendedProps?.fixtureId || '').trim().startsWith(`${fixtureSectionKey}:`)
+        );
+
+      const fixturesById = new Map();
+      fixtureEvents.forEach((entry) => {
+        const fixtureId = String(entry.extendedProps?.fixtureId || '').trim();
+        if (!fixtureId) return;
+        const existing = fixturesById.get(fixtureId) || [];
+        existing.push(entry);
+        fixturesById.set(fixtureId, existing);
+      });
+
+      let hasChanges = false;
+
+      fixtureDateEntries.forEach(([fixtureId, fixtureDate]) => {
+        const linkedEntries = fixturesById.get(fixtureId) || [];
+        const primaryEntry = linkedEntries[0] || null;
+
+        if (linkedEntries.length > 1) {
+          linkedEntries.slice(1).forEach((duplicate) => duplicate.remove());
+          hasChanges = true;
+        }
+
+        const eventTitle = buildFixtureEventTitle(fixtureId, fixtureCatalog);
+
+        if (!primaryEntry) {
+          const newEntry = calendar.addEvent({
+            id: `${fixtureId}:event`,
+            title: eventTitle,
+            start: fixtureDate,
+            allDay: true,
+            extendedProps: {
+              eventType: 'Sports',
+              fixtureId,
+              notes: '',
+              fixtureAuto: true
+            }
+          });
+          applyEventTheme(newEntry, defaultCalendarTheme);
+          hasChanges = true;
+          return;
+        }
+
+        const currentDate = normalizeDateString(primaryEntry.startStr || primaryEntry.start || '');
+        if (currentDate !== fixtureDate) {
+          if (primaryEntry.allDay === false) {
+            const existingTime = normalizeTimeString(primaryEntry.startStr || primaryEntry.start || '');
+            primaryEntry.setStart(combineDateAndTime(fixtureDate, existingTime));
+          } else {
+            primaryEntry.setStart(fixtureDate);
+          }
+          hasChanges = true;
+        }
+
+        if (!String(primaryEntry.title || '').trim()) {
+          primaryEntry.setProp('title', eventTitle);
+          hasChanges = true;
+        }
+
+        const existingType = normalizeEventTypeLabel(primaryEntry.extendedProps?.eventType || '');
+        if (!existingType) {
+          primaryEntry.setExtendedProp('eventType', ensureEventType('Sports'));
+          hasChanges = true;
+        }
+
+        if (!primaryEntry.extendedProps?.fixtureAuto) {
+          primaryEntry.setExtendedProp('fixtureAuto', true);
+          hasChanges = true;
+        }
+      });
+
+      fixtureEvents.forEach((entry) => {
+        const fixtureId = String(entry.extendedProps?.fixtureId || '').trim();
+        if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return;
+        if (!expectedFixtureIds.has(fixtureId)) {
+          entry.remove();
+          hasChanges = true;
+        }
+      });
+
+      if (hasChanges) {
+        saveEvents(calendar.getEvents());
+        refreshDayOverlay();
+      }
+    } finally {
+      isReconcilingFixtures = false;
+    }
+  };
 
   const formatOverlayDateTitle = (dateString) => {
     const date = new Date(`${normalizeDateString(dateString)}T00:00:00`);
@@ -2414,6 +2639,20 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   calendar.render();
   renderTermBackgroundEvents(calendar);
+  reconcileFixtureEvents();
+
+  window.addEventListener('storage', (event) => {
+    if (!event.key) return;
+    if (event.key === fixtureDateStorageKey || event.key === fixtureCatalogStorageKey) {
+      reconcileFixtureEvents();
+    }
+  });
+
+  window.addEventListener('bhanoyi:fixtures-updated', (event) => {
+    const sectionKeyFromEvent = String(event?.detail?.sectionKey || '').trim();
+    if (sectionKeyFromEvent && sectionKeyFromEvent !== fixtureSectionKey) return;
+    reconcileFixtureEvents();
+  });
 
   dayOverlayCloseButton?.addEventListener('click', () => {
     hideDayOverlay();
