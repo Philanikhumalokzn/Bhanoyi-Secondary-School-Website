@@ -274,13 +274,6 @@ h1 {
   max-width: 65ch;
 }
 
-.hero-cta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 18px;
-}
-
 .btn {
   display: inline-block;
   text-decoration: none;
