@@ -1230,6 +1230,10 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                 Minimum days between fixtures
                 <input type="number" min="1" max="30" step="1" value="7" data-fixture-rule-gap-days />
               </label>
+              <label>
+                Matches per day
+                <input type="number" min="1" max="20" step="1" value="1" data-fixture-rule-matches-per-day />
+              </label>
             </div>
             <div class="fixture-rule-weekdays" data-fixture-rule-weekdays>
               ${[
@@ -1439,6 +1443,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const rulesStatusNode = fixtureNode.querySelector('[data-fixture-rules-status]');
   const ruleStartDateInput = fixtureNode.querySelector('[data-fixture-rule-start-date]');
   const ruleGapDaysInput = fixtureNode.querySelector('[data-fixture-rule-gap-days]');
+  const ruleMatchesPerDayInput = fixtureNode.querySelector('[data-fixture-rule-matches-per-day]');
   const ruleWeekdayInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-rule-weekday]'));
   const ruleUseTermsInput = fixtureNode.querySelector('[data-fixture-rule-use-terms]');
   const ruleAvoidAcademicInput = fixtureNode.querySelector('[data-fixture-rule-avoid-academic]');
@@ -1470,6 +1475,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   let lastFormatLabel = '';
   let lastPreviewDateMap = null;
   let lastPreviewFixtureSignature = '';
+  let lastPreviewMatchesPerDay = 1;
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
@@ -1630,6 +1636,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const collectDateRules = () => {
     const startDate = normalizeDateOnly(ruleStartDateInput instanceof HTMLInputElement ? ruleStartDateInput.value : '');
     const gapDays = parsePositiveInt(ruleGapDaysInput instanceof HTMLInputElement ? ruleGapDaysInput.value : '', 7);
+    const matchesPerDay = parsePositiveInt(
+      ruleMatchesPerDayInput instanceof HTMLInputElement ? ruleMatchesPerDayInput.value : '',
+      1
+    );
     const weekdays = ruleWeekdayInputs
       .filter((input) => input instanceof HTMLInputElement && input.checked)
       .map((input) => Number.parseInt(String(input.value || '').trim(), 10))
@@ -1661,6 +1671,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       rules: {
         startDate,
         gapDays,
+        matchesPerDay,
         weekdays,
         useTerms,
         avoidAcademic,
@@ -1682,6 +1693,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const payload = {
       startDate: collected.rules.startDate,
       gapDays: collected.rules.gapDays,
+      matchesPerDay: collected.rules.matchesPerDay,
       weekdays: collected.rules.weekdays,
       useTerms: collected.rules.useTerms,
       avoidAcademic: collected.rules.avoidAcademic,
@@ -1705,6 +1717,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
       if (ruleGapDaysInput instanceof HTMLInputElement) {
         ruleGapDaysInput.value = String(parsePositiveInt(parsed.gapDays, 7));
+      }
+      if (ruleMatchesPerDayInput instanceof HTMLInputElement) {
+        ruleMatchesPerDayInput.value = String(parsePositiveInt(parsed.matchesPerDay, 1));
       }
       if (ruleUseTermsInput instanceof HTMLInputElement) {
         ruleUseTermsInput.checked = parsed.useTerms !== false;
@@ -1763,6 +1778,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     const rules = collected.rules;
     let cursor = rules.startDate;
+    let currentDateCount = 0;
     const nextDates = {};
 
     for (let index = 0; index < inputFixtures.length; index += 1) {
@@ -1782,16 +1798,28 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       const fixtureId = getFixtureId(inputFixtures[index]);
       nextDates[fixtureId] = probe;
-      cursor = addDays(probe, Math.max(1, rules.gapDays));
+
+      currentDateCount += 1;
+      if (currentDateCount >= Math.max(1, rules.matchesPerDay)) {
+        cursor = addDays(probe, Math.max(1, rules.gapDays));
+        currentDateCount = 0;
+      } else {
+        cursor = probe;
+      }
     }
 
-    return { ok: true, dateMap: nextDates };
+    return {
+      ok: true,
+      dateMap: nextDates,
+      matchesPerDay: Math.max(1, rules.matchesPerDay)
+    };
   };
 
-  const renderAutoFillPreview = (inputFixtures, dateMap) => {
+  const renderAutoFillPreview = (inputFixtures, dateMap, matchesPerDay = 1) => {
     if (!(rulesPreviewNode instanceof HTMLElement)) return;
     lastPreviewDateMap = { ...dateMap };
     lastPreviewFixtureSignature = fixtureSignature(inputFixtures);
+    lastPreviewMatchesPerDay = Math.max(1, parsePositiveInt(matchesPerDay, 1));
 
     const rows = inputFixtures
       .map((fixture) => {
@@ -1837,9 +1865,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-    renderAutoFillPreview(lastFixtures, result.dateMap);
+    renderAutoFillPreview(lastFixtures, result.dateMap, result.matchesPerDay);
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = 'Candidate dates previewed. Apply by generating with auto-fill enabled.';
+      rulesStatusNode.textContent = `Candidate dates previewed (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Apply by generating with auto-fill enabled.`;
     }
   };
 
@@ -1865,12 +1893,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
     );
 
     if (statusNode) {
-      statusNode.textContent = `Fixtures generated and ${fixtures.length} dates auto-filled using rules.`;
+      statusNode.textContent = `Fixtures generated and ${fixtures.length} dates auto-filled using rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = 'Auto-fill completed with current date rules.';
+      rulesStatusNode.textContent = `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
-    renderAutoFillPreview(fixtures, result.dateMap);
+    renderAutoFillPreview(fixtures, result.dateMap, result.matchesPerDay);
     return true;
   };
 
@@ -1904,10 +1932,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     );
 
     if (statusNode) {
-      statusNode.textContent = `Applied previewed dates to ${lastFixtures.length} fixtures.`;
+      statusNode.textContent = `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = 'Previewed dates applied.';
+      rulesStatusNode.textContent = `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     renderFixtures(lastFixtures);
   };
