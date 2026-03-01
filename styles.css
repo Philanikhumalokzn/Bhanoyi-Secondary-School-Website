@@ -2199,6 +2199,101 @@ body.news-read-open {
   margin-top: 6px;
 }
 
+.fixture-creator-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.fixture-creator-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fixture-creator-meta,
+.fixture-creator-status {
+  margin: 0;
+}
+
+.fixture-creator-meta {
+  color: var(--muted);
+}
+
+.fixture-creator-status {
+  font-size: 0.86rem;
+}
+
+.fixture-creator-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fixture-creator-team-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fixture-team-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  padding: 4px 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.fixture-team-option input[type='checkbox'] {
+  margin: 0;
+}
+
+.fixture-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+  background: var(--surface);
+}
+
+.fixture-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+}
+
+.fixture-table thead th {
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.fixture-table th,
+.fixture-table td {
+  border: 1px solid var(--border);
+  padding: 7px 8px;
+  text-align: left;
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.fixture-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-alt) 45%, var(--surface));
+}
+
+.fixture-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 12px;
+}
+
 @media (max-width: 640px) {
   .hero {
     padding: 20px 0;
@@ -2335,6 +2430,20 @@ body.news-read-open {
 
   .match-log-event-detail {
     font-size: 0.72rem;
+  }
+
+  .fixture-creator-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .fixture-creator-actions {
+    width: 100%;
+  }
+
+  .fixture-creator-actions .btn {
+    flex: 1 1 auto;
+    text-align: center;
   }
 
   .news-overlay {

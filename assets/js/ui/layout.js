@@ -1,4 +1,5 @@
 import {
+  initFixtureCreators,
   initMatchEventLogs,
   initLatestNewsReaders,
   initLatestNewsRotators,
@@ -171,4 +172,5 @@ export const renderSite = (siteContent, page) => {
   initLatestNewsRotators();
   initLatestNewsReaders();
   initMatchEventLogs();
+  initFixtureCreators();
 };

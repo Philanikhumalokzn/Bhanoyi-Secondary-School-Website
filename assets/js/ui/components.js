@@ -1159,9 +1159,261 @@ const hydrateMatchLog = (matchLogNode) => {
   render();
 };
 
+const renderFixtureCreatorSection = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const houseOptions = normalizeMatchTeams(
+    Array.isArray(section.houseOptions) && section.houseOptions.length
+      ? section.houseOptions
+      : section.teams
+  );
+
+  const config = {
+    sectionKey: fallbackSectionKey,
+    sport: (section.sport || 'Football / Netball').trim() || 'Football / Netball',
+    competition: (section.competition || 'Inter-House League').trim() || 'Inter-House League',
+    venue: (section.venue || '').trim(),
+    houseOptions
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="fixture-creator" data-section-key="${fallbackSectionKey}">
+      <div class="container">
+        <h2>${section.title || 'Season Fixture Creator'}</h2>
+        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <header class="fixture-creator-header">
+            <p class="fixture-creator-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
+            <div class="fixture-creator-actions">
+              <button type="button" class="btn btn-secondary" data-fixture-generate>Generate fixtures</button>
+              <button type="button" class="btn btn-secondary" data-fixture-export>Export CSV</button>
+            </div>
+          </header>
+          <div class="fixture-creator-team-picks" data-fixture-team-picks>
+            ${houseOptions
+              .map(
+                (team) => `
+                  <label class="fixture-team-option">
+                    <input type="checkbox" data-fixture-team value="${team.id}" checked />
+                    <span>${team.name}</span>
+                  </label>
+                `
+              )
+              .join('')}
+          </div>
+          <p class="fixture-creator-status" data-fixture-status aria-live="polite">Select teams and generate fixtures.</p>
+          <div class="fixture-table-wrap">
+            <table class="fixture-table">
+              <thead>
+                <tr>
+                  <th>Round</th>
+                  <th>Leg</th>
+                  <th>Match</th>
+                  <th>Home</th>
+                  <th>Away</th>
+                </tr>
+              </thead>
+              <tbody data-fixture-body>
+                <tr>
+                  <td colspan="5" class="fixture-empty">No fixtures generated yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const buildSingleRoundRobin = (teamIds = []) => {
+  const normalized = teamIds.filter(Boolean);
+  if (normalized.length < 2) return [];
+
+  const rotation = [...normalized];
+  if (rotation.length % 2 !== 0) {
+    rotation.push(null);
+  }
+
+  const rounds = rotation.length - 1;
+  const half = rotation.length / 2;
+  const firstLeg = [];
+
+  for (let roundIndex = 0; roundIndex < rounds; roundIndex += 1) {
+    const roundMatches = [];
+    for (let pairIndex = 0; pairIndex < half; pairIndex += 1) {
+      const left = rotation[pairIndex];
+      const right = rotation[rotation.length - 1 - pairIndex];
+      if (!left || !right) continue;
+
+      let home = left;
+      let away = right;
+      if ((roundIndex + pairIndex) % 2 === 1) {
+        home = right;
+        away = left;
+      }
+
+      roundMatches.push({
+        round: roundIndex + 1,
+        leg: 'First',
+        match: pairIndex + 1,
+        homeId: home,
+        awayId: away
+      });
+    }
+    firstLeg.push(...roundMatches);
+
+    const fixed = rotation[0];
+    const moved = rotation.pop();
+    rotation.splice(1, 0, moved);
+    rotation[0] = fixed;
+  }
+
+  const secondLegOffset = rounds;
+  const secondLeg = firstLeg.map((fixture) => ({
+    ...fixture,
+    round: fixture.round + secondLegOffset,
+    leg: 'Return',
+    homeId: fixture.awayId,
+    awayId: fixture.homeId
+  }));
+
+  return [...firstLeg, ...secondLeg].sort((left, right) => {
+    if (left.round === right.round) return left.match - right.match;
+    return left.round - right.round;
+  });
+};
+
+const hydrateFixtureCreator = (fixtureNode) => {
+  const rawConfig = (fixtureNode.dataset.fixtureConfig || '').trim();
+  if (!rawConfig) return;
+
+  let config;
+  try {
+    config = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  const houseOptions = normalizeMatchTeams(config.houseOptions || []);
+  if (houseOptions.length < 2) return;
+
+  const teamPickInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-team]'));
+  const statusNode = fixtureNode.querySelector('[data-fixture-status]');
+  const bodyNode = fixtureNode.querySelector('[data-fixture-body]');
+  const generateButton = fixtureNode.querySelector('[data-fixture-generate]');
+  const exportButton = fixtureNode.querySelector('[data-fixture-export]');
+
+  if (!bodyNode || !generateButton || !exportButton) return;
+
+  let lastFixtures = [];
+
+  const selectedTeamIds = () =>
+    teamPickInputs
+      .filter((input) => input instanceof HTMLInputElement && input.checked)
+      .map((input) => (input instanceof HTMLInputElement ? input.value : ''))
+      .filter((teamId) => houseOptions.some((team) => team.id === teamId));
+
+  const teamNameById = (teamId) => houseOptions.find((team) => team.id === teamId)?.name || teamId;
+
+  const renderFixtures = (fixtures) => {
+    if (!fixtures.length) {
+      bodyNode.innerHTML = '<tr><td colspan="5" class="fixture-empty">Select at least two teams to generate fixtures.</td></tr>';
+      if (statusNode) {
+        statusNode.textContent = 'Select at least two teams to generate fixtures.';
+      }
+      return;
+    }
+
+    bodyNode.innerHTML = fixtures
+      .map(
+        (fixture) => `
+          <tr>
+            <td>${fixture.round}</td>
+            <td>${fixture.leg}</td>
+            <td>R${fixture.round}M${fixture.match}</td>
+            <td>${escapeHtmlText(teamNameById(fixture.homeId))}</td>
+            <td>${escapeHtmlText(teamNameById(fixture.awayId))}</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    if (statusNode) {
+      statusNode.textContent = `${fixtures.length} fixtures generated (${fixtures.filter((entry) => entry.leg === 'First').length} first-leg + ${fixtures.filter((entry) => entry.leg === 'Return').length} return-leg).`;
+    }
+  };
+
+  const generateFixtures = () => {
+    const teams = selectedTeamIds();
+    lastFixtures = buildSingleRoundRobin(teams);
+    renderFixtures(lastFixtures);
+  };
+
+  const escapeCsvValue = (value) => {
+    const normalized = String(value ?? '').replace(/"/g, '""');
+    return `"${normalized}"`;
+  };
+
+  exportButton.addEventListener('click', () => {
+    if (!lastFixtures.length) {
+      generateFixtures();
+      if (!lastFixtures.length) return;
+    }
+
+    const lines = [
+      ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
+      ['Sport', config.sport || ''].map(escapeCsvValue).join(','),
+      ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
+      '',
+      ['Round', 'Leg', 'Match', 'Home', 'Away'].map(escapeCsvValue).join(',')
+    ];
+
+    lastFixtures.forEach((fixture) => {
+      lines.push(
+        [
+          fixture.round,
+          fixture.leg,
+          `R${fixture.round}M${fixture.match}`,
+          teamNameById(fixture.homeId),
+          teamNameById(fixture.awayId)
+        ]
+          .map(escapeCsvValue)
+          .join(',')
+      );
+    });
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const safeCompetition = (config.competition || 'season-fixtures')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    anchor.href = url;
+    anchor.download = `${safeCompetition || 'season-fixtures'}-${stamp}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  generateButton.addEventListener('click', generateFixtures);
+  teamPickInputs.forEach((input) => {
+    input.addEventListener('change', generateFixtures);
+  });
+
+  generateFixtures();
+};
+
 const renderSectionByType = (section, sectionIndex, context = {}) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const effectiveSection = resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context);
+
+  if (effectiveSection.type === 'fixture-creator') {
+    return renderFixtureCreatorSection(effectiveSection, sectionIndex);
+  }
 
   if (effectiveSection.type === 'match-log') {
     return renderMatchLogSection(effectiveSection, sectionIndex);
@@ -1985,6 +2237,11 @@ export const initLatestNewsReaders = () => {
 export const initMatchEventLogs = () => {
   const logs = Array.from(document.querySelectorAll('[data-match-log="true"]'));
   logs.forEach((log) => hydrateMatchLog(log));
+};
+
+export const initFixtureCreators = () => {
+  const creators = Array.from(document.querySelectorAll('[data-fixture-creator="true"]'));
+  creators.forEach((creator) => hydrateFixtureCreator(creator));
 };
 
 export const renderFooter = (siteContent) => `

@@ -80,6 +80,22 @@ export const fallbackSiteContent = {
             { key: 'injury', label: 'Injury', icon: '🩹', scoreFor: 'none', playerLabel: 'Injured Player' },
             { key: 'substitution', label: 'Substitution', icon: '🔁', scoreFor: 'none', playerLabel: 'Player' }
           ]
+        },
+        {
+          type: 'fixture-creator',
+          title: 'Season Fixture Creator',
+          sectionKey: 'sports_fixture_creator',
+          body: 'Generate the full home-and-away round-robin schedule for the selected houses.',
+          sport: 'Football / Netball',
+          competition: 'Inter-House League',
+          venue: 'Main Field',
+          houseOptions: [
+            { id: 'house_1', name: 'House 1' },
+            { id: 'house_2', name: 'House 2' },
+            { id: 'house_3', name: 'House 3' },
+            { id: 'house_4', name: 'House 4' },
+            { id: 'house_5', name: 'House 5' }
+          ]
         }
       ]
     }
