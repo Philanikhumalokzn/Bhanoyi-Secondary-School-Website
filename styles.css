@@ -3983,3 +3983,44 @@ body.news-read-open {
     transform: translateY(2px);
   }
 }
+
+.page-section-collapsible .container,
+.sports-workflow-step,
+.calendar-workflow-step,
+.school-calendar-admin,
+.fixture-approval-panel,
+.image-crop-panel,
+.news-overlay-panel,
+.news-read-panel,
+.match-log-modal-panel,
+.calendar-day-overlay-panel,
+.calendar-sports-overlay-panel,
+.calendar-sports-frame-wrap,
+[class*='overlay-panel'],
+[class*='modal-panel'] {
+  box-shadow: none !important;
+}
+
+.page-section-collapsible:hover .container,
+.page-section-collapsible:focus-visible .container,
+.page-section-collapsible.is-expanded .container,
+.sports-workflow-step:hover,
+.calendar-workflow-step:hover,
+.calendar-day-event-open:hover,
+.calendar-day-event-open:focus-visible {
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.page-section-collapsible-body,
+.sports-workflow-body,
+.calendar-workflow-body {
+  transform: none !important;
+  transition: max-height 220ms ease, opacity 140ms ease !important;
+}
+
+.news-overlay,
+.news-read-overlay {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
