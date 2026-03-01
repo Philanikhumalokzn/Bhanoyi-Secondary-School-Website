@@ -1173,7 +1173,7 @@ const renderFixtureCreatorSection = (section, sectionIndex) => {
 
   const config = {
     sectionKey: fallbackSectionKey,
-    sport: (section.sport || 'Football / Netball').trim() || 'Football / Netball',
+    sport: (section.sport || '').trim(),
     competition: (section.competition || 'Inter-House League').trim() || 'Inter-House League',
     venue: (section.venue || '').trim(),
     houseOptions
@@ -1186,12 +1186,60 @@ const renderFixtureCreatorSection = (section, sectionIndex) => {
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="fixture-creator-header">
-            <p class="fixture-creator-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
+            <p class="fixture-creator-meta" data-fixture-meta>Choose a sport format to begin.</p>
             <div class="fixture-creator-actions">
               <button type="button" class="btn btn-secondary" data-fixture-generate>Generate fixtures</button>
               <button type="button" class="btn btn-secondary" data-fixture-export>Export CSV</button>
             </div>
           </header>
+          <div class="fixture-creator-sport-grid">
+            <label>
+              Sport code (required)
+              <select data-fixture-sport required>
+                <option value="">Select sport</option>
+                <option value="soccer">Soccer</option>
+                <option value="netball">Netball</option>
+              </select>
+            </label>
+          </div>
+          <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
+            <h3>Soccer Format</h3>
+            <div class="fixture-creator-sport-grid">
+              <label>
+                Halves
+                <input type="number" min="2" max="2" step="1" value="2" data-fixture-soccer-halves />
+              </label>
+              <label>
+                Minutes per half
+                <input type="number" min="10" max="60" step="1" value="40" data-fixture-soccer-half-minutes />
+              </label>
+              <label>
+                Break minutes
+                <input type="number" min="0" max="30" step="1" value="10" data-fixture-soccer-break-minutes />
+              </label>
+            </div>
+          </div>
+          <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="netball">
+            <h3>Netball Format</h3>
+            <div class="fixture-creator-sport-grid">
+              <label>
+                Quarters
+                <input type="number" min="4" max="4" step="1" value="4" data-fixture-netball-quarters />
+              </label>
+              <label>
+                Minutes per quarter
+                <input type="number" min="8" max="20" step="1" value="15" data-fixture-netball-quarter-minutes />
+              </label>
+              <label>
+                Quarter break minutes
+                <input type="number" min="0" max="15" step="1" value="3" data-fixture-netball-break-minutes />
+              </label>
+              <label>
+                Half-time minutes
+                <input type="number" min="0" max="20" step="1" value="5" data-fixture-netball-half-time-minutes />
+              </label>
+            </div>
+          </div>
           <div class="fixture-creator-team-picks" data-fixture-team-picks>
             ${houseOptions
               .map(
@@ -1213,13 +1261,14 @@ const renderFixtureCreatorSection = (section, sectionIndex) => {
                   <th>Leg</th>
                   <th>Match</th>
                   <th>Date</th>
+                  <th>Format</th>
                   <th>Home</th>
                   <th>Away</th>
                 </tr>
               </thead>
               <tbody data-fixture-body>
                 <tr>
-                  <td colspan="6" class="fixture-empty">No fixtures generated yet.</td>
+                  <td colspan="7" class="fixture-empty">No fixtures generated yet.</td>
                 </tr>
               </tbody>
             </table>
@@ -1303,6 +1352,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
   if (houseOptions.length < 2) return;
 
   const teamPickInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-team]'));
+  const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
+  const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
+  const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
+  const netballPanel = fixtureNode.querySelector('[data-fixture-sport-panel="netball"]');
+  const soccerHalvesInput = fixtureNode.querySelector('[data-fixture-soccer-halves]');
+  const soccerHalfMinutesInput = fixtureNode.querySelector('[data-fixture-soccer-half-minutes]');
+  const soccerBreakMinutesInput = fixtureNode.querySelector('[data-fixture-soccer-break-minutes]');
+  const netballQuartersInput = fixtureNode.querySelector('[data-fixture-netball-quarters]');
+  const netballQuarterMinutesInput = fixtureNode.querySelector('[data-fixture-netball-quarter-minutes]');
+  const netballBreakMinutesInput = fixtureNode.querySelector('[data-fixture-netball-break-minutes]');
+  const netballHalfTimeMinutesInput = fixtureNode.querySelector('[data-fixture-netball-half-time-minutes]');
   const statusNode = fixtureNode.querySelector('[data-fixture-status]');
   const bodyNode = fixtureNode.querySelector('[data-fixture-body]');
   const generateButton = fixtureNode.querySelector('[data-fixture-generate]');
@@ -1311,6 +1371,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
   if (!bodyNode || !generateButton || !exportButton) return;
 
   let lastFixtures = [];
+  let lastSportKey = '';
+  let lastSportLabel = '';
+  let lastFormatLabel = '';
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
@@ -1332,12 +1395,98 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const getFixtureId = (fixture) =>
-    `${fixtureSectionKey}:${fixture.round}:${fixture.leg}:${fixture.match}:${fixture.homeId}:${fixture.awayId}`;
+    `${fixtureSectionKey}:${fixture.sportKey}:${fixture.round}:${fixture.leg}:${fixture.match}:${fixture.homeId}:${fixture.awayId}`;
+
+  const parsePositiveInt = (value, fallback) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  };
+
+  const sportProfiles = {
+    soccer: {
+      label: 'Soccer',
+      readSetup: () => {
+        const halves = 2;
+        const minutesPerHalf = parsePositiveInt(
+          soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
+          40
+        );
+        const breakMinutes = parsePositiveInt(
+          soccerBreakMinutesInput instanceof HTMLInputElement ? soccerBreakMinutesInput.value : '',
+          10
+        );
+        return {
+          halves,
+          minutesPerHalf,
+          breakMinutes,
+          formatLabel: `${halves} x ${minutesPerHalf} min (break ${breakMinutes} min)`
+        };
+      }
+    },
+    netball: {
+      label: 'Netball',
+      readSetup: () => {
+        const quarters = 4;
+        const minutesPerQuarter = parsePositiveInt(
+          netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
+          15
+        );
+        const breakMinutes = parsePositiveInt(
+          netballBreakMinutesInput instanceof HTMLInputElement ? netballBreakMinutesInput.value : '',
+          3
+        );
+        const halfTimeMinutes = parsePositiveInt(
+          netballHalfTimeMinutesInput instanceof HTMLInputElement ? netballHalfTimeMinutesInput.value : '',
+          5
+        );
+        return {
+          quarters,
+          minutesPerQuarter,
+          breakMinutes,
+          halfTimeMinutes,
+          formatLabel: `${quarters} x ${minutesPerQuarter} min (quarter break ${breakMinutes} min, half-time ${halfTimeMinutes} min)`
+        };
+      }
+    }
+  };
+
+  const selectedSportKey = () => {
+    const value = sportSelect instanceof HTMLSelectElement ? sportSelect.value : '';
+    return value === 'soccer' || value === 'netball' ? value : '';
+  };
+
+  const selectedSportProfile = () => {
+    const key = selectedSportKey();
+    return key ? { key, ...sportProfiles[key] } : null;
+  };
+
+  const refreshSportPanelState = () => {
+    const key = selectedSportKey();
+    if (soccerPanel instanceof HTMLElement) {
+      soccerPanel.classList.toggle('is-hidden', key !== 'soccer');
+    }
+    if (netballPanel instanceof HTMLElement) {
+      netballPanel.classList.toggle('is-hidden', key !== 'netball');
+    }
+
+    if (metaNode instanceof HTMLElement) {
+      if (!key) {
+        metaNode.textContent = 'Choose Soccer or Netball to load fixture format options.';
+      } else {
+        const profile = selectedSportProfile();
+        const setup = profile?.readSetup();
+        metaNode.textContent = `${profile?.label || ''} · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}${setup?.formatLabel ? ` · ${setup.formatLabel}` : ''}`;
+      }
+    }
+  };
 
   const saveFixtureCatalog = (fixtures) => {
     const catalog = {};
     fixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
+      const sportProfile = sportProfiles[fixture.sportKey] || null;
+      const setup = sportProfile?.readSetup?.() || {};
       catalog[fixtureId] = {
         id: fixtureId,
         round: fixture.round,
@@ -1348,9 +1497,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
         homeName: teamNameById(fixture.homeId),
         awayName: teamNameById(fixture.awayId),
         title: `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`,
-        sport: String(config.sport || '').trim(),
+        sport: sportProfile?.label || '',
         competition: String(config.competition || '').trim(),
-        venue: String(config.venue || '').trim()
+        venue: String(config.venue || '').trim(),
+        format: String(setup.formatLabel || '').trim(),
+        setup
       };
     });
 
@@ -1421,9 +1572,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const renderFixtures = (fixtures) => {
     if (!fixtures.length) {
-      bodyNode.innerHTML = '<tr><td colspan="6" class="fixture-empty">Select at least two teams to generate fixtures.</td></tr>';
+      bodyNode.innerHTML = '<tr><td colspan="7" class="fixture-empty">Select sport and at least two teams to generate fixtures.</td></tr>';
       if (statusNode) {
-        statusNode.textContent = 'Select at least two teams to generate fixtures.';
+        statusNode.textContent = selectedSportKey()
+          ? 'Select at least two teams to generate fixtures.'
+          : 'Choose Soccer or Netball first, then generate fixtures.';
       }
       return;
     }
@@ -1445,6 +1598,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
                 return `<a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">${escapeHtmlText(label)}</a>`;
               })()}
             </td>
+            <td>${escapeHtmlText(fixture.formatLabel || '')}</td>
             <td>${escapeHtmlText(teamNameById(fixture.homeId))}</td>
             <td>${escapeHtmlText(teamNameById(fixture.awayId))}</td>
           </tr>
@@ -1453,13 +1607,34 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .join('');
 
     if (statusNode) {
-      statusNode.textContent = `${fixtures.length} fixtures generated (${fixtures.filter((entry) => entry.leg === 'First').length} first-leg + ${fixtures.filter((entry) => entry.leg === 'Return').length} return-leg).`;
+      statusNode.textContent = `${lastSportLabel}: ${fixtures.length} fixtures generated (${fixtures.filter((entry) => entry.leg === 'First').length} first-leg + ${fixtures.filter((entry) => entry.leg === 'Return').length} return-leg).`;
     }
   };
 
   const generateFixtures = () => {
+    refreshSportPanelState();
+    const profile = selectedSportProfile();
+    if (!profile) {
+      lastFixtures = [];
+      lastSportKey = '';
+      lastSportLabel = '';
+      lastFormatLabel = '';
+      renderFixtures(lastFixtures);
+      return;
+    }
+
     const teams = selectedTeamIds();
-    lastFixtures = buildSingleRoundRobin(teams);
+    const setup = profile.readSetup();
+    lastSportKey = profile.key;
+    lastSportLabel = profile.label;
+    lastFormatLabel = String(setup.formatLabel || '').trim();
+
+    lastFixtures = buildSingleRoundRobin(teams).map((fixture) => ({
+      ...fixture,
+      sportKey: profile.key,
+      sportLabel: profile.label,
+      formatLabel: lastFormatLabel
+    }));
     saveFixtureCatalog(lastFixtures);
     loadFixtureDates();
     renderFixtures(lastFixtures);
@@ -1478,10 +1653,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     const lines = [
       ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
-      ['Sport', config.sport || ''].map(escapeCsvValue).join(','),
+      ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
+      ['Format', lastFormatLabel || ''].map(escapeCsvValue).join(','),
       ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
       '',
-      ['Round', 'Leg', 'Match', 'Date', 'Home', 'Away'].map(escapeCsvValue).join(',')
+      ['Round', 'Leg', 'Match', 'Date', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
     ];
 
     lastFixtures.forEach((fixture) => {
@@ -1492,6 +1668,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           fixture.leg,
           `R${fixture.round}M${fixture.match}`,
           fixtureDateLabel(fixtureId) || '',
+          fixture.formatLabel || '',
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
         ]
@@ -1522,6 +1699,28 @@ const hydrateFixtureCreator = (fixtureNode) => {
     input.addEventListener('change', generateFixtures);
   });
 
+  sportSelect?.addEventListener('change', () => {
+    refreshSportPanelState();
+    generateFixtures();
+  });
+
+  [
+    soccerHalvesInput,
+    soccerHalfMinutesInput,
+    soccerBreakMinutesInput,
+    netballQuartersInput,
+    netballQuarterMinutesInput,
+    netballBreakMinutesInput,
+    netballHalfTimeMinutesInput
+  ].forEach((input) => {
+    input?.addEventListener('change', () => {
+      refreshSportPanelState();
+      if (lastFixtures.length) {
+        generateFixtures();
+      }
+    });
+  });
+
   window.addEventListener('storage', (event) => {
     if (!event.key) return;
     if (event.key !== fixtureDateStorageKey) return;
@@ -1537,6 +1736,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   loadFixtureDates();
+  refreshSportPanelState();
   generateFixtures();
 };
 

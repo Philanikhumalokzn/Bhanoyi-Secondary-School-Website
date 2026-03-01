@@ -2231,6 +2231,43 @@ body.news-read-open {
   flex-wrap: wrap;
 }
 
+.fixture-creator-sport-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fixture-creator-sport-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.fixture-creator-sport-grid input,
+.fixture-creator-sport-grid select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.fixture-sport-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.fixture-sport-panel h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
 .fixture-creator-team-picks {
   display: flex;
   flex-wrap: wrap;
@@ -2800,6 +2837,10 @@ body.news-read-open {
   }
 
   .school-calendar-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fixture-creator-sport-grid {
     grid-template-columns: 1fr;
   }
 
