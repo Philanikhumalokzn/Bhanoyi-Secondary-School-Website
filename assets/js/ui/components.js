@@ -1255,7 +1255,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                 <span>Auto-fill dates (use rules)</span>
               </label>
               <button type="button" class="btn btn-secondary" data-fixture-generate>Generate fixtures</button>
-              <button type="button" class="btn btn-secondary" data-fixture-export>Export CSV</button>
+              <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
             </div>
           </header>
           <div class="fixture-date-rules" data-fixture-date-rules>
@@ -2951,58 +2951,268 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return `"${normalized}"`;
   };
 
-  exportButton.addEventListener('click', () => {
+  exportButton.addEventListener('click', async () => {
     if (!lastFixtures.length) {
       generateFixtures();
       if (!lastFixtures.length) return;
     }
 
-    const lines = [
-      ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
-      ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
-      ['Format', lastFormatLabel || ''].map(escapeCsvValue).join(','),
-      ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
-      '',
-      ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
-    ];
-
-    lastFixtures.forEach((fixture) => {
-      const fixtureId = getFixtureId(fixture);
-      const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
-      const dateLabel = stamp.date || '';
-      const kickoffLabel = stamp.time || '';
-      lines.push(
-        [
-          fixture.round,
-          fixture.leg,
-          `R${fixture.round}M${fixture.match}`,
-          dateLabel,
-          kickoffLabel,
-          fixture.formatLabel || '',
-          teamNameById(fixture.homeId),
-          teamNameById(fixture.awayId)
-        ]
-          .map(escapeCsvValue)
-          .join(',')
-      );
-    });
-
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
     const safeCompetition = (config.competition || 'season-fixtures')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
     const stamp = new Date().toISOString().slice(0, 10);
 
-    anchor.href = url;
-    anchor.download = `${safeCompetition || 'season-fixtures'}-${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    showSmartToast('Fixtures exported to CSV.', { tone: 'success' });
+    const formatFriendlyDate = (dateValue) => {
+      const normalized = normalizeDateOnly(dateValue);
+      if (!normalized) return 'TBD';
+      const parsed = new Date(`${normalized}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) return normalized;
+      return parsed.toLocaleDateString('en-GB', {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
+    };
+
+    const downloadBlob = (blob, fileName) => {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    try {
+      const { default: ExcelJS } = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Bhanoyi Secondary School Website';
+      workbook.created = new Date();
+      const sheet = workbook.addWorksheet('Fixtures', {
+        pageSetup: {
+          orientation: 'portrait',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          margins: {
+            left: 0.4,
+            right: 0.4,
+            top: 0.55,
+            bottom: 0.55,
+            header: 0.2,
+            footer: 0.2
+          }
+        }
+      });
+
+      sheet.views = [{ state: 'frozen', ySplit: 8 }];
+      sheet.columns = [
+        { header: 'Round', key: 'round', width: 9 },
+        { header: 'Leg', key: 'leg', width: 12 },
+        { header: 'Match', key: 'match', width: 14 },
+        { header: 'Date', key: 'date', width: 20 },
+        { header: 'Kickoff', key: 'kickoff', width: 12 },
+        { header: 'Format', key: 'format', width: 34 },
+        { header: 'Home', key: 'home', width: 20 },
+        { header: 'Away', key: 'away', width: 20 }
+      ];
+
+      const primaryBlue = '0B5CAB';
+      const deepBlue = '0D2238';
+      const lightBlue = 'EEF3FB';
+      const white = 'FFFFFFFF';
+      const borderColor = 'D6E0EA';
+
+      sheet.mergeCells('A1:H1');
+      sheet.mergeCells('A2:H2');
+      sheet.mergeCells('A3:H3');
+      sheet.mergeCells('A4:H4');
+      sheet.mergeCells('A5:H5');
+      sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
+      sheet.getCell('A2').value = 'Official Sports Fixture';
+      sheet.getCell('A3').value = `${config.competition || 'Inter-House League'}${lastSportLabel ? ` • ${lastSportLabel}` : ''}`;
+      sheet.getCell('A4').value = config.venue ? `Venue: ${config.venue}` : '';
+      sheet.getCell('A5').value = `Generated on: ${new Date().toLocaleString('en-GB')}`;
+
+      ['A1', 'A2', 'A3', 'A4', 'A5'].forEach((ref, index) => {
+        const cell = sheet.getCell(ref);
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = {
+          name: 'Calibri',
+          size: index === 0 ? 18 : index === 1 ? 14 : 11,
+          bold: index <= 2,
+          color: { argb: index <= 2 ? white : `FF${deepBlue}` }
+        };
+        if (index <= 2) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${index === 0 ? deepBlue : primaryBlue}` }
+          };
+        }
+      });
+
+      sheet.getRow(1).height = 30;
+      sheet.getRow(2).height = 24;
+      sheet.getRow(3).height = 22;
+      sheet.getRow(4).height = 20;
+      sheet.getRow(5).height = 20;
+
+      try {
+        const logoResponse = await fetch('/branding/bhanoyi-logo.png');
+        if (logoResponse.ok) {
+          const logoBuffer = await logoResponse.arrayBuffer();
+          const imageId = workbook.addImage({
+            buffer: logoBuffer,
+            extension: 'png'
+          });
+          sheet.addImage(imageId, {
+            tl: { col: 0.1, row: 0.15 },
+            ext: { width: 86, height: 86 }
+          });
+        }
+      } catch {
+        // Logo is optional in export; continue without it.
+      }
+
+      const headerRowNumber = 7;
+      const headerLabels = ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'];
+      const headerRow = sheet.getRow(headerRowNumber);
+      headerRow.values = headerLabels;
+      headerRow.height = 22;
+      headerRow.eachCell((cell) => {
+        cell.font = {
+          name: 'Calibri',
+          size: 11,
+          bold: true,
+          color: { argb: white }
+        };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: `FF${deepBlue}` }
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: `FF${borderColor}` } },
+          left: { style: 'thin', color: { argb: `FF${borderColor}` } },
+          bottom: { style: 'thin', color: { argb: `FF${borderColor}` } },
+          right: { style: 'thin', color: { argb: `FF${borderColor}` } }
+        };
+      });
+
+      const dataStartRow = headerRowNumber + 1;
+      lastFixtures.forEach((fixture, index) => {
+        const fixtureId = getFixtureId(fixture);
+        const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
+        const row = sheet.getRow(dataStartRow + index);
+        row.values = [
+          fixture.round,
+          fixture.leg,
+          `R${fixture.round}M${fixture.match}`,
+          formatFriendlyDate(stampValue.date),
+          stampValue.time || 'TBD',
+          fixture.formatLabel || '',
+          teamNameById(fixture.homeId),
+          teamNameById(fixture.awayId)
+        ];
+        row.height = 20;
+
+        row.eachCell((cell, columnIndex) => {
+          cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${deepBlue}` } };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: columnIndex <= 5 ? 'center' : 'left',
+            wrapText: columnIndex === 6
+          };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${index % 2 === 0 ? white : lightBlue}` }
+          };
+          cell.border = {
+            top: { style: 'thin', color: { argb: `FF${borderColor}` } },
+            left: { style: 'thin', color: { argb: `FF${borderColor}` } },
+            bottom: { style: 'thin', color: { argb: `FF${borderColor}` } },
+            right: { style: 'thin', color: { argb: `FF${borderColor}` } }
+          };
+        });
+      });
+
+      const groupByRoundLeg = new Map();
+      lastFixtures.forEach((fixture, index) => {
+        const key = `${fixture.round}::${fixture.leg}`;
+        const rowNumber = dataStartRow + index;
+        const group = groupByRoundLeg.get(key) || [];
+        group.push(rowNumber);
+        groupByRoundLeg.set(key, group);
+      });
+
+      groupByRoundLeg.forEach((rows) => {
+        if (rows.length < 2) return;
+        const start = rows[0];
+        const end = rows[rows.length - 1];
+        sheet.mergeCells(`A${start}:A${end}`);
+        sheet.mergeCells(`B${start}:B${end}`);
+        sheet.getCell(`A${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+        sheet.getCell(`B${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+
+      const noteRowNumber = dataStartRow + lastFixtures.length + 2;
+      sheet.mergeCells(`A${noteRowNumber}:H${noteRowNumber}`);
+      const noteCell = sheet.getCell(`A${noteRowNumber}`);
+      noteCell.value = 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.';
+      noteCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${deepBlue}` } };
+      noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+      const workbookBuffer = await workbook.xlsx.writeBuffer();
+      downloadBlob(
+        new Blob([workbookBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        }),
+        `${safeCompetition || 'season-fixtures'}-${stamp}.xlsx`
+      );
+      showSmartToast('Professional fixture file exported (.xlsx).', { tone: 'success' });
+      return;
+    } catch {
+      const lines = [
+        ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
+        ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
+        ['Format', lastFormatLabel || ''].map(escapeCsvValue).join(','),
+        ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
+        '',
+        ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
+      ];
+
+      lastFixtures.forEach((fixture) => {
+        const fixtureId = getFixtureId(fixture);
+        const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
+        lines.push(
+          [
+            fixture.round,
+            fixture.leg,
+            `R${fixture.round}M${fixture.match}`,
+            stampValue.date || '',
+            stampValue.time || '',
+            fixture.formatLabel || '',
+            teamNameById(fixture.homeId),
+            teamNameById(fixture.awayId)
+          ]
+            .map(escapeCsvValue)
+            .join(',')
+        );
+      });
+
+      downloadBlob(
+        new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }),
+        `${safeCompetition || 'season-fixtures'}-${stamp}.csv`
+      );
+      showSmartToast('Exported CSV fallback.', { tone: 'info' });
+    }
   });
 
   generateButton.addEventListener('click', () => {
