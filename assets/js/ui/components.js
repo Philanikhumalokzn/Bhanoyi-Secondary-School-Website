@@ -3928,15 +3928,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
       workbook.created = new Date();
       const sheet = workbook.addWorksheet('Fixtures', {
         pageSetup: {
+          paperSize: 9,
           orientation: 'portrait',
           fitToPage: true,
           fitToWidth: 1,
           fitToHeight: 0,
+          horizontalCentered: true,
           margins: {
-            left: 0.4,
-            right: 0.4,
+            left: 0.35,
+            right: 0.35,
             top: 0.55,
-            bottom: 0.55,
+            bottom: 0.5,
             header: 0.2,
             footer: 0.2
           }
@@ -3945,14 +3947,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       sheet.views = [{ state: 'frozen', ySplit: 8 }];
       sheet.columns = [
-        { header: 'Round', key: 'round', width: 9 },
-        { header: 'Leg', key: 'leg', width: 12 },
-        { header: 'Match', key: 'match', width: 14 },
-        { header: 'Date', key: 'date', width: 20 },
-        { header: 'Kickoff', key: 'kickoff', width: 12 },
-        { header: 'Format', key: 'format', width: 34 },
-        { header: 'Home', key: 'home', width: 20 },
-        { header: 'Away', key: 'away', width: 20 }
+        { header: 'Round', key: 'round', width: 8 },
+        { header: 'Leg', key: 'leg', width: 11 },
+        { header: 'Match', key: 'match', width: 12 },
+        { header: 'Date', key: 'date', width: 18 },
+        { header: 'Kickoff', key: 'kickoff', width: 10 },
+        { header: 'Format', key: 'format', width: 28 },
+        { header: 'Home', key: 'home', width: 17 },
+        { header: 'Away', key: 'away', width: 17 }
       ];
 
       const primaryBlue = '1F6FCB';
@@ -3979,7 +3981,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
         cell.font = {
           name: 'Calibri',
-          size: index === 0 ? 18 : index === 1 ? 14 : 11,
+          size: index === 0 ? 17 : index === 1 ? 13 : 10.5,
           bold: index <= 2,
           color: { argb: index <= 2 ? `FF${white}` : `FF${deepBlue}` }
         };
@@ -3998,11 +4000,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
         }
       });
 
-      sheet.getRow(1).height = 30;
-      sheet.getRow(2).height = 24;
-      sheet.getRow(3).height = 22;
-      sheet.getRow(4).height = 20;
-      sheet.getRow(5).height = 20;
+      sheet.getRow(1).height = 28;
+      sheet.getRow(2).height = 22;
+      sheet.getRow(3).height = 20;
+      sheet.getRow(4).height = 18;
+      sheet.getRow(5).height = 18;
 
       try {
         const logoResponse = await fetch('/branding/bhanoyi-logo.png');
@@ -4025,11 +4027,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const headerLabels = ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'];
       const headerRow = sheet.getRow(headerRowNumber);
       headerRow.values = headerLabels;
-      headerRow.height = 22;
+      headerRow.height = 20;
       headerRow.eachCell((cell) => {
         cell.font = {
           name: 'Calibri',
-          size: 11,
+          size: 10.5,
           bold: true,
           color: { argb: `FF${white}` }
         };
@@ -4063,7 +4065,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
         ];
-        row.height = 20;
+        row.height = 18;
 
         row.eachCell((cell, columnIndex) => {
           cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${deepBlue}` } };
