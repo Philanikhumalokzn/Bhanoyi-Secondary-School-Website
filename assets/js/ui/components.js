@@ -2140,6 +2140,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   let lastPreviewMatchesPerDay = 1;
   let pendingFixtureApproval = false;
   let approvedWithUnfairness = false;
+  let lastRenderedFixtureOrder = [];
   let currentUnfairnessReport = {
     hasUnfairness: false,
     fixtureReasons: {},
@@ -3552,6 +3553,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       };
       pendingFixtureApproval = false;
       approvedWithUnfairness = false;
+      lastRenderedFixtureOrder = [];
       bodyNode.innerHTML = '<tr><td colspan="9" class="fixture-empty">Select sport and at least two teams to generate fixtures.</td></tr>';
       if (statusNode) {
         statusNode.textContent = selectedSportKey()
@@ -3602,6 +3604,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
         if (left.fixture.match !== right.fixture.match) return left.fixture.match - right.fixture.match;
         return left.fixtureId.localeCompare(right.fixtureId);
       });
+
+    lastRenderedFixtureOrder = renderedFixtures.map(({ fixture }) => fixture);
 
     const teamOptionMarkup = (selectedId) =>
       (effectiveTeamOptions.length ? effectiveTeamOptions : houseOptions)
@@ -3857,8 +3861,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
   };
 
-  const getExportFixtures = () =>
-    [...lastFixtures].sort((left, right) => {
+  const getExportFixtures = () => {
+    if (lastRenderedFixtureOrder.length === lastFixtures.length && lastRenderedFixtureOrder.length > 0) {
+      return [...lastRenderedFixtureOrder];
+    }
+
+    return [...lastFixtures].sort((left, right) => {
       const leftEpoch = getFixtureEpochForExport(left);
       const rightEpoch = getFixtureEpochForExport(right);
       if (leftEpoch !== rightEpoch) return leftEpoch - rightEpoch;
@@ -3866,6 +3874,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (left.match !== right.match) return left.match - right.match;
       return getFixtureId(left).localeCompare(getFixtureId(right));
     });
+  };
 
   const buildFixtureCsvContent = () => {
     const exportFixtures = getExportFixtures();
