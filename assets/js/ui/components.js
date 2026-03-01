@@ -1234,6 +1234,14 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                 Matches per day
                 <input type="number" min="1" max="20" step="1" value="1" data-fixture-rule-matches-per-day />
               </label>
+              <label>
+                Kickoff start time
+                <input type="time" value="14:00" data-fixture-rule-kickoff-time />
+              </label>
+              <label>
+                Minutes between same-day matches
+                <input type="number" min="15" max="360" step="5" value="120" data-fixture-rule-kickoff-gap-minutes />
+              </label>
             </div>
             <div class="fixture-rule-weekdays" data-fixture-rule-weekdays>
               ${[
@@ -1444,6 +1452,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const ruleStartDateInput = fixtureNode.querySelector('[data-fixture-rule-start-date]');
   const ruleGapDaysInput = fixtureNode.querySelector('[data-fixture-rule-gap-days]');
   const ruleMatchesPerDayInput = fixtureNode.querySelector('[data-fixture-rule-matches-per-day]');
+  const ruleKickoffTimeInput = fixtureNode.querySelector('[data-fixture-rule-kickoff-time]');
+  const ruleKickoffGapMinutesInput = fixtureNode.querySelector('[data-fixture-rule-kickoff-gap-minutes]');
   const ruleWeekdayInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-rule-weekday]'));
   const ruleUseTermsInput = fixtureNode.querySelector('[data-fixture-rule-use-terms]');
   const ruleAvoidAcademicInput = fixtureNode.querySelector('[data-fixture-rule-avoid-academic]');
@@ -1525,6 +1535,51 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const month = String(parsed.getMonth() + 1).padStart(2, '0');
     const day = String(parsed.getDate()).padStart(2, '0');
     return `${parsed.getFullYear()}-${month}-${day}`;
+  };
+
+  const normalizeTimeOnly = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const match = raw.match(/^(\d{2}):(\d{2})/);
+    if (!match) return '';
+    const hours = Number.parseInt(match[1], 10);
+    const minutes = Number.parseInt(match[2], 10);
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return '';
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return '';
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  };
+
+  const combineFixtureDateTime = (dateValue, timeValue) => {
+    const date = normalizeDateOnly(dateValue);
+    if (!date) return '';
+    const time = normalizeTimeOnly(timeValue);
+    return time ? `${date}T${time}` : date;
+  };
+
+  const normalizeFixtureStamp = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const datePart = normalizeDateOnly(raw);
+    if (!datePart) return '';
+    const timePart = normalizeTimeOnly(raw.includes('T') ? raw.split('T')[1] : raw);
+    return timePart ? `${datePart}T${timePart}` : datePart;
+  };
+
+  const splitFixtureStamp = (value) => {
+    const normalized = normalizeFixtureStamp(value);
+    if (!normalized) return { date: '', time: '' };
+    const [datePart, timePart] = normalized.split('T');
+    return { date: datePart || '', time: normalizeTimeOnly(timePart || '') };
+  };
+
+  const addMinutesToTime = (timeValue, minutesToAdd) => {
+    const base = normalizeTimeOnly(timeValue);
+    if (!base) return '';
+    const [hours, minutes] = base.split(':').map((entry) => Number.parseInt(entry, 10));
+    const total = (((hours * 60 + minutes + minutesToAdd) % (24 * 60)) + (24 * 60)) % (24 * 60);
+    const nextHours = Math.floor(total / 60);
+    const nextMinutes = total % 60;
+    return `${String(nextHours).padStart(2, '0')}:${String(nextMinutes).padStart(2, '0')}`;
   };
 
   const toEpochDay = (dateString) => {
@@ -1640,6 +1695,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ruleMatchesPerDayInput instanceof HTMLInputElement ? ruleMatchesPerDayInput.value : '',
       1
     );
+    const kickoffTime = normalizeTimeOnly(
+      ruleKickoffTimeInput instanceof HTMLInputElement ? ruleKickoffTimeInput.value : '14:00'
+    );
+    const kickoffGapMinutes = parsePositiveInt(
+      ruleKickoffGapMinutesInput instanceof HTMLInputElement ? ruleKickoffGapMinutesInput.value : '',
+      120
+    );
     const weekdays = ruleWeekdayInputs
       .filter((input) => input instanceof HTMLInputElement && input.checked)
       .map((input) => Number.parseInt(String(input.value || '').trim(), 10))
@@ -1672,6 +1734,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
         startDate,
         gapDays,
         matchesPerDay,
+        kickoffTime,
+        kickoffGapMinutes,
         weekdays,
         useTerms,
         avoidAcademic,
@@ -1694,6 +1758,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       startDate: collected.rules.startDate,
       gapDays: collected.rules.gapDays,
       matchesPerDay: collected.rules.matchesPerDay,
+      kickoffTime: collected.rules.kickoffTime,
+      kickoffGapMinutes: collected.rules.kickoffGapMinutes,
       weekdays: collected.rules.weekdays,
       useTerms: collected.rules.useTerms,
       avoidAcademic: collected.rules.avoidAcademic,
@@ -1720,6 +1786,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
       if (ruleMatchesPerDayInput instanceof HTMLInputElement) {
         ruleMatchesPerDayInput.value = String(parsePositiveInt(parsed.matchesPerDay, 1));
+      }
+      if (ruleKickoffTimeInput instanceof HTMLInputElement) {
+        ruleKickoffTimeInput.value = normalizeTimeOnly(parsed.kickoffTime || '14:00') || '14:00';
+      }
+      if (ruleKickoffGapMinutesInput instanceof HTMLInputElement) {
+        ruleKickoffGapMinutesInput.value = String(parsePositiveInt(parsed.kickoffGapMinutes, 120));
       }
       if (ruleUseTermsInput instanceof HTMLInputElement) {
         ruleUseTermsInput.checked = parsed.useTerms !== false;
@@ -1778,10 +1850,88 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     const rules = collected.rules;
     let cursor = rules.startDate;
-    let currentDateCount = 0;
     const nextDates = {};
 
-    for (let index = 0; index < inputFixtures.length; index += 1) {
+    const matchesPerDay = Math.max(1, rules.matchesPerDay);
+    const allTeams = Array.from(
+      new Set(
+        inputFixtures
+          .flatMap((fixture) => [String(fixture.homeId || '').trim(), String(fixture.awayId || '').trim()])
+          .filter(Boolean)
+      )
+    );
+
+    const teamPlayCount = Object.fromEntries(allTeams.map((teamId) => [teamId, 0]));
+    const teamIdleStreak = Object.fromEntries(allTeams.map((teamId) => [teamId, 0]));
+    const teamFirstSlotCount = Object.fromEntries(allTeams.map((teamId) => [teamId, 0]));
+    const pendingPriorityTeams = new Set();
+    const remainingFixtures = inputFixtures.map((fixture) => ({ ...fixture }));
+
+    const teamHasRemainingFixture = (teamId) =>
+      remainingFixtures.some((fixture) => fixture.homeId === teamId || fixture.awayId === teamId);
+
+    const fixtureIncludesAnyTeam = (fixture, teamSet) =>
+      teamSet.has(String(fixture.homeId || '').trim()) || teamSet.has(String(fixture.awayId || '').trim());
+
+    const takeDailyFixtureSet = () => {
+      const selected = [];
+      const selectedTeams = new Set();
+
+      const pickBestFixture = (candidates, { preferPriorityTeams, isFirstSlot }) => {
+        let best = null;
+        let bestScore = Number.NEGATIVE_INFINITY;
+
+        candidates.forEach((fixture, index) => {
+          const homeId = String(fixture.homeId || '').trim();
+          const awayId = String(fixture.awayId || '').trim();
+
+          const idleScore = (teamIdleStreak[homeId] || 0) + (teamIdleStreak[awayId] || 0);
+          const playCountScore = -((teamPlayCount[homeId] || 0) + (teamPlayCount[awayId] || 0));
+          const priorityScore =
+            preferPriorityTeams && (pendingPriorityTeams.has(homeId) || pendingPriorityTeams.has(awayId)) ? 25 : 0;
+          const firstSlotPenalty = isFirstSlot ? -((teamFirstSlotCount[homeId] || 0) + (teamFirstSlotCount[awayId] || 0)) : 0;
+          const stableJitter = (Number.parseInt(String(fixture.round || 0), 10) * 7 + Number.parseInt(String(fixture.match || 0), 10) * 13 + index) % 3;
+
+          const score = idleScore * 20 + playCountScore * 8 + priorityScore + firstSlotPenalty + stableJitter;
+          if (score > bestScore) {
+            best = fixture;
+            bestScore = score;
+          }
+        });
+
+        return best;
+      };
+
+      while (selected.length < matchesPerDay) {
+        const nonConflicting = remainingFixtures.filter((fixture) => {
+          const homeId = String(fixture.homeId || '').trim();
+          const awayId = String(fixture.awayId || '').trim();
+          if (!homeId || !awayId || homeId === awayId) return false;
+          if (selectedTeams.has(homeId) || selectedTeams.has(awayId)) return false;
+          return true;
+        });
+
+        if (!nonConflicting.length) break;
+
+        const mustPlayCandidates = nonConflicting.filter((fixture) => fixtureIncludesAnyTeam(fixture, pendingPriorityTeams));
+        const candidatePool = mustPlayCandidates.length ? mustPlayCandidates : nonConflicting;
+        const picked = pickBestFixture(candidatePool, {
+          preferPriorityTeams: mustPlayCandidates.length > 0,
+          isFirstSlot: selected.length === 0
+        });
+
+        if (!picked) break;
+
+        selected.push(picked);
+        selectedTeams.add(String(picked.homeId || '').trim());
+        selectedTeams.add(String(picked.awayId || '').trim());
+      }
+
+      return selected;
+    };
+
+    let dateGuard = 0;
+    while (remainingFixtures.length && dateGuard < 4000) {
       let probe = cursor;
       let guard = 0;
       while (guard < 2000 && !isDateAllowedByRules(probe, rules)) {
@@ -1796,22 +1946,78 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      const fixtureId = getFixtureId(inputFixtures[index]);
-      nextDates[fixtureId] = probe;
-
-      currentDateCount += 1;
-      if (currentDateCount >= Math.max(1, rules.matchesPerDay)) {
-        cursor = addDays(probe, Math.max(1, rules.gapDays));
-        currentDateCount = 0;
-      } else {
-        cursor = probe;
+      const dailyFixtures = takeDailyFixtureSet();
+      if (!dailyFixtures.length) {
+        cursor = addDays(probe, 1);
+        dateGuard += 1;
+        continue;
       }
+
+      if (dailyFixtures[0]) {
+        const firstHome = String(dailyFixtures[0].homeId || '').trim();
+        const firstAway = String(dailyFixtures[0].awayId || '').trim();
+        if (firstHome) teamFirstSlotCount[firstHome] = (teamFirstSlotCount[firstHome] || 0) + 1;
+        if (firstAway) teamFirstSlotCount[firstAway] = (teamFirstSlotCount[firstAway] || 0) + 1;
+      }
+
+      const playedToday = new Set();
+
+      dailyFixtures.forEach((fixture, slotIndex) => {
+        const fixtureId = getFixtureId(fixture);
+        const slotTime = rules.kickoffTime
+          ? addMinutesToTime(rules.kickoffTime, slotIndex * Math.max(1, rules.kickoffGapMinutes))
+          : '';
+        nextDates[fixtureId] = combineFixtureDateTime(probe, slotTime);
+
+        const homeId = String(fixture.homeId || '').trim();
+        const awayId = String(fixture.awayId || '').trim();
+        if (homeId) {
+          playedToday.add(homeId);
+          teamPlayCount[homeId] = (teamPlayCount[homeId] || 0) + 1;
+          teamIdleStreak[homeId] = 0;
+          pendingPriorityTeams.delete(homeId);
+        }
+        if (awayId) {
+          playedToday.add(awayId);
+          teamPlayCount[awayId] = (teamPlayCount[awayId] || 0) + 1;
+          teamIdleStreak[awayId] = 0;
+          pendingPriorityTeams.delete(awayId);
+        }
+      });
+
+      allTeams.forEach((teamId) => {
+        if (playedToday.has(teamId)) return;
+        if (!teamHasRemainingFixture(teamId)) {
+          pendingPriorityTeams.delete(teamId);
+          return;
+        }
+        teamIdleStreak[teamId] = (teamIdleStreak[teamId] || 0) + 1;
+        pendingPriorityTeams.add(teamId);
+      });
+
+      const assignedIds = new Set(dailyFixtures.map((fixture) => getFixtureId(fixture)));
+      for (let index = remainingFixtures.length - 1; index >= 0; index -= 1) {
+        const fixtureId = getFixtureId(remainingFixtures[index]);
+        if (assignedIds.has(fixtureId)) {
+          remainingFixtures.splice(index, 1);
+        }
+      }
+
+      cursor = addDays(probe, Math.max(1, rules.gapDays));
+      dateGuard += 1;
+    }
+
+    if (remainingFixtures.length) {
+      return {
+        ok: false,
+        message: 'Could not assign dates fairly for all fixtures with the current rules. Try reducing matches per day or relaxing date constraints.'
+      };
     }
 
     return {
       ok: true,
       dateMap: nextDates,
-      matchesPerDay: Math.max(1, rules.matchesPerDay)
+      matchesPerDay
     };
   };
 
@@ -2076,15 +2282,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const fixtureDateLabel = (fixtureId) => {
-    const value = String(fixtureDates[fixtureId] || '').trim();
+    const value = normalizeFixtureStamp(fixtureDates[fixtureId]);
     if (!value) return '';
-    const date = new Date(value);
+    const parsed = splitFixtureStamp(value);
+    const date = new Date(`${parsed.date}T00:00:00`);
     if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat('en-GB', {
+    const dateLabel = new Intl.DateTimeFormat('en-GB', {
       day: '2-digit',
       month: 'short',
       year: 'numeric'
     }).format(date);
+    return parsed.time ? `${dateLabel} ${parsed.time}` : dateLabel;
   };
 
   const buildCalendarHref = (fixture, fixtureId) => {
@@ -2092,7 +2300,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     params.set('fixtureSectionKey', fixtureSectionKey);
     params.set('fixtureId', fixtureId);
     params.set('fixtureLabel', `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`);
-    const existing = String(fixtureDates[fixtureId] || '').trim();
+    const existing = normalizeFixtureStamp(fixtureDates[fixtureId]);
     if (existing) {
       params.set('date', existing);
     }
@@ -2174,6 +2382,48 @@ const hydrateFixtureCreator = (fixtureNode) => {
         }
 
         seenPairs.add(pairKey);
+      }
+    }
+
+    return { ok: true };
+  };
+
+  const validateHomeAwayBalancePerLeg = (fixtures, teamIds) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (!normalizedTeams.length) {
+      return { ok: false, message: 'At least one team is required for fairness checks.' };
+    }
+
+    const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    if (!legLabels.length) {
+      return { ok: false, message: 'Fixture legs are missing; unable to validate home/away fairness.' };
+    }
+
+    for (const legLabel of legLabels) {
+      const homeCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      const awayCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      const legFixtures = fixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+
+      legFixtures.forEach((fixture) => {
+        const homeId = String(fixture.homeId || '').trim();
+        const awayId = String(fixture.awayId || '').trim();
+        if (homeId in homeCount) homeCount[homeId] += 1;
+        if (awayId in awayCount) awayCount[awayId] += 1;
+      });
+
+      const imbalances = normalizedTeams
+        .map((teamId) => ({
+          teamId,
+          delta: Math.abs((homeCount[teamId] || 0) - (awayCount[teamId] || 0))
+        }))
+        .filter((entry) => entry.delta > 1);
+
+      if (imbalances.length) {
+        const first = imbalances[0];
+        return {
+          ok: false,
+          message: `${teamNameById(first.teamId)} has an unfair home/away split in ${legLabel} leg.`
+        };
       }
     }
 
@@ -2291,6 +2541,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return legValidation;
     }
 
+    const homeAwayValidation = validateHomeAwayBalancePerLeg(repairedFixtures, normalizedTeams);
+    if (!homeAwayValidation.ok) {
+      return homeAwayValidation;
+    }
+
     const changedIndexes = repairedFixtures
       .map((entry, index) => ({
         index,
@@ -2344,7 +2599,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
             <td>
               ${(() => {
                 const fixtureId = getFixtureId(fixture);
-                const dateValue = String(fixtureDates[fixtureId] || '').trim();
+                const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
+                const dateValue = stamp.date;
+                const timeValue = stamp.time;
                 const label = fixtureDateLabel(fixtureId) || (isAdminMode ? 'Set date in calendar' : 'TBD');
                 if (!isAdminMode) {
                   return `<span class="fixture-date-label">${escapeHtmlText(label)}</span>`;
@@ -2352,6 +2609,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
                 return `
                   <div class="fixture-date-edit-wrap">
                     <input type="date" class="fixture-inline-input" data-fixture-date-input value="${escapeHtmlAttribute(dateValue)}" />
+                    <input type="time" class="fixture-inline-input" data-fixture-time-input value="${escapeHtmlAttribute(timeValue)}" />
                     <a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">Open calendar</a>
                   </div>
                 `;
@@ -2408,6 +2666,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
       lastFixtures = [];
       renderFixtures(lastFixtures);
       if (statusNode) statusNode.textContent = generationValidation.message;
+      return;
+    }
+
+    const homeAwayValidation = validateHomeAwayBalancePerLeg(lastFixtures, teams);
+    if (!homeAwayValidation.ok) {
+      lastFixtures = [];
+      renderFixtures(lastFixtures);
+      if (statusNode) statusNode.textContent = homeAwayValidation.message;
       return;
     }
 
@@ -2512,11 +2778,38 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const fixtureId = getFixtureId(fixture);
 
     if (target.matches('[data-fixture-date-input]') && target instanceof HTMLInputElement) {
-      const nextDate = String(target.value || '').trim();
-      if (!nextDate) {
+      const dateInput = row.querySelector('[data-fixture-date-input]');
+      const timeInput = row.querySelector('[data-fixture-time-input]');
+      const nextDate = String(dateInput instanceof HTMLInputElement ? dateInput.value : '').trim();
+      const nextTime = String(timeInput instanceof HTMLInputElement ? timeInput.value : '').trim();
+      const nextStamp = combineFixtureDateTime(nextDate, nextTime);
+      if (!nextStamp) {
         delete fixtureDates[fixtureId];
       } else {
-        fixtureDates[fixtureId] = nextDate;
+        fixtureDates[fixtureId] = nextStamp;
+      }
+      localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+      window.dispatchEvent(
+        new CustomEvent('bhanoyi:fixtures-updated', {
+          detail: {
+            sectionKey: fixtureSectionKey
+          }
+        })
+      );
+      renderFixtures(lastFixtures);
+      return;
+    }
+
+    if (target.matches('[data-fixture-time-input]') && target instanceof HTMLInputElement) {
+      const dateInput = row.querySelector('[data-fixture-date-input]');
+      const timeInput = row.querySelector('[data-fixture-time-input]');
+      const nextDate = String(dateInput instanceof HTMLInputElement ? dateInput.value : '').trim();
+      const nextTime = String(timeInput instanceof HTMLInputElement ? timeInput.value : '').trim();
+      const nextStamp = combineFixtureDateTime(nextDate, nextTime);
+      if (!nextStamp) {
+        delete fixtureDates[fixtureId];
+      } else {
+        fixtureDates[fixtureId] = nextStamp;
       }
       localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
       window.dispatchEvent(
@@ -3275,9 +3568,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
       serialized.forEach((entry) => {
         const fixtureId = String(entry.fixtureId || '').trim();
-        const start = normalizeDateString(entry.start);
-        if (fixtureId && start) {
-          nextMap[fixtureId] = start;
+        const startDate = normalizeDateString(entry.start);
+        const startTime = normalizeTimeString(entry.start);
+        const startStamp = startDate ? (startTime ? `${startDate}T${startTime}` : startDate) : '';
+        if (fixtureId && startStamp) {
+          nextMap[fixtureId] = startStamp;
         }
       });
 
@@ -3450,8 +3745,14 @@ const hydrateSchoolCalendar = (calendarShell) => {
       const fixtureMapRaw = loadFixtureDateMap();
       const fixtureCatalog = loadFixtureCatalog();
       const fixtureDateEntries = Object.entries(fixtureMapRaw)
-        .map(([fixtureId, dateValue]) => [String(fixtureId || '').trim(), normalizeDateString(dateValue)])
-        .filter(([fixtureId, dateValue]) => fixtureId.startsWith(`${fixtureSectionKey}:`) && Boolean(dateValue));
+        .map(([fixtureId, dateValue]) => {
+          const raw = String(dateValue || '').trim();
+          const datePart = normalizeDateString(raw);
+          const timePart = normalizeTimeString(raw);
+          const stamp = datePart ? (timePart ? `${datePart}T${timePart}` : datePart) : '';
+          return [String(fixtureId || '').trim(), stamp];
+        })
+        .filter(([fixtureId, stamp]) => fixtureId.startsWith(`${fixtureSectionKey}:`) && Boolean(stamp));
 
       const expectedFixtureIds = new Set(fixtureDateEntries.map(([fixtureId]) => fixtureId));
       const fixtureEvents = calendar
@@ -3473,7 +3774,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
       let hasChanges = false;
 
-      fixtureDateEntries.forEach(([fixtureId, fixtureDate]) => {
+      fixtureDateEntries.forEach(([fixtureId, fixtureStamp]) => {
         const linkedEntries = fixturesById.get(fixtureId) || [];
         const primaryEntry = linkedEntries[0] || null;
 
@@ -3484,12 +3785,17 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
         const eventTitle = buildFixtureEventTitle(fixtureId, fixtureCatalog);
 
+        const fixtureDate = normalizeDateString(fixtureStamp);
+        const fixtureTime = normalizeTimeString(fixtureStamp);
+        const fixtureStart = fixtureTime ? `${fixtureDate}T${fixtureTime}` : fixtureDate;
+        const isTimedFixture = Boolean(fixtureTime);
+
         if (!primaryEntry) {
           const newEntry = calendar.addEvent({
             id: `${fixtureId}:event`,
             title: eventTitle,
-            start: fixtureDate,
-            allDay: true,
+            start: fixtureStart,
+            allDay: !isTimedFixture,
             extendedProps: {
               eventType: 'Sports',
               fixtureId,
@@ -3502,14 +3808,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
           return;
         }
 
-        const currentDate = normalizeDateString(primaryEntry.startStr || primaryEntry.start || '');
-        if (currentDate !== fixtureDate) {
-          if (primaryEntry.allDay === false) {
-            const existingTime = normalizeTimeString(primaryEntry.startStr || primaryEntry.start || '');
-            primaryEntry.setStart(combineDateAndTime(fixtureDate, existingTime));
-          } else {
-            primaryEntry.setStart(fixtureDate);
-          }
+        const currentStartDate = normalizeDateString(primaryEntry.startStr || primaryEntry.start || '');
+        const currentStartTime = normalizeTimeString(primaryEntry.startStr || primaryEntry.start || '');
+        const currentStamp = currentStartDate ? (currentStartTime ? `${currentStartDate}T${currentStartTime}` : currentStartDate) : '';
+        if (currentStamp !== fixtureStart || primaryEntry.allDay === isTimedFixture) {
+          primaryEntry.setAllDay(!isTimedFixture);
+          primaryEntry.setStart(fixtureStart);
           hasChanges = true;
         }
 
@@ -4024,8 +4328,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
     if (incomingDate) {
       const startInput = form.querySelector('input[name="start"]');
+      const startTimeInput = form.querySelector('input[name="startTime"]');
       if (startInput instanceof HTMLInputElement) {
         startInput.value = normalizeDateString(incomingDate);
+      }
+      if (startTimeInput instanceof HTMLInputElement) {
+        startTimeInput.value = normalizeTimeString(incomingDate);
       }
     }
     if (incomingFixtureLabel) {
