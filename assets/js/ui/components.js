@@ -2326,7 +2326,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           halves,
           minutesPerHalf,
           breakMinutes,
-          formatLabel: `${halves} x ${minutesPerHalf} min (break ${breakMinutes} min)`
+          formatLabel: `${halves} x ${minutesPerHalf} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`})`
         };
       }
     },
@@ -2351,7 +2351,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           minutesPerQuarter,
           breakMinutes,
           halfTimeMinutes,
-          formatLabel: `${quarters} x ${minutesPerQuarter} min (quarter break ${breakMinutes} min, half-time ${halfTimeMinutes} min)`
+          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no quarter break' : `quarter break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time break' : `half-time ${halfTimeMinutes} min`})`
         };
       }
     }
