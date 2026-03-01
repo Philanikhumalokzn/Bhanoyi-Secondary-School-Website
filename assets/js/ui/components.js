@@ -1531,9 +1531,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const fixtureRulesStorageKey = `bhanoyi.fixtureDateRules.${fixtureSectionKey}`;
+  const fixtureCreatorStateStorageKey = `bhanoyi.fixtureCreatorState.${fixtureSectionKey}`;
   const defaultRulesBucket = 'default';
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   let fixtureDates = {};
+  let fixtureCreatorState = {
+    lastSport: '',
+    sports: {}
+  };
 
   if (rulesPanel instanceof HTMLElement) {
     rulesPanel.classList.toggle('is-hidden', !isAdminMode);
@@ -1553,6 +1558,32 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
     } catch {
       fixtureDates = {};
+    }
+  };
+
+  const loadFixtureCreatorState = () => {
+    try {
+      const raw = localStorage.getItem(fixtureCreatorStateStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      fixtureCreatorState = {
+        lastSport: String(parsed.lastSport || '').trim(),
+        sports: parsed.sports && typeof parsed.sports === 'object' ? parsed.sports : {}
+      };
+    } catch {
+      fixtureCreatorState = {
+        lastSport: '',
+        sports: {}
+      };
+    }
+  };
+
+  const saveFixtureCreatorState = () => {
+    try {
+      localStorage.setItem(fixtureCreatorStateStorageKey, JSON.stringify(fixtureCreatorState));
+    } catch {
+      return;
     }
   };
 
@@ -2270,6 +2301,90 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return value === 'soccer' || value === 'netball' ? value : '';
   };
 
+  const setSelectedTeamIds = (teamIds) => {
+    const allowed = new Set((teamIds || []).filter((teamId) => houseOptions.some((team) => team.id === teamId)));
+    teamPickInputs.forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+      input.checked = allowed.has(input.value);
+    });
+  };
+
+  const readSportSetupValues = (sportKey) => {
+    if (sportKey === 'soccer') {
+      return {
+        halfMinutes: parsePositiveInt(
+          soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
+          40
+        ),
+        breakMinutes: parsePositiveInt(
+          soccerBreakMinutesInput instanceof HTMLInputElement ? soccerBreakMinutesInput.value : '',
+          10
+        )
+      };
+    }
+
+    if (sportKey === 'netball') {
+      return {
+        quarterMinutes: parsePositiveInt(
+          netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
+          15
+        ),
+        breakMinutes: parsePositiveInt(
+          netballBreakMinutesInput instanceof HTMLInputElement ? netballBreakMinutesInput.value : '',
+          3
+        ),
+        halfTimeMinutes: parsePositiveInt(
+          netballHalfTimeMinutesInput instanceof HTMLInputElement ? netballHalfTimeMinutesInput.value : '',
+          5
+        )
+      };
+    }
+
+    return {};
+  };
+
+  const applySportSetupValues = (sportKey, setup = {}) => {
+    if (sportKey === 'soccer') {
+      if (soccerHalfMinutesInput instanceof HTMLInputElement) {
+        soccerHalfMinutesInput.value = String(parsePositiveInt(setup.halfMinutes, 40));
+      }
+      if (soccerBreakMinutesInput instanceof HTMLInputElement) {
+        soccerBreakMinutesInput.value = String(parsePositiveInt(setup.breakMinutes, 10));
+      }
+      return;
+    }
+
+    if (sportKey === 'netball') {
+      if (netballQuarterMinutesInput instanceof HTMLInputElement) {
+        netballQuarterMinutesInput.value = String(parsePositiveInt(setup.quarterMinutes, 15));
+      }
+      if (netballBreakMinutesInput instanceof HTMLInputElement) {
+        netballBreakMinutesInput.value = String(parsePositiveInt(setup.breakMinutes, 3));
+      }
+      if (netballHalfTimeMinutesInput instanceof HTMLInputElement) {
+        netballHalfTimeMinutesInput.value = String(parsePositiveInt(setup.halfTimeMinutes, 5));
+      }
+    }
+  };
+
+  const sanitizeStoredFixturesForSport = (sportKey, fixtures) => {
+    if (!Array.isArray(fixtures)) return [];
+    return fixtures
+      .filter((entry) => entry && typeof entry === 'object')
+      .map((entry) => ({
+        slotKey: String(entry.slotKey || '').trim() || `R${entry.round}M${entry.match}`,
+        round: parsePositiveInt(entry.round, 1),
+        leg: String(entry.leg || '').trim() || 'First',
+        match: parsePositiveInt(entry.match, 1),
+        homeId: String(entry.homeId || '').trim(),
+        awayId: String(entry.awayId || '').trim(),
+        sportKey,
+        sportLabel: String(entry.sportLabel || '').trim(),
+        formatLabel: String(entry.formatLabel || '').trim()
+      }))
+      .filter((entry) => entry.homeId && entry.awayId && entry.homeId !== entry.awayId);
+  };
+
   const selectedSportProfile = () => {
     const key = selectedSportKey();
     return key ? { key, ...sportProfiles[key] } : null;
@@ -2764,7 +2879,71 @@ const hydrateFixtureCreator = (fixtureNode) => {
       autoFillFixtureDates(lastFixtures);
       loadFixtureDates();
     }
+
+    const activeSport = selectedSportKey();
+    if (activeSport) {
+      fixtureCreatorState.lastSport = activeSport;
+      fixtureCreatorState.sports[activeSport] = {
+        selectedTeamIds: selectedTeamIds(),
+        fixtures: lastFixtures.map((entry) => ({ ...entry })),
+        setup: readSportSetupValues(activeSport),
+        formatLabel: String(lastFormatLabel || '').trim()
+      };
+      saveFixtureCreatorState();
+    }
+
     renderFixtures(lastFixtures);
+  };
+
+  const restoreSavedStateForSport = (sportKey) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return false;
+
+    const saved = fixtureCreatorState.sports?.[key];
+    if (!saved || typeof saved !== 'object') return false;
+
+    const selectedIds = Array.isArray(saved.selectedTeamIds)
+      ? saved.selectedTeamIds.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    if (selectedIds.length) {
+      setSelectedTeamIds(selectedIds);
+    }
+
+    applySportSetupValues(key, saved.setup || {});
+    refreshSportPanelState();
+
+    const profile = selectedSportProfile();
+    if (!profile) return false;
+
+    const teams = selectedTeamIds();
+    const sanitizedFixtures = sanitizeStoredFixturesForSport(key, saved.fixtures || []);
+    if (!sanitizedFixtures.length) return false;
+
+    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, teams);
+    if (!integrity.ok) return false;
+    const balance = validateHomeAwayBalancePerLeg(sanitizedFixtures, teams);
+    if (!balance.ok) return false;
+
+    const setup = profile.readSetup();
+    lastSportKey = key;
+    lastSportLabel = profile.label;
+    lastFormatLabel = String(setup.formatLabel || saved.formatLabel || '').trim();
+    lastFixtures = sanitizedFixtures.map((entry) => ({
+      ...entry,
+      sportKey: key,
+      sportLabel: profile.label,
+      formatLabel: String(entry.formatLabel || lastFormatLabel || '').trim()
+    }));
+
+    saveFixtureCatalog(lastFixtures);
+    loadFixtureDates();
+    renderFixtures(lastFixtures);
+
+    if (statusNode) {
+      statusNode.textContent = `${profile.label}: loaded last saved fixture state.`;
+    }
+    showSmartToast(`${profile.label}: loaded last saved fixture state.`, { tone: 'info' });
+    return true;
   };
 
   const escapeCsvValue = (value) => {
@@ -2965,6 +3144,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       lastFixtures = repairResult.fixtures;
       saveFixtureCatalog(lastFixtures);
+      const activeSport = selectedSportKey();
+      if (activeSport) {
+        fixtureCreatorState.lastSport = activeSport;
+        fixtureCreatorState.sports[activeSport] = {
+          selectedTeamIds: selectedTeamIds(),
+          fixtures: lastFixtures.map((entry) => ({ ...entry })),
+          setup: readSportSetupValues(activeSport),
+          formatLabel: String(lastFormatLabel || '').trim()
+        };
+        saveFixtureCreatorState();
+      }
       renderFixtures(lastFixtures);
       if (statusNode) {
         statusNode.textContent = repairResult.affectedOtherCount > 0
@@ -3007,6 +3197,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       lastFixtures = repairResult.fixtures;
       saveFixtureCatalog(lastFixtures);
+      const activeSport = selectedSportKey();
+      if (activeSport) {
+        fixtureCreatorState.lastSport = activeSport;
+        fixtureCreatorState.sports[activeSport] = {
+          selectedTeamIds: selectedTeamIds(),
+          fixtures: lastFixtures.map((entry) => ({ ...entry })),
+          setup: readSportSetupValues(activeSport),
+          formatLabel: String(lastFormatLabel || '').trim()
+        };
+        saveFixtureCreatorState();
+      }
       renderFixtures(lastFixtures);
       if (statusNode) {
         statusNode.textContent = repairResult.affectedOtherCount > 0
@@ -3018,8 +3219,15 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   sportSelect?.addEventListener('change', () => {
     hydrateDateRules(activeRulesBucket());
+    const activeSport = selectedSportKey();
+    if (activeSport) {
+      fixtureCreatorState.lastSport = activeSport;
+      saveFixtureCreatorState();
+    }
     refreshSportPanelState();
-    generateFixtures();
+    if (!restoreSavedStateForSport(activeSport)) {
+      generateFixtures();
+    }
   });
 
   [
@@ -3054,9 +3262,19 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   loadFixtureDates();
-  hydrateDateRules();
+  loadFixtureCreatorState();
+  if (sportSelect instanceof HTMLSelectElement) {
+    const savedSport = String(fixtureCreatorState.lastSport || '').trim();
+    if (savedSport === 'soccer' || savedSport === 'netball') {
+      sportSelect.value = savedSport;
+    }
+  }
+  hydrateDateRules(activeRulesBucket());
   refreshSportPanelState();
-  generateFixtures();
+  const bootSport = selectedSportKey();
+  if (!restoreSavedStateForSport(bootSport)) {
+    generateFixtures();
+  }
 };
 
 const renderSchoolCalendarSection = (section, sectionIndex) => {
