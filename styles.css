@@ -2454,7 +2454,7 @@ body.news-read-open {
 .sports-workflow-step.is-expanded .sports-workflow-body {
   opacity: 1;
   transform: none;
-  overflow-y: auto;
+  overflow-y: visible;
   overscroll-behavior: contain;
   position: relative;
   z-index: 201;
@@ -2799,7 +2799,7 @@ body.news-read-open {
 .calendar-workflow-step.is-expanded .calendar-workflow-body {
   opacity: 1;
   transform: none;
-  overflow-y: auto;
+  overflow-y: visible;
   overscroll-behavior: contain;
   position: relative;
   z-index: 201;
