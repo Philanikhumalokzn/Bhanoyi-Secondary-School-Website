@@ -2335,6 +2335,23 @@ body.news-read-open {
   text-decoration: underline;
 }
 
+.fixture-date-edit-wrap {
+  display: grid;
+  gap: 4px;
+}
+
+.fixture-inline-input,
+.fixture-inline-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 5px 7px;
+  min-width: 120px;
+}
+
 .fixture-table tbody tr:nth-child(even) td {
   background: color-mix(in srgb, var(--surface-alt) 45%, var(--surface));
 }

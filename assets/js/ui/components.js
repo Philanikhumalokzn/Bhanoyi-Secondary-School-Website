@@ -1163,13 +1163,36 @@ const hydrateMatchLog = (matchLogNode) => {
   render();
 };
 
-const renderFixtureCreatorSection = (section, sectionIndex) => {
-  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
-  const houseOptions = normalizeMatchTeams(
+const isGenericHouseName = (value) => /^house\s*\d+$/i.test(String(value || '').trim());
+
+const resolveFixtureHouseOptions = (section, context = {}) => {
+  const ownOptions = normalizeMatchTeams(
     Array.isArray(section.houseOptions) && section.houseOptions.length
       ? section.houseOptions
       : section.teams
   );
+
+  const pageSections = Array.isArray(context?.page?.sections) ? context.page.sections : [];
+  const matchLogSection = pageSections.find((entry) => entry?.type === 'match-log');
+  const sharedOptions = normalizeMatchTeams(matchLogSection?.houseOptions || []);
+
+  if (!ownOptions.length && sharedOptions.length) {
+    return sharedOptions;
+  }
+
+  const ownGeneric = ownOptions.length && ownOptions.every((entry) => isGenericHouseName(entry.name));
+  const sharedNonGeneric = sharedOptions.length && sharedOptions.some((entry) => !isGenericHouseName(entry.name));
+
+  if (ownGeneric && sharedNonGeneric) {
+    return sharedOptions;
+  }
+
+  return ownOptions;
+};
+
+const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const houseOptions = resolveFixtureHouseOptions(section, context);
 
   const config = {
     sectionKey: fallbackSectionKey,
@@ -1307,6 +1330,7 @@ const buildSingleRoundRobin = (teamIds = []) => {
       }
 
       roundMatches.push({
+        slotKey: `R${roundIndex + 1}M${pairIndex + 1}`,
         round: roundIndex + 1,
         leg: 'First',
         match: pairIndex + 1,
@@ -1325,6 +1349,7 @@ const buildSingleRoundRobin = (teamIds = []) => {
   const secondLegOffset = rounds;
   const secondLeg = firstLeg.map((fixture) => ({
     ...fixture,
+    slotKey: `R${fixture.round + secondLegOffset}M${fixture.match}`,
     round: fixture.round + secondLegOffset,
     leg: 'Return',
     homeId: fixture.awayId,
@@ -1395,7 +1420,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const getFixtureId = (fixture) =>
-    `${fixtureSectionKey}:${fixture.sportKey}:${fixture.round}:${fixture.leg}:${fixture.match}:${fixture.homeId}:${fixture.awayId}`;
+    `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
 
   const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
@@ -1581,26 +1606,47 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
+    const teamOptionMarkup = (selectedId) =>
+      houseOptions
+        .map(
+          (team) => `<option value="${escapeHtmlAttribute(team.id)}" ${team.id === selectedId ? 'selected' : ''}>${escapeHtmlText(team.name)}</option>`
+        )
+        .join('');
+
     bodyNode.innerHTML = fixtures
       .map(
-        (fixture) => `
-          <tr>
+        (fixture, index) => `
+          <tr data-fixture-row="${index}">
             <td>${fixture.round}</td>
             <td>${fixture.leg}</td>
             <td>R${fixture.round}M${fixture.match}</td>
             <td>
               ${(() => {
                 const fixtureId = getFixtureId(fixture);
+                const dateValue = String(fixtureDates[fixtureId] || '').trim();
                 const label = fixtureDateLabel(fixtureId) || (isAdminMode ? 'Set date in calendar' : 'TBD');
                 if (!isAdminMode) {
                   return `<span class="fixture-date-label">${escapeHtmlText(label)}</span>`;
                 }
-                return `<a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">${escapeHtmlText(label)}</a>`;
+                return `
+                  <div class="fixture-date-edit-wrap">
+                    <input type="date" class="fixture-inline-input" data-fixture-date-input value="${escapeHtmlAttribute(dateValue)}" />
+                    <a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">Open calendar</a>
+                  </div>
+                `;
               })()}
             </td>
             <td>${escapeHtmlText(fixture.formatLabel || '')}</td>
-            <td>${escapeHtmlText(teamNameById(fixture.homeId))}</td>
-            <td>${escapeHtmlText(teamNameById(fixture.awayId))}</td>
+            <td>
+              ${isAdminMode
+                ? `<select class="fixture-inline-select" data-fixture-home-select>${teamOptionMarkup(fixture.homeId)}</select>`
+                : escapeHtmlText(teamNameById(fixture.homeId))}
+            </td>
+            <td>
+              ${isAdminMode
+                ? `<select class="fixture-inline-select" data-fixture-away-select>${teamOptionMarkup(fixture.awayId)}</select>`
+                : escapeHtmlText(teamNameById(fixture.awayId))}
+            </td>
           </tr>
         `
       )
@@ -1697,6 +1743,68 @@ const hydrateFixtureCreator = (fixtureNode) => {
   generateButton.addEventListener('click', generateFixtures);
   teamPickInputs.forEach((input) => {
     input.addEventListener('change', generateFixtures);
+  });
+
+  bodyNode.addEventListener('change', (event) => {
+    if (!isAdminMode) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const row = target.closest('[data-fixture-row]');
+    if (!(row instanceof HTMLElement)) return;
+    const rowIndex = Number.parseInt(row.dataset.fixtureRow || '', 10);
+    if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= lastFixtures.length) return;
+
+    const fixture = lastFixtures[rowIndex];
+    const fixtureId = getFixtureId(fixture);
+
+    if (target.matches('[data-fixture-date-input]') && target instanceof HTMLInputElement) {
+      const nextDate = String(target.value || '').trim();
+      if (!nextDate) {
+        delete fixtureDates[fixtureId];
+      } else {
+        fixtureDates[fixtureId] = nextDate;
+      }
+      localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+      window.dispatchEvent(
+        new CustomEvent('bhanoyi:fixtures-updated', {
+          detail: {
+            sectionKey: fixtureSectionKey
+          }
+        })
+      );
+      renderFixtures(lastFixtures);
+      return;
+    }
+
+    if (target.matches('[data-fixture-home-select]') && target instanceof HTMLSelectElement) {
+      const nextHome = String(target.value || '').trim();
+      if (!nextHome) return;
+      if (nextHome === fixture.awayId) {
+        if (statusNode) statusNode.textContent = 'Home and away teams must be different.';
+        renderFixtures(lastFixtures);
+        return;
+      }
+      fixture.homeId = nextHome;
+      saveFixtureCatalog(lastFixtures);
+      renderFixtures(lastFixtures);
+      if (statusNode) statusNode.textContent = 'Fixture home team updated.';
+      return;
+    }
+
+    if (target.matches('[data-fixture-away-select]') && target instanceof HTMLSelectElement) {
+      const nextAway = String(target.value || '').trim();
+      if (!nextAway) return;
+      if (nextAway === fixture.homeId) {
+        if (statusNode) statusNode.textContent = 'Home and away teams must be different.';
+        renderFixtures(lastFixtures);
+        return;
+      }
+      fixture.awayId = nextAway;
+      saveFixtureCatalog(lastFixtures);
+      renderFixtures(lastFixtures);
+      if (statusNode) statusNode.textContent = 'Fixture away team updated.';
+    }
   });
 
   sportSelect?.addEventListener('change', () => {
@@ -3338,7 +3446,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   }
 
   if (effectiveSection.type === 'fixture-creator') {
-    return renderFixtureCreatorSection(effectiveSection, sectionIndex);
+    return renderFixtureCreatorSection(effectiveSection, sectionIndex, context);
   }
 
   if (effectiveSection.type === 'match-log') {
