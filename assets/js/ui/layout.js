@@ -63,6 +63,96 @@ const bindMobileNav = () => {
   });
 };
 
+const initCollapsiblePageSections = (pageKey) => {
+  const key = String(pageKey || '').trim().toLowerCase();
+  if (key !== 'sports' && key !== 'calendar') return;
+
+  const sectionNodes = Array.from(document.querySelectorAll('#main-content > section.section'));
+  if (!sectionNodes.length) return;
+
+  const preparedSections = sectionNodes
+    .map((section) => {
+      if (!(section instanceof HTMLElement)) return null;
+
+      const container = section.querySelector(':scope > .container');
+      if (!(container instanceof HTMLElement)) return null;
+
+      const heading = container.querySelector(':scope > h2');
+      if (!(heading instanceof HTMLElement)) return null;
+
+      let body = container.querySelector(':scope > .page-section-collapsible-body');
+      if (!(body instanceof HTMLElement)) {
+        body = document.createElement('div');
+        body.className = 'page-section-collapsible-body';
+
+        const nodesToMove = [];
+        let cursor = heading.nextSibling;
+        while (cursor) {
+          nodesToMove.push(cursor);
+          cursor = cursor.nextSibling;
+        }
+        nodesToMove.forEach((node) => body.appendChild(node));
+        container.appendChild(body);
+      }
+
+      section.classList.add('page-section-collapsible', 'is-collapsed');
+      section.tabIndex = 0;
+      section.setAttribute('role', 'button');
+      section.setAttribute('aria-expanded', 'false');
+      heading.classList.add('page-section-collapsible-heading');
+      body.style.maxHeight = '0px';
+
+      return { section, body };
+    })
+    .filter(Boolean);
+
+  if (!preparedSections.length) return;
+
+  const collapseSection = (entry) => {
+    entry.section.classList.add('is-collapsed');
+    entry.section.classList.remove('is-expanded');
+    entry.section.setAttribute('aria-expanded', 'false');
+    entry.body.style.maxHeight = '0px';
+  };
+
+  const expandSection = (entry) => {
+    entry.section.classList.remove('is-collapsed');
+    entry.section.classList.add('is-expanded');
+    entry.section.setAttribute('aria-expanded', 'true');
+    entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+  };
+
+  const openOnly = (targetSection) => {
+    preparedSections.forEach((entry) => {
+      if (entry.section === targetSection) {
+        expandSection(entry);
+      } else {
+        collapseSection(entry);
+      }
+    });
+  };
+
+  preparedSections.forEach((entry) => {
+    entry.section.addEventListener('click', () => {
+      openOnly(entry.section);
+    });
+
+    entry.section.addEventListener('keydown', (event) => {
+      if (!(event instanceof KeyboardEvent)) return;
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openOnly(entry.section);
+    });
+  });
+
+  window.addEventListener('resize', () => {
+    preparedSections.forEach((entry) => {
+      if (!entry.section.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+    });
+  });
+};
+
 export const renderSite = (siteContent, page) => {
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
@@ -175,4 +265,5 @@ export const renderSite = (siteContent, page) => {
   initMatchEventLogs();
   initFixtureCreators();
   initSchoolCalendars();
+  initCollapsiblePageSections(page.key);
 };

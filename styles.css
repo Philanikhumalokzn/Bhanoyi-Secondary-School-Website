@@ -308,6 +308,60 @@ h1 {
   padding: 26px 0;
 }
 
+.page-section-collapsible {
+  cursor: pointer;
+}
+
+.page-section-collapsible .container {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.page-section-collapsible:hover .container,
+.page-section-collapsible:focus-visible .container,
+.page-section-collapsible.is-expanded .container {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  box-shadow: 0 8px 18px rgba(13, 34, 56, 0.12);
+}
+
+.page-section-collapsible-heading {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.page-section-collapsible-heading::after {
+  content: '▾';
+  font-size: 1rem;
+  color: var(--primary);
+  transform: rotate(-90deg);
+  transition: transform 180ms ease;
+}
+
+.page-section-collapsible.is-expanded .page-section-collapsible-heading::after {
+  transform: rotate(0deg);
+}
+
+.page-section-collapsible-body {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: max-height 240ms ease, opacity 180ms ease, transform 180ms ease;
+  margin-top: 0;
+}
+
+.page-section-collapsible.is-expanded .page-section-collapsible-body {
+  opacity: 1;
+  transform: translateY(0);
+  margin-top: 10px;
+}
+
 .section-alt {
   background: var(--surface-alt);
 }
