@@ -1635,6 +1635,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return parsed;
   };
 
+  const parseNonNegativeInt = (value, fallback) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return parsed;
+  };
+
   const activeRulesBucket = () => {
     const sportValue = String(sportSelect instanceof HTMLSelectElement ? sportSelect.value : '').trim();
     return sportValue === 'soccer' || sportValue === 'netball' ? sportValue : defaultRulesBucket;
@@ -2312,7 +2318,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
           40
         );
-        const breakMinutes = parsePositiveInt(
+        const breakMinutes = parseNonNegativeInt(
           soccerBreakMinutesInput instanceof HTMLInputElement ? soccerBreakMinutesInput.value : '',
           10
         );
@@ -2332,11 +2338,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
           netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
           15
         );
-        const breakMinutes = parsePositiveInt(
+        const breakMinutes = parseNonNegativeInt(
           netballBreakMinutesInput instanceof HTMLInputElement ? netballBreakMinutesInput.value : '',
           3
         );
-        const halfTimeMinutes = parsePositiveInt(
+        const halfTimeMinutes = parseNonNegativeInt(
           netballHalfTimeMinutesInput instanceof HTMLInputElement ? netballHalfTimeMinutesInput.value : '',
           5
         );
@@ -2371,7 +2377,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
           40
         ),
-        breakMinutes: parsePositiveInt(
+        breakMinutes: parseNonNegativeInt(
           soccerBreakMinutesInput instanceof HTMLInputElement ? soccerBreakMinutesInput.value : '',
           10
         )
@@ -2384,11 +2390,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
           netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
           15
         ),
-        breakMinutes: parsePositiveInt(
+        breakMinutes: parseNonNegativeInt(
           netballBreakMinutesInput instanceof HTMLInputElement ? netballBreakMinutesInput.value : '',
           3
         ),
-        halfTimeMinutes: parsePositiveInt(
+        halfTimeMinutes: parseNonNegativeInt(
           netballHalfTimeMinutesInput instanceof HTMLInputElement ? netballHalfTimeMinutesInput.value : '',
           5
         )
@@ -2404,7 +2410,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         soccerHalfMinutesInput.value = String(parsePositiveInt(setup.halfMinutes, 40));
       }
       if (soccerBreakMinutesInput instanceof HTMLInputElement) {
-        soccerBreakMinutesInput.value = String(parsePositiveInt(setup.breakMinutes, 10));
+        soccerBreakMinutesInput.value = String(parseNonNegativeInt(setup.breakMinutes, 10));
       }
       return;
     }
@@ -2414,10 +2420,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
         netballQuarterMinutesInput.value = String(parsePositiveInt(setup.quarterMinutes, 15));
       }
       if (netballBreakMinutesInput instanceof HTMLInputElement) {
-        netballBreakMinutesInput.value = String(parsePositiveInt(setup.breakMinutes, 3));
+        netballBreakMinutesInput.value = String(parseNonNegativeInt(setup.breakMinutes, 3));
       }
       if (netballHalfTimeMinutesInput instanceof HTMLInputElement) {
-        netballHalfTimeMinutesInput.value = String(parsePositiveInt(setup.halfTimeMinutes, 5));
+        netballHalfTimeMinutesInput.value = String(parseNonNegativeInt(setup.halfTimeMinutes, 5));
       }
     }
   };
