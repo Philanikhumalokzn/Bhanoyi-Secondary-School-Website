@@ -2519,8 +2519,13 @@ body.news-read-open {
 
 .school-event-type-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: center;
+}
+
+.school-event-type-icon {
+  font-size: 1rem;
 }
 
 .school-event-type-row input {
@@ -2724,6 +2729,23 @@ body.news-read-open {
   border: 1px solid var(--primary);
   background: color-mix(in srgb, var(--primary) 14%, #fff);
   color: var(--text);
+}
+
+.calendar-event-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.calendar-event-time {
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.calendar-event-title {
+  font-weight: 700;
 }
 
 .fc .school-term-bg {

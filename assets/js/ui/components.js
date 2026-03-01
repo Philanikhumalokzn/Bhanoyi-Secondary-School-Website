@@ -2807,6 +2807,38 @@ const hydrateSchoolCalendar = (calendarShell) => {
     return raw.replace(/\s+/g, ' ');
   };
 
+  const eventTypeIconMap = {
+    sports: '🏆',
+    religious: '🕊️',
+    cultural: '🎭',
+    entertainment: '🎉',
+    academic: '📘',
+    meeting: '🗓️',
+    assembly: '📣',
+    exam: '📝',
+    holiday: '🌴',
+    community: '🤝'
+  };
+
+  const resolveEventTypeIcon = (value) => {
+    const normalized = normalizeEventTypeLabel(value).toLowerCase();
+    if (!normalized) return '📅';
+    if (eventTypeIconMap[normalized]) return eventTypeIconMap[normalized];
+    if (normalized.includes('sport')) return '🏆';
+    if (normalized.includes('academ') || normalized.includes('exam') || normalized.includes('test')) return '📘';
+    if (normalized.includes('relig')) return '🕊️';
+    if (normalized.includes('cult')) return '🎭';
+    if (normalized.includes('entertain') || normalized.includes('fun')) return '🎉';
+    if (normalized.includes('meeting') || normalized.includes('staff')) return '🗓️';
+    return '📌';
+  };
+
+  const formatEventTypeWithIcon = (value) => {
+    const label = normalizeEventTypeLabel(value);
+    if (!label) return '📅 General';
+    return `${resolveEventTypeIcon(label)} ${label}`;
+  };
+
   const loadEventTypes = () => {
     try {
       const raw = localStorage.getItem(eventTypesStorageKey);
@@ -2848,7 +2880,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (!(eventTypeSelect instanceof HTMLSelectElement)) return;
     const existing = eventTypeSelect.value;
     eventTypeSelect.innerHTML = [
-      ...eventTypes.map((type) => `<option value="${escapeHtmlAttribute(type)}">${escapeHtmlText(type)}</option>`),
+      ...eventTypes.map(
+        (type) => `<option value="${escapeHtmlAttribute(type)}">${escapeHtmlText(formatEventTypeWithIcon(type))}</option>`
+      ),
       '<option value="__custom__">Other (create new type)</option>'
     ].join('');
     if (eventTypes.includes(existing)) {
@@ -2886,6 +2920,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       .map(
         (type, index) => `
           <div class="school-event-type-row" data-event-type-row="${index}">
+            <span class="school-event-type-icon" aria-hidden="true">${escapeHtmlText(resolveEventTypeIcon(type))}</span>
             <input type="text" value="${escapeHtmlAttribute(type)}" data-event-type-input="${index}" maxlength="60" />
             <button type="button" class="btn btn-secondary" data-event-type-delete="${index}">Delete</button>
           </div>
@@ -3529,6 +3564,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     dayOverlayList.innerHTML = dayEvents
       .map((entry) => {
         const eventType = escapeHtmlText(String(entry.extendedProps?.eventType || 'General'));
+        const eventTypeWithIcon = escapeHtmlText(formatEventTypeWithIcon(eventType));
         const title = escapeHtmlText(String(entry.title || 'Untitled event'));
         const eventId = escapeHtmlAttribute(String(entry.id || ''));
         const timeLabel = escapeHtmlText(formatTimeLabel(entry));
@@ -3536,7 +3572,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
           <button type="button" class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
             <span class="calendar-day-event-time">${timeLabel}</span>
             <span class="calendar-day-event-title">${title}</span>
-            <span class="calendar-day-event-type">${eventType}</span>
+            <span class="calendar-day-event-type">${eventTypeWithIcon}</span>
           </button>
         `;
       })
@@ -3609,6 +3645,28 @@ const hydrateSchoolCalendar = (calendarShell) => {
     editable: isAdminMode,
     eventStartEditable: isAdminMode,
     events,
+    eventContent: (arg) => {
+      if (arg.event.display === 'background') return true;
+      const typeLabel = normalizeEventTypeLabel(arg.event.extendedProps?.eventType || 'General');
+      const icon = resolveEventTypeIcon(typeLabel);
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'calendar-event-content';
+
+      if (arg.timeText) {
+        const timeNode = document.createElement('span');
+        timeNode.className = 'calendar-event-time';
+        timeNode.textContent = arg.timeText;
+        wrapper.appendChild(timeNode);
+      }
+
+      const titleNode = document.createElement('span');
+      titleNode.className = 'calendar-event-title';
+      titleNode.textContent = `${icon} ${arg.event.title}`;
+      wrapper.appendChild(titleNode);
+
+      return { domNodes: [wrapper] };
+    },
     eventClick: (info) => {
       if (info.event.display === 'background') return;
       if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
