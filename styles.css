@@ -2231,6 +2231,71 @@ body.news-read-open {
   flex-wrap: wrap;
 }
 
+.fixture-autofill-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.fixture-date-rules {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.fixture-date-rules h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.fixture-date-rules textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  resize: vertical;
+}
+
+.fixture-rule-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fixture-rule-day-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 3px 9px;
+  font-size: 0.8rem;
+}
+
+.fixture-rule-flags {
+  display: grid;
+  gap: 6px;
+}
+
+.fixture-rule-flags label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+}
+
 .fixture-creator-sport-grid {
   display: grid;
   gap: 8px;

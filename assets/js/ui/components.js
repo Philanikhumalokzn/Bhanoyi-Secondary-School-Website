@@ -1211,10 +1211,65 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
           <header class="fixture-creator-header">
             <p class="fixture-creator-meta" data-fixture-meta>Choose a sport format to begin.</p>
             <div class="fixture-creator-actions">
+              <label class="fixture-autofill-toggle">
+                <input type="checkbox" data-fixture-auto-fill />
+                <span>Auto-fill dates (use rules)</span>
+              </label>
               <button type="button" class="btn btn-secondary" data-fixture-generate>Generate fixtures</button>
               <button type="button" class="btn btn-secondary" data-fixture-export>Export CSV</button>
             </div>
           </header>
+          <div class="fixture-date-rules" data-fixture-date-rules>
+            <h3>Date Rules for Auto-fill</h3>
+            <div class="fixture-creator-sport-grid">
+              <label>
+                Start scheduling from
+                <input type="date" data-fixture-rule-start-date />
+              </label>
+              <label>
+                Minimum days between fixtures
+                <input type="number" min="1" max="30" step="1" value="7" data-fixture-rule-gap-days />
+              </label>
+            </div>
+            <div class="fixture-rule-weekdays" data-fixture-rule-weekdays>
+              ${[
+                ['1', 'Mon'],
+                ['2', 'Tue'],
+                ['3', 'Wed'],
+                ['4', 'Thu'],
+                ['5', 'Fri'],
+                ['6', 'Sat'],
+                ['0', 'Sun']
+              ]
+                .map(
+                  ([value, label]) => `
+                    <label class="fixture-rule-day-chip">
+                      <input type="checkbox" data-fixture-rule-weekday value="${value}" />
+                      <span>${label}</span>
+                    </label>
+                  `
+                )
+                .join('')}
+            </div>
+            <div class="fixture-rule-flags">
+              <label>
+                <input type="checkbox" data-fixture-rule-use-terms checked />
+                <span>Only schedule within configured school terms</span>
+              </label>
+              <label>
+                <input type="checkbox" data-fixture-rule-avoid-academic checked />
+                <span>Avoid dates with Academic calendar events</span>
+              </label>
+            </div>
+            <label>
+              Excluded date ranges (optional)
+              <textarea rows="3" data-fixture-rule-exclusions placeholder="One range per line, e.g. 2026-04-01 to 2026-04-05"></textarea>
+            </label>
+            <div class="fixture-creator-actions">
+              <button type="button" class="btn btn-secondary" data-fixture-rules-save>Save rules</button>
+            </div>
+            <p class="fixture-creator-status" data-fixture-rules-status aria-live="polite"></p>
+          </div>
           <div class="fixture-creator-sport-grid">
             <label>
               Sport code (required)
@@ -1377,6 +1432,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
   if (houseOptions.length < 2) return;
 
   const teamPickInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-team]'));
+  const autoFillToggle = fixtureNode.querySelector('[data-fixture-auto-fill]');
+  const rulesPanel = fixtureNode.querySelector('[data-fixture-date-rules]');
+  const rulesStatusNode = fixtureNode.querySelector('[data-fixture-rules-status]');
+  const ruleStartDateInput = fixtureNode.querySelector('[data-fixture-rule-start-date]');
+  const ruleGapDaysInput = fixtureNode.querySelector('[data-fixture-rule-gap-days]');
+  const ruleWeekdayInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-rule-weekday]'));
+  const ruleUseTermsInput = fixtureNode.querySelector('[data-fixture-rule-use-terms]');
+  const ruleAvoidAcademicInput = fixtureNode.querySelector('[data-fixture-rule-avoid-academic]');
+  const ruleExclusionsInput = fixtureNode.querySelector('[data-fixture-rule-exclusions]');
+  const rulesSaveButton = fixtureNode.querySelector('[data-fixture-rules-save]');
   const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
@@ -1403,8 +1468,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
+  const fixtureRulesStorageKey = `bhanoyi.fixtureDateRules.${fixtureSectionKey}`;
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   let fixtureDates = {};
+
+  if (rulesPanel instanceof HTMLElement) {
+    rulesPanel.classList.toggle('is-hidden', !isAdminMode);
+  }
+  if (autoFillToggle instanceof HTMLInputElement) {
+    autoFillToggle.disabled = !isAdminMode;
+    autoFillToggle.checked = false;
+  }
 
   const loadFixtureDates = () => {
     try {
@@ -1426,6 +1500,305 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
     return parsed;
+  };
+
+  const normalizeDateOnly = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${parsed.getFullYear()}-${month}-${day}`;
+  };
+
+  const toEpochDay = (dateString) => {
+    const normalized = normalizeDateOnly(dateString);
+    if (!normalized) return Number.NaN;
+    return new Date(`${normalized}T00:00:00`).getTime();
+  };
+
+  const addDays = (dateString, days) => {
+    const normalized = normalizeDateOnly(dateString);
+    if (!normalized) return '';
+    const date = new Date(`${normalized}T00:00:00`);
+    date.setDate(date.getDate() + days);
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${month}-${day}`;
+  };
+
+  const loadTermsFromStorage = () => {
+    const termKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.schoolTerms.'));
+    const ranges = [];
+
+    termKeys.forEach((key) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        parsed.forEach((term) => {
+          const start = normalizeDateOnly(term?.start);
+          const end = normalizeDateOnly(term?.end);
+          if (!start || !end) return;
+          const startDay = toEpochDay(start);
+          const endDay = toEpochDay(end);
+          if (!Number.isFinite(startDay) || !Number.isFinite(endDay) || endDay < startDay) return;
+          ranges.push({ start, end });
+        });
+      } catch {
+        return;
+      }
+    });
+
+    return ranges;
+  };
+
+  const loadAcademicDatesFromCalendar = () => {
+    const eventKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.schoolCalendarEvents.'));
+    const academicDates = new Set();
+
+    eventKeys.forEach((key) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        parsed.forEach((entry) => {
+          const eventType = String(entry?.eventType || '').trim().toLowerCase();
+          if (eventType !== 'academic') return;
+          const start = normalizeDateOnly(entry?.start);
+          const endRaw = normalizeDateOnly(entry?.end);
+          if (!start) return;
+          if (!endRaw) {
+            academicDates.add(start);
+            return;
+          }
+          let cursor = start;
+          const endEpoch = toEpochDay(endRaw);
+          let guard = 0;
+          while (toEpochDay(cursor) <= endEpoch && guard < 400) {
+            academicDates.add(cursor);
+            cursor = addDays(cursor, 1);
+            guard += 1;
+          }
+        });
+      } catch {
+        return;
+      }
+    });
+
+    return academicDates;
+  };
+
+  const parseExclusionRanges = (text) => {
+    const lines = String(text || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const ranges = [];
+    for (const line of lines) {
+      const matched = line.match(/^(\d{4}-\d{2}-\d{2})(?:\s*(?:to|-)\s*(\d{4}-\d{2}-\d{2}))?$/i);
+      if (!matched) {
+        return { ok: false, message: `Invalid exclusion line: "${line}"` };
+      }
+      const start = normalizeDateOnly(matched[1]);
+      const end = normalizeDateOnly(matched[2] || matched[1]);
+      if (!start || !end) {
+        return { ok: false, message: `Invalid exclusion date: "${line}"` };
+      }
+      if (toEpochDay(end) < toEpochDay(start)) {
+        return { ok: false, message: `Exclusion end is before start: "${line}"` };
+      }
+      ranges.push({ start, end });
+    }
+
+    return { ok: true, ranges };
+  };
+
+  const collectDateRules = () => {
+    const startDate = normalizeDateOnly(ruleStartDateInput instanceof HTMLInputElement ? ruleStartDateInput.value : '');
+    const gapDays = parsePositiveInt(ruleGapDaysInput instanceof HTMLInputElement ? ruleGapDaysInput.value : '', 7);
+    const weekdays = ruleWeekdayInputs
+      .filter((input) => input instanceof HTMLInputElement && input.checked)
+      .map((input) => Number.parseInt(String(input.value || '').trim(), 10))
+      .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+    const useTerms = ruleUseTermsInput instanceof HTMLInputElement ? ruleUseTermsInput.checked : true;
+    const avoidAcademic = ruleAvoidAcademicInput instanceof HTMLInputElement ? ruleAvoidAcademicInput.checked : true;
+    const exclusionRaw = ruleExclusionsInput instanceof HTMLTextAreaElement ? ruleExclusionsInput.value : '';
+
+    const parsedExclusions = parseExclusionRanges(exclusionRaw);
+    if (!parsedExclusions.ok) {
+      return { ok: false, message: parsedExclusions.message };
+    }
+
+    if (!startDate) {
+      return { ok: false, message: 'Set a start date for auto-fill rules.' };
+    }
+
+    if (!weekdays.length) {
+      return { ok: false, message: 'Select at least one allowed weekday for auto-fill.' };
+    }
+
+    const terms = loadTermsFromStorage();
+    if (useTerms && !terms.length) {
+      return { ok: false, message: 'No school terms found. Configure terms in Calendar before auto-fill.' };
+    }
+
+    return {
+      ok: true,
+      rules: {
+        startDate,
+        gapDays,
+        weekdays,
+        useTerms,
+        avoidAcademic,
+        exclusionRaw,
+        exclusions: parsedExclusions.ranges,
+        terms,
+        academicDates: avoidAcademic ? loadAcademicDatesFromCalendar() : new Set()
+      }
+    };
+  };
+
+  const saveDateRules = () => {
+    const collected = collectDateRules();
+    if (!collected.ok) {
+      if (rulesStatusNode) rulesStatusNode.textContent = collected.message;
+      return false;
+    }
+
+    const payload = {
+      startDate: collected.rules.startDate,
+      gapDays: collected.rules.gapDays,
+      weekdays: collected.rules.weekdays,
+      useTerms: collected.rules.useTerms,
+      avoidAcademic: collected.rules.avoidAcademic,
+      exclusionRaw: collected.rules.exclusionRaw
+    };
+
+    localStorage.setItem(fixtureRulesStorageKey, JSON.stringify(payload));
+    if (rulesStatusNode) rulesStatusNode.textContent = 'Date rules saved.';
+    return true;
+  };
+
+  const hydrateDateRules = () => {
+    try {
+      const raw = localStorage.getItem(fixtureRulesStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      if (ruleStartDateInput instanceof HTMLInputElement) {
+        ruleStartDateInput.value = normalizeDateOnly(parsed.startDate || '');
+      }
+      if (ruleGapDaysInput instanceof HTMLInputElement) {
+        ruleGapDaysInput.value = String(parsePositiveInt(parsed.gapDays, 7));
+      }
+      if (ruleUseTermsInput instanceof HTMLInputElement) {
+        ruleUseTermsInput.checked = parsed.useTerms !== false;
+      }
+      if (ruleAvoidAcademicInput instanceof HTMLInputElement) {
+        ruleAvoidAcademicInput.checked = parsed.avoidAcademic !== false;
+      }
+      if (ruleExclusionsInput instanceof HTMLTextAreaElement) {
+        ruleExclusionsInput.value = String(parsed.exclusionRaw || '').trim();
+      }
+
+      const savedWeekdays = Array.isArray(parsed.weekdays)
+        ? parsed.weekdays
+            .map((entry) => Number.parseInt(String(entry || '').trim(), 10))
+            .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+        : [];
+
+      ruleWeekdayInputs.forEach((input) => {
+        if (!(input instanceof HTMLInputElement)) return;
+        const day = Number.parseInt(String(input.value || '').trim(), 10);
+        input.checked = savedWeekdays.includes(day);
+      });
+    } catch {
+      return;
+    }
+  };
+
+  const isWithinAnyRange = (dateString, ranges) => {
+    const day = toEpochDay(dateString);
+    if (!Number.isFinite(day)) return false;
+    return ranges.some((range) => {
+      const start = toEpochDay(range.start);
+      const end = toEpochDay(range.end);
+      return Number.isFinite(start) && Number.isFinite(end) && day >= start && day <= end;
+    });
+  };
+
+  const isDateAllowedByRules = (dateString, rules) => {
+    const normalized = normalizeDateOnly(dateString);
+    if (!normalized) return false;
+    const date = new Date(`${normalized}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return false;
+
+    if (!rules.weekdays.includes(date.getDay())) return false;
+    if (rules.useTerms && !isWithinAnyRange(normalized, rules.terms)) return false;
+    if (rules.avoidAcademic && rules.academicDates.has(normalized)) return false;
+    if (rules.exclusions.length && isWithinAnyRange(normalized, rules.exclusions)) return false;
+    return true;
+  };
+
+  const autoFillFixtureDates = (fixtures) => {
+    const collected = collectDateRules();
+    if (!collected.ok) {
+      if (statusNode) statusNode.textContent = collected.message;
+      if (rulesStatusNode) rulesStatusNode.textContent = collected.message;
+      return false;
+    }
+
+    const rules = collected.rules;
+    let cursor = rules.startDate;
+    const nextDates = {};
+
+    for (let index = 0; index < fixtures.length; index += 1) {
+      let probe = cursor;
+      let guard = 0;
+      while (guard < 2000 && !isDateAllowedByRules(probe, rules)) {
+        probe = addDays(probe, 1);
+        guard += 1;
+      }
+
+      if (guard >= 2000 || !probe) {
+        const message = 'Could not find enough valid dates for all fixtures with the current rules.';
+        if (statusNode) statusNode.textContent = message;
+        if (rulesStatusNode) rulesStatusNode.textContent = message;
+        return false;
+      }
+
+      const fixtureId = getFixtureId(fixtures[index]);
+      nextDates[fixtureId] = probe;
+      cursor = addDays(probe, Math.max(1, rules.gapDays));
+    }
+
+    fixtureDates = {
+      ...fixtureDates,
+      ...nextDates
+    };
+    localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:fixtures-updated', {
+        detail: {
+          sectionKey: fixtureSectionKey
+        }
+      })
+    );
+
+    if (statusNode) {
+      statusNode.textContent = `Fixtures generated and ${fixtures.length} dates auto-filled using rules.`;
+    }
+    if (rulesStatusNode) {
+      rulesStatusNode.textContent = 'Auto-fill completed with current date rules.';
+    }
+    return true;
   };
 
   const sportProfiles = {
@@ -1761,7 +2134,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   };
 
-  const generateFixtures = () => {
+  const generateFixtures = ({ autoFillDates = false } = {}) => {
     refreshSportPanelState();
     const profile = selectedSportProfile();
     if (!profile) {
@@ -1787,6 +2160,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }));
     saveFixtureCatalog(lastFixtures);
     loadFixtureDates();
+    if (autoFillDates && isAdminMode) {
+      autoFillFixtureDates(lastFixtures);
+      loadFixtureDates();
+    }
     renderFixtures(lastFixtures);
   };
 
@@ -1844,9 +2221,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
     URL.revokeObjectURL(url);
   });
 
-  generateButton.addEventListener('click', generateFixtures);
+  generateButton.addEventListener('click', () => {
+    const wantsAutoFill = isAdminMode && autoFillToggle instanceof HTMLInputElement && autoFillToggle.checked;
+    generateFixtures({ autoFillDates: wantsAutoFill });
+  });
   teamPickInputs.forEach((input) => {
     input.addEventListener('change', generateFixtures);
+  });
+
+  rulesSaveButton?.addEventListener('click', () => {
+    saveDateRules();
   });
 
   bodyNode.addEventListener('change', (event) => {
@@ -2002,6 +2386,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   loadFixtureDates();
+  hydrateDateRules();
   refreshSportPanelState();
   generateFixtures();
 };
