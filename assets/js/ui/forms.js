@@ -1,3 +1,5 @@
+import { getSession } from '../admin/api.ts';
+
 const setFormStatus = (form, message, tone = 'muted') => {
   const status = form.querySelector('[data-form-status]');
   if (!status) return;
@@ -94,10 +96,16 @@ const bindGeminiTester = (form) => {
 
     try {
       const prompt = typeof input?.value === 'string' ? input.value.trim() : '';
+      const session = await getSession();
+      const accessToken = typeof session?.access_token === 'string' ? session.access_token.trim() : '';
+      if (!accessToken) {
+        throw new Error('Admin session required. Please sign in again.');
+      }
       const response = await fetch('/api/gemini-test', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
         },
         body: JSON.stringify({ prompt })
       });

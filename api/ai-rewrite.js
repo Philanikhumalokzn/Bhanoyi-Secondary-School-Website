@@ -1,4 +1,4 @@
-import { normalize, readJsonBody, sendJson } from './http.js';
+import { normalize, readJsonBody, requireAdminRequest, sendJson } from './http.js';
 
 const buildPrompt = (input, refinementPrompt = '') => {
   const normalizedRefinement = normalize(refinementPrompt);
@@ -60,6 +60,11 @@ const toFriendlyProviderError = (message) => {
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     return sendJson(response, 405, { error: 'Method not allowed.' });
+  }
+
+  const admin = await requireAdminRequest(request, response);
+  if (!admin) {
+    return;
   }
 
   const apiKey = normalize(process.env.AI_API_KEY);

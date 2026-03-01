@@ -767,12 +767,18 @@ const normalizeRefinementPrompt = (value?: string) => (typeof value === 'string'
 const rewriteWithHostedAi = async (input: string, options: AiRewriteOptions = {}) => {
   const refinementPrompt = normalizeRefinementPrompt(options.refinementPrompt);
   const modelChoice = options.modelChoice === 'gemini' ? 'gemini' : 'auto';
+  const session = await getSession();
+  const accessToken = typeof session?.access_token === 'string' ? session.access_token.trim() : '';
+  if (!accessToken) {
+    throw new Error('Admin session required. Please sign in again.');
+  }
   let response: Response;
   try {
     response = await fetch('/api/ai-rewrite', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
       },
       body: JSON.stringify({
         input,

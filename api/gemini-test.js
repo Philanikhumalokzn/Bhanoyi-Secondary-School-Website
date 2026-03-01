@@ -1,4 +1,4 @@
-import { normalize, readJsonBody, sendJson } from './http.js';
+import { normalize, readJsonBody, requireAdminRequest, sendJson } from './http.js';
 
 const PROVIDER_TIMEOUT_MS = 20000;
 
@@ -43,6 +43,11 @@ const toFriendlyProviderError = (message) => {
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     return sendJson(response, 405, { error: 'Method not allowed.' });
+  }
+
+  const admin = await requireAdminRequest(request, response);
+  if (!admin) {
+    return;
   }
 
   const apiKey = normalize(process.env.GOOGLE_API_KEY);

@@ -1,9 +1,14 @@
 import { Resend } from 'resend';
-import { readJsonBody, sendJson } from './http.js';
+import { readJsonBody, requireAdminRequest, sendJson } from './http.js';
 
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     return sendJson(response, 405, { error: 'Method not allowed.' });
+  }
+
+  const admin = await requireAdminRequest(request, response);
+  if (!admin) {
+    return;
   }
 
   const apiKey = process.env.RESEND_API_KEY;
