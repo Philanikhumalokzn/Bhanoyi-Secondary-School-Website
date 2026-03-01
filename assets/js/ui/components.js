@@ -1468,6 +1468,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
   let lastSportKey = '';
   let lastSportLabel = '';
   let lastFormatLabel = '';
+  let lastPreviewDateMap = null;
+  let lastPreviewFixtureSignature = '';
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
@@ -1499,6 +1501,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const getFixtureId = (fixture) =>
     `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
+
+  const fixtureSignature = (fixtures) => fixtures.map((fixture) => getFixtureId(fixture)).join('|');
 
   const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
@@ -1786,6 +1790,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const renderAutoFillPreview = (inputFixtures, dateMap) => {
     if (!(rulesPreviewNode instanceof HTMLElement)) return;
+    lastPreviewDateMap = { ...dateMap };
+    lastPreviewFixtureSignature = fixtureSignature(inputFixtures);
+
     const rows = inputFixtures
       .map((fixture) => {
         const fixtureId = getFixtureId(fixture);
@@ -1808,6 +1815,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
           </thead>
           <tbody>${rows}</tbody>
         </table>
+      </div>
+      <div class="fixture-rules-preview-actions">
+        <button type="button" class="btn btn-primary" data-fixture-rules-apply-preview>Apply previewed dates</button>
       </div>
     `;
     rulesPreviewNode.classList.remove('is-hidden');
@@ -1862,6 +1872,44 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
     renderAutoFillPreview(fixtures, result.dateMap);
     return true;
+  };
+
+  const applyPreviewedDates = () => {
+    if (!lastPreviewDateMap || !lastPreviewFixtureSignature) {
+      if (rulesStatusNode) {
+        rulesStatusNode.textContent = 'No preview is available. Click Preview candidate dates first.';
+      }
+      return;
+    }
+
+    const currentSignature = fixtureSignature(lastFixtures);
+    if (currentSignature !== lastPreviewFixtureSignature) {
+      if (rulesStatusNode) {
+        rulesStatusNode.textContent = 'Fixtures changed after preview. Please preview again before applying.';
+      }
+      return;
+    }
+
+    fixtureDates = {
+      ...fixtureDates,
+      ...lastPreviewDateMap
+    };
+    localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:fixtures-updated', {
+        detail: {
+          sectionKey: fixtureSectionKey
+        }
+      })
+    );
+
+    if (statusNode) {
+      statusNode.textContent = `Applied previewed dates to ${lastFixtures.length} fixtures.`;
+    }
+    if (rulesStatusNode) {
+      rulesStatusNode.textContent = 'Previewed dates applied.';
+    }
+    renderFixtures(lastFixtures);
   };
 
   const sportProfiles = {
@@ -2298,6 +2346,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   rulesPreviewButton?.addEventListener('click', () => {
     buildAutoFillPreview();
+  });
+
+  rulesPreviewNode?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest('[data-fixture-rules-apply-preview]');
+    if (!(button instanceof HTMLButtonElement)) return;
+    applyPreviewedDates();
   });
 
   bodyNode.addEventListener('change', (event) => {

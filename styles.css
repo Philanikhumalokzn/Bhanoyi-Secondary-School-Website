@@ -2305,6 +2305,12 @@ body.news-read-open {
   gap: 8px;
 }
 
+.fixture-rules-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .fixture-creator-sport-grid {
   display: grid;
   gap: 8px;
