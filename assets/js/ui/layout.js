@@ -1,4 +1,5 @@
 import {
+  initMatchEventLogs,
   initLatestNewsReaders,
   initLatestNewsRotators,
   renderFooter,
@@ -169,4 +170,5 @@ export const renderSite = (siteContent, page) => {
   bindMobileNav();
   initLatestNewsRotators();
   initLatestNewsReaders();
+  initMatchEventLogs();
 };

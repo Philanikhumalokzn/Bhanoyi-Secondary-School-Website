@@ -5,6 +5,12 @@ const escapeHtmlAttribute = (value = '') =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
+const escapeHtmlText = (value = '') =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
 const stripHtmlTags = (value = '') =>
   String(value)
     .replace(/<br\s*\/?>/gi, '\n')
@@ -446,9 +452,500 @@ const getOrderedSectionEntries = (sections, context = {}) => {
   });
 };
 
+const DEFAULT_MATCH_EVENT_TYPES = [
+  { key: 'goal', label: 'Goal', icon: '⚽', scoreFor: 'self', allowAssist: true, playerLabel: 'Scorer' },
+  { key: 'penalty_goal', label: 'Penalty Goal', icon: '⚽', scoreFor: 'self', allowAssist: false, playerLabel: 'Scorer' },
+  { key: 'own_goal', label: 'Own Goal', icon: '⚽', scoreFor: 'opponent', allowAssist: false, playerLabel: 'Player' },
+  { key: 'yellow_card', label: 'Yellow Card', icon: '🟨', scoreFor: 'none', allowAssist: false, playerLabel: 'Booked Player' },
+  { key: 'red_card', label: 'Red Card', icon: '🟥', scoreFor: 'none', allowAssist: false, playerLabel: 'Sent-off Player' },
+  { key: 'injury', label: 'Injury', icon: '🩹', scoreFor: 'none', allowAssist: false, playerLabel: 'Injured Player' },
+  { key: 'substitution', label: 'Substitution', icon: '🔁', scoreFor: 'none', allowAssist: false, playerLabel: 'Player' }
+];
+
+const normalizeMatchTeams = (sectionTeams = []) => {
+  const candidates = Array.isArray(sectionTeams) ? sectionTeams : [];
+  const normalized = candidates
+    .map((entry, index) => {
+      const source = entry && typeof entry === 'object' ? entry : { name: String(entry || '').trim() };
+      const name = (source.name || `Team ${index + 1}`).trim() || `Team ${index + 1}`;
+      const id = (source.id || name.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `team_${index + 1}`).trim();
+      const shortName = (source.shortName || name).trim() || name;
+      return { id, name, shortName };
+    })
+    .filter((entry, index, list) =>
+      entry.id &&
+      entry.name &&
+      list.findIndex((candidate) => candidate.id === entry.id) === index
+    );
+
+  if (normalized.length >= 2) return normalized;
+  return [
+    { id: 'home', name: 'Home', shortName: 'Home' },
+    { id: 'away', name: 'Away', shortName: 'Away' }
+  ];
+};
+
+const normalizeMatchEventTypes = (sectionEventTypes = []) => {
+  const configured = Array.isArray(sectionEventTypes) ? sectionEventTypes : [];
+  if (!configured.length) {
+    return DEFAULT_MATCH_EVENT_TYPES;
+  }
+
+  const fallbackByKey = new Map(DEFAULT_MATCH_EVENT_TYPES.map((entry) => [entry.key, entry]));
+  const normalized = configured
+    .map((entry) => {
+      const source = entry && typeof entry === 'object' ? entry : { key: String(entry || '').trim() };
+      const key = (source.key || '').trim();
+      if (!key) return null;
+
+      const fallback = fallbackByKey.get(key) || {};
+      return {
+        key,
+        label: (source.label || fallback.label || key.replace(/_/g, ' ')).trim(),
+        icon: (source.icon || fallback.icon || '•').trim(),
+        scoreFor: source.scoreFor || fallback.scoreFor || 'none',
+        allowAssist: source.allowAssist !== undefined ? Boolean(source.allowAssist) : Boolean(fallback.allowAssist),
+        playerLabel: (source.playerLabel || fallback.playerLabel || 'Player').trim()
+      };
+    })
+    .filter(Boolean);
+
+  return normalized.length ? normalized : DEFAULT_MATCH_EVENT_TYPES;
+};
+
+const renderMatchLogSection = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const teams = normalizeMatchTeams(section.teams);
+  const eventTypes = normalizeMatchEventTypes(section.eventTypes);
+  const initialScores = teams.reduce((acc, team) => {
+    const raw = Number(section.initialScores?.[team.id]);
+    acc[team.id] = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+    return acc;
+  }, {});
+
+  const config = {
+    sectionKey: fallbackSectionKey,
+    sport: (section.sport || 'Football').trim() || 'Football',
+    competition: (section.competition || 'Friendly Match').trim() || 'Friendly Match',
+    venue: (section.venue || '').trim(),
+    teams,
+    eventTypes,
+    initialScores
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
+      <div class="container">
+        <h2>${section.title || 'Live Match Event Log'}</h2>
+        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <header class="match-log-header">
+            <div>
+              <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
+              <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
+            </div>
+            <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
+          </header>
+          <div class="match-log-teams" data-match-teams>
+            ${teams
+              .map(
+                (team) => `
+                  <article class="match-log-team" data-team-id="${team.id}">
+                    <div class="match-log-team-head">
+                      <h3 class="match-log-team-title">
+                        <span class="match-log-team-name">${team.name}</span>
+                        <span class="match-log-team-score">(<span data-team-score>${initialScores[team.id] || 0}</span>)</span>
+                      </h3>
+                      <button type="button" class="btn btn-secondary" data-match-open-event data-team-id="${team.id}">Add event</button>
+                    </div>
+                    <ol class="match-log-events" data-team-events></ol>
+                  </article>
+                `
+              )
+              .join('')}
+          </div>
+          <div class="match-log-modal is-hidden" data-match-modal>
+            <div class="match-log-modal-backdrop" data-match-close-modal></div>
+            <article class="panel match-log-modal-panel" role="dialog" aria-modal="true" aria-label="Add match event">
+              <h3 class="match-log-modal-title">Add match event</h3>
+              <p class="match-log-modal-subtitle" data-match-modal-team></p>
+              <section class="match-log-step" data-match-step="type">
+                <h4>Select event type</h4>
+                <div class="match-log-event-type-list" data-match-event-types></div>
+                <div class="match-log-modal-actions">
+                  <button type="button" class="btn btn-secondary" data-match-cancel>Cancel</button>
+                  <button type="button" class="btn btn-primary" data-match-next disabled>Next</button>
+                </div>
+              </section>
+              <section class="match-log-step is-hidden" data-match-step="details">
+                <h4>Optional event details</h4>
+                <form class="match-log-form" data-match-event-form>
+                  <div class="match-log-form-grid">
+                    <label>
+                      Match minute
+                      <input type="number" min="0" max="130" step="1" name="minute" inputmode="numeric" placeholder="e.g. 9" />
+                    </label>
+                    <label>
+                      Stoppage (+)
+                      <input type="number" min="0" max="30" step="1" name="stoppage" inputmode="numeric" placeholder="e.g. 2" />
+                    </label>
+                  </div>
+                  <div class="match-log-form-grid">
+                    <label data-player-label>
+                      Player name
+                      <input type="text" name="playerName" maxlength="120" placeholder="e.g. Sipho" />
+                    </label>
+                    <label>
+                      Jersey number
+                      <input type="text" name="jerseyNumber" maxlength="8" placeholder="e.g. 9" />
+                    </label>
+                  </div>
+                  <label class="match-log-assist-row is-hidden" data-assist-row>
+                    Assist by (optional)
+                    <input type="text" name="assistName" maxlength="120" placeholder="e.g. Themba" />
+                  </label>
+                  <label>
+                    Notes (optional)
+                    <textarea name="notes" rows="3" maxlength="300" placeholder="Additional event context"></textarea>
+                  </label>
+                  <div class="match-log-modal-actions">
+                    <button type="button" class="btn btn-secondary" data-match-back>Back</button>
+                    <button type="button" class="btn btn-primary" data-match-save>Save event</button>
+                  </div>
+                </form>
+              </section>
+            </article>
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const getMatchStorageKey = (sectionKey) => {
+  const path = typeof window !== 'undefined' ? window.location.pathname : 'sports';
+  return `bhanoyi.matchLog.${path}.${sectionKey}`;
+};
+
+const getOtherTeamId = (teamId, teams) => {
+  const other = teams.find((entry) => entry.id !== teamId);
+  return other ? other.id : teamId;
+};
+
+const formatMatchMinuteLabel = (minute, stoppage) => {
+  if (!Number.isFinite(minute)) return '';
+  const base = `${Math.max(0, Math.floor(minute))}`;
+  if (Number.isFinite(stoppage) && stoppage > 0) {
+    return `${base}+${Math.floor(stoppage)}'`;
+  }
+  return `${base}'`;
+};
+
+const renderMatchEventItem = (event, definition) => {
+  const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
+  const playerParts = [event.playerName || '', event.jerseyNumber ? `#${event.jerseyNumber}` : ''].filter(Boolean);
+  const playerLabel = playerParts.join(' ');
+  const detailParts = [
+    playerLabel,
+    event.assistName ? `Assist: ${event.assistName}` : '',
+    event.notes || ''
+  ].filter(Boolean);
+
+  return `
+    <li class="match-log-event-item" data-event-type="${event.type}">
+      <div class="match-log-event-main">
+        <span class="match-log-event-icon" aria-hidden="true">${escapeHtmlText(definition?.icon || '•')}</span>
+        <strong class="match-log-event-type">${escapeHtmlText(definition?.label || event.type)}</strong>
+        ${minute ? `<span class="match-log-event-minute">${minute}</span>` : ''}
+      </div>
+      ${detailParts.length ? `<p class="match-log-event-detail">${escapeHtmlText(detailParts.join(' · '))}</p>` : ''}
+    </li>
+  `;
+};
+
+const hydrateMatchLog = (matchLogNode) => {
+  const rawConfig = (matchLogNode.dataset.matchLogConfig || '').trim();
+  if (!rawConfig) return;
+
+  let config;
+  try {
+    config = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  const teams = normalizeMatchTeams(config.teams);
+  const eventTypes = normalizeMatchEventTypes(config.eventTypes);
+  const eventTypeByKey = new Map(eventTypes.map((entry) => [entry.key, entry]));
+  const initialScores = teams.reduce((acc, team) => {
+    const raw = Number(config.initialScores?.[team.id]);
+    acc[team.id] = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+    return acc;
+  }, {});
+
+  const scoreNodes = new Map();
+  const eventsNodes = new Map();
+  teams.forEach((team) => {
+    const teamNode = matchLogNode.querySelector(`[data-team-id="${team.id}"]`);
+    if (!teamNode) return;
+    scoreNodes.set(team.id, teamNode.querySelector('[data-team-score]'));
+    eventsNodes.set(team.id, teamNode.querySelector('[data-team-events]'));
+  });
+
+  const statusNode = matchLogNode.querySelector('[data-match-status]');
+  const modal = matchLogNode.querySelector('[data-match-modal]');
+  const teamLabel = matchLogNode.querySelector('[data-match-modal-team]');
+  const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
+  const detailsStep = matchLogNode.querySelector('[data-match-step="details"]');
+  const typeListNode = matchLogNode.querySelector('[data-match-event-types]');
+  const nextButton = matchLogNode.querySelector('[data-match-next]');
+  const backButton = matchLogNode.querySelector('[data-match-back]');
+  const saveButton = matchLogNode.querySelector('[data-match-save]');
+  const cancelButtons = Array.from(matchLogNode.querySelectorAll('[data-match-cancel], [data-match-close-modal]'));
+  const eventForm = matchLogNode.querySelector('[data-match-event-form]');
+  const playerLabelNode = matchLogNode.querySelector('[data-player-label]');
+  const assistRow = matchLogNode.querySelector('[data-assist-row]');
+  const minuteInput = eventForm?.querySelector('input[name="minute"]');
+  const stoppageInput = eventForm?.querySelector('input[name="stoppage"]');
+  const playerInput = eventForm?.querySelector('input[name="playerName"]');
+  const jerseyInput = eventForm?.querySelector('input[name="jerseyNumber"]');
+  const assistInput = eventForm?.querySelector('input[name="assistName"]');
+  const notesInput = eventForm?.querySelector('textarea[name="notes"]');
+
+  if (!modal || !typeStep || !detailsStep || !typeListNode || !nextButton || !backButton || !saveButton || !eventForm) {
+    return;
+  }
+
+  const storageKey = getMatchStorageKey(matchLogNode.dataset.matchLogId || config.sectionKey || 'sports_log');
+  let state = {
+    events: []
+  };
+  let activeTeamId = teams[0]?.id || '';
+  let selectedTypeKey = '';
+
+  const saveState = () => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch {
+      return;
+    }
+  };
+
+  const loadState = () => {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (!parsed || !Array.isArray(parsed.events)) return;
+      state = {
+        events: parsed.events
+          .filter((entry) => entry && typeof entry === 'object' && eventTypeByKey.has(entry.type))
+          .map((entry) => ({
+            id: entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            teamId: teams.some((team) => team.id === entry.teamId) ? entry.teamId : teams[0].id,
+            type: entry.type,
+            minute: Number.isFinite(Number(entry.minute)) ? Number(entry.minute) : null,
+            stoppage: Number.isFinite(Number(entry.stoppage)) ? Number(entry.stoppage) : null,
+            playerName: (entry.playerName || '').trim(),
+            jerseyNumber: (entry.jerseyNumber || '').trim(),
+            assistName: (entry.assistName || '').trim(),
+            notes: (entry.notes || '').trim(),
+            createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
+          }))
+      };
+    } catch {
+      state = { events: [] };
+    }
+  };
+
+  const computeScores = () => {
+    const scores = { ...initialScores };
+    state.events.forEach((event) => {
+      const definition = eventTypeByKey.get(event.type);
+      if (!definition) return;
+
+      if (definition.scoreFor === 'self') {
+        scores[event.teamId] = (scores[event.teamId] || 0) + 1;
+        return;
+      }
+
+      if (definition.scoreFor === 'opponent') {
+        const opponentTeamId = getOtherTeamId(event.teamId, teams);
+        scores[opponentTeamId] = (scores[opponentTeamId] || 0) + 1;
+      }
+    });
+    return scores;
+  };
+
+  const render = () => {
+    const scores = computeScores();
+
+    teams.forEach((team) => {
+      const scoreNode = scoreNodes.get(team.id);
+      if (scoreNode) {
+        scoreNode.textContent = String(scores[team.id] || 0);
+      }
+
+      const eventListNode = eventsNodes.get(team.id);
+      if (!eventListNode) return;
+
+      const teamEvents = state.events
+        .filter((entry) => entry.teamId === team.id)
+        .sort((left, right) => {
+          const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+          const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+          if (leftMinute === rightMinute) {
+            return (left.createdAt || 0) - (right.createdAt || 0);
+          }
+          return leftMinute - rightMinute;
+        });
+
+      eventListNode.innerHTML = teamEvents.length
+        ? teamEvents.map((entry) => renderMatchEventItem(entry, eventTypeByKey.get(entry.type))).join('')
+        : '<li class="match-log-empty">No events logged yet.</li>';
+    });
+
+    const eventCount = state.events.length;
+    if (statusNode) {
+      statusNode.textContent = eventCount ? `${eventCount} event${eventCount === 1 ? '' : 's'} logged.` : 'No events logged yet.';
+    }
+  };
+
+  const resetModal = () => {
+    selectedTypeKey = '';
+    typeStep.classList.remove('is-hidden');
+    detailsStep.classList.add('is-hidden');
+    nextButton.disabled = true;
+    typeListNode.innerHTML = eventTypes
+      .map(
+        (entry) => `
+          <label class="match-log-event-option">
+            <input type="radio" name="match-event-type" value="${entry.key}" />
+            <span class="match-log-event-option-icon" aria-hidden="true">${escapeHtmlText(entry.icon)}</span>
+            <span class="match-log-event-option-label">${escapeHtmlText(entry.label)}</span>
+          </label>
+        `
+      )
+      .join('');
+
+    eventForm.reset();
+    if (assistRow) {
+      assistRow.classList.add('is-hidden');
+    }
+  };
+
+  const closeModal = () => {
+    modal.classList.add('is-hidden');
+    resetModal();
+  };
+
+  const openModalForTeam = (teamId) => {
+    activeTeamId = teamId;
+    const team = teams.find((entry) => entry.id === teamId);
+    if (teamLabel) {
+      teamLabel.textContent = `Team: ${team?.name || 'Selected team'}`;
+    }
+    resetModal();
+    modal.classList.remove('is-hidden');
+  };
+
+  typeListNode.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.name !== 'match-event-type') {
+      return;
+    }
+    selectedTypeKey = target.value;
+    nextButton.disabled = !selectedTypeKey;
+  });
+
+  nextButton.addEventListener('click', () => {
+    if (!selectedTypeKey) return;
+    const definition = eventTypeByKey.get(selectedTypeKey);
+    if (!definition) return;
+
+    if (playerLabelNode) {
+      playerLabelNode.firstChild.textContent = `${definition.playerLabel || 'Player name'} `;
+    }
+
+    if (assistRow) {
+      assistRow.classList.toggle('is-hidden', !definition.allowAssist);
+      if (!definition.allowAssist && assistInput instanceof HTMLInputElement) {
+        assistInput.value = '';
+      }
+    }
+
+    typeStep.classList.add('is-hidden');
+    detailsStep.classList.remove('is-hidden');
+  });
+
+  backButton.addEventListener('click', () => {
+    detailsStep.classList.add('is-hidden');
+    typeStep.classList.remove('is-hidden');
+  });
+
+  saveButton.addEventListener('click', () => {
+    if (!selectedTypeKey || !eventTypeByKey.has(selectedTypeKey)) return;
+
+    const minute = Number(minuteInput?.value);
+    const stoppage = Number(stoppageInput?.value);
+    const playerName = (playerInput?.value || '').trim();
+    const jerseyNumber = (jerseyInput?.value || '').trim();
+    const assistName = (assistInput?.value || '').trim();
+    const notes = (notesInput?.value || '').trim();
+
+    state.events.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      teamId: activeTeamId,
+      type: selectedTypeKey,
+      minute: Number.isFinite(minute) && minute >= 0 ? Math.floor(minute) : null,
+      stoppage: Number.isFinite(stoppage) && stoppage > 0 ? Math.floor(stoppage) : null,
+      playerName,
+      jerseyNumber,
+      assistName,
+      notes,
+      createdAt: Date.now()
+    });
+
+    saveState();
+    render();
+    closeModal();
+  });
+
+  cancelButtons.forEach((button) => {
+    button.addEventListener('click', closeModal);
+  });
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
+      closeModal();
+    }
+  });
+
+  matchLogNode.querySelectorAll('[data-match-open-event]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const teamId = (button.dataset.teamId || '').trim();
+      if (!teamId) return;
+      openModalForTeam(teamId);
+    });
+  });
+
+  matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
+    state = { events: [] };
+    saveState();
+    render();
+  });
+
+  loadState();
+  render();
+};
+
 const renderSectionByType = (section, sectionIndex, context = {}) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const effectiveSection = resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context);
+
+  if (effectiveSection.type === 'match-log') {
+    return renderMatchLogSection(effectiveSection, sectionIndex);
+  }
 
   if (effectiveSection.type === 'cards' && effectiveSection.sectionKey === 'latest_news') {
     return renderLatestNewsSection(effectiveSection, sectionIndex);
@@ -1263,6 +1760,11 @@ export const initLatestNewsReaders = () => {
       openLatestNewsReadOverlay(slide);
     });
   });
+};
+
+export const initMatchEventLogs = () => {
+  const logs = Array.from(document.querySelectorAll('[data-match-log="true"]'));
+  logs.forEach((log) => hydrateMatchLog(log));
 };
 
 export const renderFooter = (siteContent) => `
