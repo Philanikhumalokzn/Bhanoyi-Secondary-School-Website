@@ -2231,6 +2231,44 @@ body.news-read-open {
   flex-wrap: wrap;
 }
 
+.fixture-creator-shell .btn,
+.fixture-rules-preview-actions .btn,
+.fixture-date-rules .btn {
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  will-change: transform;
+}
+
+.fixture-creator-shell .btn:hover,
+.fixture-creator-shell .btn:focus-visible,
+.fixture-rules-preview-actions .btn:hover,
+.fixture-rules-preview-actions .btn:focus-visible,
+.fixture-date-rules .btn:hover,
+.fixture-date-rules .btn:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(13, 34, 56, 0.12);
+}
+
+.fixture-creator-shell .btn:active,
+.fixture-rules-preview-actions .btn:active,
+.fixture-date-rules .btn:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 6px rgba(13, 34, 56, 0.14);
+}
+
+.fixture-autofill-toggle {
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.fixture-autofill-toggle:hover,
+.fixture-autofill-toggle:focus-within {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px rgba(13, 34, 56, 0.1);
+}
+
+.fixture-autofill-toggle:active {
+  transform: translateY(0) scale(0.985);
+}
+
 .fixture-autofill-toggle {
   display: inline-flex;
   align-items: center;
@@ -3060,6 +3098,31 @@ body.news-read-open {
 
   .news-read-nav-state {
     font-size: 0.82rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fixture-creator-shell .btn,
+  .fixture-rules-preview-actions .btn,
+  .fixture-date-rules .btn,
+  .fixture-autofill-toggle {
+    transition: none;
+  }
+
+  .fixture-creator-shell .btn:hover,
+  .fixture-creator-shell .btn:focus-visible,
+  .fixture-rules-preview-actions .btn:hover,
+  .fixture-rules-preview-actions .btn:focus-visible,
+  .fixture-date-rules .btn:hover,
+  .fixture-date-rules .btn:focus-visible,
+  .fixture-creator-shell .btn:active,
+  .fixture-rules-preview-actions .btn:active,
+  .fixture-date-rules .btn:active,
+  .fixture-autofill-toggle:hover,
+  .fixture-autofill-toggle:focus-within,
+  .fixture-autofill-toggle:active {
+    transform: none;
+    box-shadow: none;
   }
 }
 
