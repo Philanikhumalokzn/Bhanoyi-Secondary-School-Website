@@ -344,14 +344,12 @@ h1 {
   overflow: hidden;
   max-height: 0;
   opacity: 0;
-  transform: translateY(-4px);
-  transition: max-height 240ms ease, opacity 180ms ease, transform 180ms ease;
+  transition: max-height 240ms ease, opacity 180ms ease;
   margin-top: 0;
 }
 
 .page-section-collapsible.is-expanded .page-section-collapsible-body {
   opacity: 1;
-  transform: none;
   margin-top: 10px;
   overflow: visible;
 }
@@ -482,7 +480,6 @@ h1 {
 .card:hover,
 .card:focus-visible {
   border-color: #b5c9df;
-  transform: translateY(-1px);
 }
 
 .list {
@@ -1424,13 +1421,12 @@ h1 {
   color: var(--text);
   font: inherit;
   font-weight: 600;
-  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
 }
 
 .news-overlay-actions button:hover {
   border-color: #a9c0d9;
   box-shadow: 0 5px 12px rgba(13, 34, 56, 0.12);
-  transform: translateY(-1px);
 }
 
 .news-overlay-actions button[type="submit"] {
@@ -1473,14 +1469,13 @@ h1 {
   padding: 14px;
   text-align: center;
   color: var(--muted);
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 #news-image-dropzone:hover,
 #news-image-dropzone:focus-visible {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(11, 92, 171, 0.1);
-  transform: translateY(-1px);
 }
 
 #news-current-images-wrap {
@@ -2035,7 +2030,7 @@ body.news-read-open {
   border-radius: 10px;
   background: #fff;
   padding-inline: 12px;
-  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .admin-auth .admin-form input::placeholder {
@@ -2045,18 +2040,16 @@ body.news-read-open {
 .admin-auth .admin-form input:focus-visible {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
-  transform: translateY(-1px);
 }
 
 .admin-auth .btn {
   min-height: 44px;
   width: 100%;
-  transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+  transition: box-shadow 160ms ease, background-color 160ms ease;
 }
 
 .admin-auth .btn:hover,
 .admin-auth .btn:focus-visible {
-  transform: translateY(-1px);
   box-shadow: 0 8px 18px rgba(13, 34, 56, 0.14);
 }
 
@@ -2447,13 +2440,11 @@ body.news-read-open {
   overflow: hidden;
   max-height: 0;
   opacity: 0;
-  transform: translateY(-4px);
-  transition: max-height 240ms ease, opacity 180ms ease, transform 180ms ease;
+  transition: max-height 240ms ease, opacity 180ms ease;
 }
 
 .sports-workflow-step.is-expanded .sports-workflow-body {
   opacity: 1;
-  transform: none;
   overflow-y: visible;
   overscroll-behavior: contain;
   position: relative;
@@ -2469,8 +2460,7 @@ body.news-read-open {
 .fixture-creator-shell .btn,
 .fixture-rules-preview-actions .btn,
 .fixture-date-rules .btn {
-  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
-  will-change: transform;
+  transition: box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
 }
 
 .fixture-creator-shell .btn:hover,
@@ -2479,29 +2469,26 @@ body.news-read-open {
 .fixture-rules-preview-actions .btn:focus-visible,
 .fixture-date-rules .btn:hover,
 .fixture-date-rules .btn:focus-visible {
-  transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(13, 34, 56, 0.12);
 }
 
 .fixture-creator-shell .btn:active,
 .fixture-rules-preview-actions .btn:active,
 .fixture-date-rules .btn:active {
-  transform: translateY(0) scale(0.98);
   box-shadow: 0 2px 6px rgba(13, 34, 56, 0.14);
 }
 
 .fixture-autofill-toggle {
-  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  transition: box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
 }
 
 .fixture-autofill-toggle:hover,
 .fixture-autofill-toggle:focus-within {
-  transform: translateY(-1px);
   box-shadow: 0 5px 12px rgba(13, 34, 56, 0.1);
 }
 
 .fixture-autofill-toggle:active {
-  transform: translateY(0) scale(0.985);
+  box-shadow: 0 2px 6px rgba(13, 34, 56, 0.12);
 }
 
 .fixture-autofill-toggle {
@@ -2792,13 +2779,11 @@ body.news-read-open {
   overflow: hidden;
   max-height: 0;
   opacity: 0;
-  transform: translateY(-4px);
-  transition: max-height 240ms ease, opacity 180ms ease, transform 180ms ease;
+  transition: max-height 240ms ease, opacity 180ms ease;
 }
 
 .calendar-workflow-step.is-expanded .calendar-workflow-body {
   opacity: 1;
-  transform: none;
   overflow-y: visible;
   overscroll-behavior: contain;
   position: relative;
