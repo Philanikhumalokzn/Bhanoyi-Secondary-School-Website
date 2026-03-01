@@ -3955,11 +3955,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
         { header: 'Away', key: 'away', width: 20 }
       ];
 
-      const primaryBlue = '0B5CAB';
-      const deepBlue = '0D2238';
+      const primaryBlue = '1F6FCB';
+      const deepBlue = '173A5E';
+      const headerBlue = '1B4E7C';
       const lightBlue = 'EAF3FF';
       const white = 'FFFFFF';
-      const borderColor = 'D7E5F3';
+      const metaBlue = 'F5FAFF';
+      const borderColor = 'D0E0F0';
 
       sheet.mergeCells('A1:H1');
       sheet.mergeCells('A2:H2');
@@ -3986,6 +3988,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
             type: 'pattern',
             pattern: 'solid',
             fgColor: { argb: `FF${index === 0 ? deepBlue : primaryBlue}` }
+          };
+        } else {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${metaBlue}` }
           };
         }
       });
@@ -4028,13 +4036,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: `FF${deepBlue}` }
+          fgColor: { argb: `FF${headerBlue}` }
         };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.border = {
           top: { style: 'thin', color: { argb: `FF${borderColor}` } },
           left: { style: 'thin', color: { argb: `FF${borderColor}` } },
-          bottom: { style: 'thin', color: { argb: `FF${borderColor}` } },
+          bottom: { style: 'medium', color: { argb: `FF${borderColor}` } },
           right: { style: 'thin', color: { argb: `FF${borderColor}` } }
         };
       });
