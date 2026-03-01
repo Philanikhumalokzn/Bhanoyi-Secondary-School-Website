@@ -2366,6 +2366,38 @@ body.news-read-open {
   font-size: 0.84rem;
 }
 
+.school-calendar-divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+.school-terms-form {
+  display: grid;
+  gap: 10px;
+}
+
+.school-terms-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.school-terms-grid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.school-terms-grid input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+}
+
 .school-calendar-root {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2396,6 +2428,10 @@ body.news-read-open {
   border: 1px solid var(--primary);
   background: color-mix(in srgb, var(--primary) 14%, #fff);
   color: var(--text);
+}
+
+.fc .school-term-bg {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
 @media (max-width: 640px) {
@@ -2551,6 +2587,10 @@ body.news-read-open {
   }
 
   .school-calendar-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .school-terms-grid {
     grid-template-columns: 1fr;
   }
 

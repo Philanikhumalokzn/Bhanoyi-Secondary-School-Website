@@ -1515,6 +1515,48 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               </div>
             </form>
             <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
+            <hr class="school-calendar-divider" />
+            <h3>School Terms</h3>
+            <form class="school-terms-form" data-terms-form>
+              <div class="school-terms-grid">
+                <label>
+                  Term 1 Start
+                  <input type="date" name="term_1_start" />
+                </label>
+                <label>
+                  Term 1 End
+                  <input type="date" name="term_1_end" />
+                </label>
+                <label>
+                  Term 2 Start
+                  <input type="date" name="term_2_start" />
+                </label>
+                <label>
+                  Term 2 End
+                  <input type="date" name="term_2_end" />
+                </label>
+                <label>
+                  Term 3 Start
+                  <input type="date" name="term_3_start" />
+                </label>
+                <label>
+                  Term 3 End
+                  <input type="date" name="term_3_end" />
+                </label>
+                <label>
+                  Term 4 Start
+                  <input type="date" name="term_4_start" />
+                </label>
+                <label>
+                  Term 4 End
+                  <input type="date" name="term_4_end" />
+                </label>
+              </div>
+              <div class="school-calendar-actions">
+                <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
+              </div>
+            </form>
+            <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
           </div>
           <div class="school-calendar-root" data-school-calendar></div>
         </article>
@@ -1538,6 +1580,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const adminPanel = calendarShell.querySelector('[data-calendar-admin-panel]');
   const form = calendarShell.querySelector('[data-calendar-form]');
   const statusNode = calendarShell.querySelector('[data-calendar-status]');
+  const termsForm = calendarShell.querySelector('[data-terms-form]');
+  const termsStatusNode = calendarShell.querySelector('[data-terms-status]');
+  const termsSaveButton = calendarShell.querySelector('[data-terms-save]');
   const newButton = calendarShell.querySelector('[data-calendar-new]');
   const deleteButton = calendarShell.querySelector('[data-calendar-delete]');
   if (!calendarRoot) return;
@@ -1551,6 +1596,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const eventsStorageKey = `bhanoyi.schoolCalendarEvents.${sectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
+  const termsStorageKey = `bhanoyi.schoolTerms.${sectionKey}`;
 
   const params = new URLSearchParams(window.location.search);
   const incomingFixtureId = (params.get('fixtureId') || '').trim();
@@ -1564,6 +1610,122 @@ const hydrateSchoolCalendar = (calendarShell) => {
     const parsed = new Date(raw);
     if (Number.isNaN(parsed.getTime())) return '';
     return parsed.toISOString().slice(0, 10);
+  };
+
+  const toEpochDay = (dateString) => {
+    const normalized = normalizeDateString(dateString);
+    if (!normalized) return Number.NaN;
+    return new Date(`${normalized}T00:00:00`).getTime();
+  };
+
+  const addDays = (dateString, days) => {
+    const normalized = normalizeDateString(dateString);
+    if (!normalized) return '';
+    const date = new Date(`${normalized}T00:00:00`);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().slice(0, 10);
+  };
+
+  const defaultTerms = [
+    { id: 'term_1', label: 'Term 1', start: '', end: '' },
+    { id: 'term_2', label: 'Term 2', start: '', end: '' },
+    { id: 'term_3', label: 'Term 3', start: '', end: '' },
+    { id: 'term_4', label: 'Term 4', start: '', end: '' }
+  ];
+
+  const loadTerms = () => {
+    try {
+      const raw = localStorage.getItem(termsStorageKey);
+      if (!raw) return defaultTerms.map((term) => ({ ...term }));
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return defaultTerms.map((term) => ({ ...term }));
+
+      const byId = new Map(
+        parsed
+          .filter((entry) => entry && typeof entry === 'object')
+          .map((entry) => [
+            String(entry.id || '').trim(),
+            {
+              start: normalizeDateString(entry.start),
+              end: normalizeDateString(entry.end)
+            }
+          ])
+      );
+
+      return defaultTerms.map((term) => {
+        const matched = byId.get(term.id);
+        return {
+          ...term,
+          start: matched?.start || '',
+          end: matched?.end || ''
+        };
+      });
+    } catch {
+      return defaultTerms.map((term) => ({ ...term }));
+    }
+  };
+
+  const saveTerms = (terms) => {
+    const payload = terms.map((term) => ({
+      id: term.id,
+      start: normalizeDateString(term.start),
+      end: normalizeDateString(term.end)
+    }));
+    localStorage.setItem(termsStorageKey, JSON.stringify(payload));
+  };
+
+  let terms = loadTerms();
+
+  const getActiveTermRanges = () =>
+    terms
+      .map((term) => ({
+        ...term,
+        start: normalizeDateString(term.start),
+        end: normalizeDateString(term.end)
+      }))
+      .filter((term) => {
+        const startDay = toEpochDay(term.start);
+        const endDay = toEpochDay(term.end);
+        return Number.isFinite(startDay) && Number.isFinite(endDay) && endDay >= startDay;
+      });
+
+  const snapDateToActiveTerms = (dateString) => {
+    const normalized = normalizeDateString(dateString);
+    if (!normalized) return '';
+
+    const targetDay = toEpochDay(normalized);
+    if (!Number.isFinite(targetDay)) return normalized;
+
+    const activeTerms = getActiveTermRanges();
+    if (!activeTerms.length) return normalized;
+
+    const containing = activeTerms.find((term) => {
+      const startDay = toEpochDay(term.start);
+      const endDay = toEpochDay(term.end);
+      return targetDay >= startDay && targetDay <= endDay;
+    });
+    if (containing) return normalized;
+
+    let nearestDate = normalized;
+    let bestDistance = Number.MAX_SAFE_INTEGER;
+
+    activeTerms.forEach((term) => {
+      const startDay = toEpochDay(term.start);
+      const endDay = toEpochDay(term.end);
+      const startDistance = Math.abs(startDay - targetDay);
+      const endDistance = Math.abs(endDay - targetDay);
+
+      if (startDistance < bestDistance) {
+        bestDistance = startDistance;
+        nearestDate = term.start;
+      }
+      if (endDistance < bestDistance) {
+        bestDistance = endDistance;
+        nearestDate = term.end;
+      }
+    });
+
+    return nearestDate;
   };
 
   const loadEvents = () => {
@@ -1592,7 +1754,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
   };
 
   const saveEvents = (events) => {
-    const serialized = events.map((entry) => ({
+    const persistedEvents = events.filter((entry) => !String(entry.id || '').startsWith('termbg:'));
+    const serialized = persistedEvents.map((entry) => ({
       id: entry.id,
       title: entry.title,
       start: normalizeDateString(entry.startStr || entry.start || ''),
@@ -1627,6 +1790,24 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
   };
 
+  const renderTermBackgroundEvents = (calendarInstance) => {
+    calendarInstance
+      .getEvents()
+      .filter((entry) => String(entry.id || '').startsWith('termbg:'))
+      .forEach((entry) => entry.remove());
+
+    getActiveTermRanges().forEach((term) => {
+      calendarInstance.addEvent({
+        id: `termbg:${term.id}`,
+        start: term.start,
+        end: addDays(term.end, 1),
+        display: 'background',
+        allDay: true,
+        classNames: ['school-term-bg']
+      });
+    });
+  };
+
   const events = loadEvents();
   const calendar = new Calendar(calendarRoot, {
     plugins: [dayGridPlugin, interactionPlugin],
@@ -1634,6 +1815,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     height: 'auto',
     events,
     eventClick: (info) => {
+      if (info.event.display === 'background') return;
       if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
       info.jsEvent.preventDefault();
       const formData = new FormData(form);
@@ -1665,6 +1847,21 @@ const hydrateSchoolCalendar = (calendarShell) => {
   });
 
   calendar.render();
+  renderTermBackgroundEvents(calendar);
+
+  const hydrateTermsForm = () => {
+    if (!(termsForm instanceof HTMLFormElement)) return;
+    terms.forEach((term) => {
+      const startInput = termsForm.querySelector(`input[name="${term.id}_start"]`);
+      const endInput = termsForm.querySelector(`input[name="${term.id}_end"]`);
+      if (startInput instanceof HTMLInputElement) {
+        startInput.value = normalizeDateString(term.start);
+      }
+      if (endInput instanceof HTMLInputElement) {
+        endInput.value = normalizeDateString(term.end);
+      }
+    });
+  };
 
   const clearForm = () => {
     if (!(form instanceof HTMLFormElement)) return;
@@ -1709,11 +1906,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
       const idInput = form.querySelector('input[name="id"]');
 
       const title = (titleInput instanceof HTMLInputElement ? titleInput.value : '').trim();
-      const start = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
+      const rawStart = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
       const end = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
       const fixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
       const notes = (notesInput instanceof HTMLTextAreaElement ? notesInput.value : '').trim();
       const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+
+      const start = fixtureId ? snapDateToActiveTerms(rawStart) : rawStart;
 
       if (!title || !start) {
         if (statusNode) statusNode.textContent = 'Title and start date are required.';
@@ -1742,7 +1941,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
       }
 
       saveEvents(calendar.getEvents());
-      if (statusNode) statusNode.textContent = 'Event saved.';
+      if (statusNode) {
+        statusNode.textContent = fixtureId && start !== rawStart
+          ? `Event saved. Date snapped to active term (${start}).`
+          : 'Event saved.';
+      }
       clearForm();
     });
 
@@ -1770,6 +1973,28 @@ const hydrateSchoolCalendar = (calendarShell) => {
     });
 
     clearForm();
+  }
+
+  if (isAdminMode && termsForm instanceof HTMLFormElement) {
+    hydrateTermsForm();
+    termsSaveButton?.addEventListener('click', () => {
+      const nextTerms = defaultTerms.map((term) => {
+        const startInput = termsForm.querySelector(`input[name="${term.id}_start"]`);
+        const endInput = termsForm.querySelector(`input[name="${term.id}_end"]`);
+        return {
+          ...term,
+          start: startInput instanceof HTMLInputElement ? normalizeDateString(startInput.value) : '',
+          end: endInput instanceof HTMLInputElement ? normalizeDateString(endInput.value) : ''
+        };
+      });
+
+      terms = nextTerms;
+      saveTerms(terms);
+      renderTermBackgroundEvents(calendar);
+      if (termsStatusNode) {
+        termsStatusNode.textContent = 'School terms saved.';
+      }
+    });
   }
 
   const targetDate = normalizeDateString(incomingDate);
