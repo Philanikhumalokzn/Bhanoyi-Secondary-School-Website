@@ -2109,9 +2109,75 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const orderedPairKey = (homeId, awayId) => `${homeId}__${awayId}`;
 
+  const unorderedPairKey = (teamA, teamB) => {
+    const left = String(teamA || '').trim();
+    const right = String(teamB || '').trim();
+    if (!left || !right || left === right) return '';
+    return [left, right].sort((a, b) => a.localeCompare(b)).join('__');
+  };
+
+  const splitUnorderedPairKey = (key) => {
+    const [teamA, teamB] = String(key || '').split('__');
+    return { teamA: String(teamA || '').trim(), teamB: String(teamB || '').trim() };
+  };
+
   const splitOrderedPairKey = (key) => {
     const [homeId, awayId] = String(key || '').split('__');
     return { homeId: String(homeId || '').trim(), awayId: String(awayId || '').trim() };
+  };
+
+  const validateNoDuplicatePairingsPerLeg = (fixtures, teamIds) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (normalizedTeams.length < 2) {
+      return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
+    }
+
+    const allUnorderedPairs = [];
+    normalizedTeams.forEach((homeId, leftIndex) => {
+      normalizedTeams.slice(leftIndex + 1).forEach((awayId) => {
+        const pairKey = unorderedPairKey(homeId, awayId);
+        if (pairKey) allUnorderedPairs.push(pairKey);
+      });
+    });
+
+    const expectedMatchesPerLeg = allUnorderedPairs.length;
+    const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    if (!legLabels.length) {
+      return { ok: false, message: 'Fixture legs are missing; unable to validate leg pairing rules.' };
+    }
+
+    for (const legLabel of legLabels) {
+      const legFixtures = fixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+      if (legFixtures.length !== expectedMatchesPerLeg) {
+        return {
+          ok: false,
+          message: `${legLabel} leg does not contain a complete set of unique opponent fixtures.`
+        };
+      }
+
+      const seenPairs = new Set();
+      for (const fixture of legFixtures) {
+        if (!normalizedTeams.includes(fixture.homeId) || !normalizedTeams.includes(fixture.awayId)) {
+          return { ok: false, message: 'Fixture teams must come from the selected team list.' };
+        }
+
+        const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
+        if (!pairKey) {
+          return { ok: false, message: 'Home and away teams must be different.' };
+        }
+
+        if (seenPairs.has(pairKey)) {
+          return {
+            ok: false,
+            message: `${teamNameById(fixture.homeId)} and ${teamNameById(fixture.awayId)} appear more than once in ${legLabel} leg.`
+          };
+        }
+
+        seenPairs.add(pairKey);
+      }
+    }
+
+    return { ok: true };
   };
 
   const reconcileRoundRobinAfterManualEdit = ({ fixtures, teamIds, editedIndex, nextHomeId, nextAwayId }) => {
@@ -2128,24 +2194,29 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return { ok: false, message: 'Home and away teams must be different.' };
     }
 
-    const allOrderedPairs = [];
-    normalizedTeams.forEach((homeId) => {
-      normalizedTeams.forEach((awayId) => {
-        if (homeId === awayId) return;
-        allOrderedPairs.push(orderedPairKey(homeId, awayId));
+    const allUnorderedPairs = [];
+    normalizedTeams.forEach((homeId, leftIndex) => {
+      normalizedTeams.slice(leftIndex + 1).forEach((awayId) => {
+        const pairKey = unorderedPairKey(homeId, awayId);
+        if (pairKey) allUnorderedPairs.push(pairKey);
       });
     });
 
-    if (fixtures.length !== allOrderedPairs.length) {
+    const legs = Array.from(new Set(fixtures.map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    if (!legs.length) {
+      return { ok: false, message: 'Fixture legs are missing; cannot preserve leg rules.' };
+    }
+
+    const expectedMatchesPerLeg = allUnorderedPairs.length;
+    if (fixtures.length !== expectedMatchesPerLeg * legs.length) {
       return {
         ok: false,
         message: 'Fixture count does not match a full home-and-away round-robin for selected teams.'
       };
     }
 
-    const availablePairs = new Set(allOrderedPairs);
-    const editedPairKey = orderedPairKey(nextHomeId, nextAwayId);
-    if (!availablePairs.has(editedPairKey)) {
+    const editedPairKey = unorderedPairKey(nextHomeId, nextAwayId);
+    if (!editedPairKey || !allUnorderedPairs.includes(editedPairKey)) {
       return { ok: false, message: 'Unable to apply this edit while preserving round-robin rules.' };
     }
 
@@ -2155,35 +2226,69 @@ const hydrateFixtureCreator = (fixtureNode) => {
       homeId: nextHomeId,
       awayId: nextAwayId
     };
-    availablePairs.delete(editedPairKey);
 
-    for (let index = 0; index < repairedFixtures.length; index += 1) {
-      if (index === editedIndex) continue;
+    for (const legLabel of legs) {
+      const legIndexes = repairedFixtures
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => String(entry.leg || '').trim() === legLabel)
+        .map(({ index }) => index);
 
-      const currentPairKey = orderedPairKey(repairedFixtures[index].homeId, repairedFixtures[index].awayId);
-      let resolvedPairKey = '';
-
-      if (availablePairs.has(currentPairKey)) {
-        resolvedPairKey = currentPairKey;
-      } else {
-        resolvedPairKey = availablePairs.values().next().value || '';
+      if (legIndexes.length !== expectedMatchesPerLeg) {
+        return {
+          ok: false,
+          message: `${legLabel} leg does not contain the required number of fixtures.`
+        };
       }
 
-      if (!resolvedPairKey) {
-        return { ok: false, message: 'Could not auto-adjust fixtures to a valid round-robin schedule.' };
+      const availablePairs = new Set(allUnorderedPairs);
+      const orderedIndexes = [
+        ...legIndexes.filter((index) => index === editedIndex),
+        ...legIndexes.filter((index) => index !== editedIndex)
+      ];
+      const unresolvedIndexes = [];
+
+      orderedIndexes.forEach((index) => {
+        const fixture = repairedFixtures[index];
+        const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
+        if (pairKey && availablePairs.has(pairKey)) {
+          availablePairs.delete(pairKey);
+          return;
+        }
+        unresolvedIndexes.push(index);
+      });
+
+      for (const index of unresolvedIndexes) {
+        const nextPairKey = availablePairs.values().next().value || '';
+        if (!nextPairKey) {
+          return { ok: false, message: 'Could not auto-adjust fixtures to a valid round-robin schedule.' };
+        }
+
+        availablePairs.delete(nextPairKey);
+        const { teamA, teamB } = splitUnorderedPairKey(nextPairKey);
+        const current = repairedFixtures[index];
+        let nextPair = { homeId: teamA, awayId: teamB };
+
+        if (current.homeId === teamA || current.awayId === teamB) {
+          nextPair = { homeId: teamA, awayId: teamB };
+        } else if (current.homeId === teamB || current.awayId === teamA) {
+          nextPair = { homeId: teamB, awayId: teamA };
+        }
+
+        repairedFixtures[index] = {
+          ...current,
+          homeId: nextPair.homeId,
+          awayId: nextPair.awayId
+        };
       }
 
-      availablePairs.delete(resolvedPairKey);
-      const resolvedPair = splitOrderedPairKey(resolvedPairKey);
-      repairedFixtures[index] = {
-        ...repairedFixtures[index],
-        homeId: resolvedPair.homeId,
-        awayId: resolvedPair.awayId
-      };
+      if (availablePairs.size) {
+        return { ok: false, message: 'Round-robin auto-adjustment left unmatched fixture pairs.' };
+      }
     }
 
-    if (availablePairs.size) {
-      return { ok: false, message: 'Round-robin auto-adjustment left unmatched fixture pairs.' };
+    const legValidation = validateNoDuplicatePairingsPerLeg(repairedFixtures, normalizedTeams);
+    if (!legValidation.ok) {
+      return legValidation;
     }
 
     const changedIndexes = repairedFixtures
@@ -2297,6 +2402,15 @@ const hydrateFixtureCreator = (fixtureNode) => {
       sportLabel: profile.label,
       formatLabel: lastFormatLabel
     }));
+
+    const generationValidation = validateNoDuplicatePairingsPerLeg(lastFixtures, teams);
+    if (!generationValidation.ok) {
+      lastFixtures = [];
+      renderFixtures(lastFixtures);
+      if (statusNode) statusNode.textContent = generationValidation.message;
+      return;
+    }
+
     saveFixtureCatalog(lastFixtures);
     loadFixtureDates();
     if (autoFillDates && isAdminMode) {
