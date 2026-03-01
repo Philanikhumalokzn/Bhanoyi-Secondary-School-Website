@@ -249,7 +249,7 @@
       "sections": [
         {
           "type": "match-log",
-          "title": "Live Match Event Log",
+          "title": "Log Live Match Events",
           "sectionKey": "sports_match_log",
           "body": "Sports committee can log live football or netball match events as they happen. Score updates automatically when goals are logged.",
           "sport": "Football / Netball",
@@ -283,7 +283,7 @@
         },
         {
           "type": "fixture-creator",
-          "title": "Season Fixture Creator",
+          "title": "Create Season Fixtures",
           "sectionKey": "sports_fixture_creator",
           "body": "Generate the full home-and-away round-robin schedule for the selected houses.",
           "sport": "Football / Netball",
@@ -299,7 +299,7 @@
         },
         {
           "type": "cards",
-          "title": "Sporting Codes",
+          "title": "Explore Sporting Codes",
           "sectionKey": "sporting_codes",
           "editable": true,
           "columns": 3,
@@ -320,7 +320,7 @@
         },
         {
           "type": "split",
-          "title": "Training and Fixtures",
+          "title": "Plan Training and Fixtures",
           "alt": true,
           "body": "Training schedules and fixture updates are shared with learners and parents each term.",
           "panel": {
@@ -344,7 +344,7 @@
       "sections": [
         {
           "type": "calendar",
-          "title": "School Calendar",
+          "title": "Manage School Calendar",
           "sectionKey": "school_calendar",
           "body": "Admins can add and manage school events here. Fixture date edits from Sports open this calendar.",
           "fixtureSectionKey": "sports_fixture_creator"

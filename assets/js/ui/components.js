@@ -1244,7 +1244,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="fixture-creator" data-section-key="${fallbackSectionKey}">
       <div class="container">
-        <h2>${section.title || 'Season Fixture Creator'}</h2>
+        <h2>${section.title || 'Create Season Fixtures'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="fixture-creator-header">
@@ -1261,7 +1261,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
           </header>
           <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
           <div class="fixture-date-rules" data-fixture-date-rules>
-            <h3>Date Rules for Auto-fill</h3>
+            <h3>Set Auto-fill Date Rules</h3>
             <div class="fixture-creator-sport-grid">
               <label>
                 Start scheduling from
@@ -3780,13 +3780,13 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="calendar" data-section-key="${fallbackSectionKey}">
       <div class="container">
-        <h2>${section.title || 'School Calendar'}</h2>
+        <h2>${section.title || 'Manage School Calendar'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
           <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
             <div class="calendar-editor-head">
-              <h3>Calendar Event Editor</h3>
+              <h3>Create Event</h3>
               <button type="button" class="btn btn-secondary" data-calendar-editor-close>Close editor</button>
             </div>
             <form class="school-calendar-form" data-calendar-form>
@@ -3838,7 +3838,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
             </form>
             <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
             <hr class="school-calendar-divider" />
-            <h3>Event Types</h3>
+            <h3>Manage Event Types</h3>
             <div class="school-event-types-editor" data-event-types-editor>
               <div class="school-event-types-list" data-event-types-list></div>
               <div class="school-calendar-actions">
@@ -3848,7 +3848,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
             </div>
             <hr class="school-calendar-divider" />
-            <h3>School Terms</h3>
+            <h3>Set School Terms</h3>
             <form class="school-terms-form" data-terms-form>
               <div class="school-terms-grid">
                 <label>
@@ -3903,7 +3903,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
           <div class="calendar-sports-overlay is-hidden" data-calendar-sports-overlay>
             <div class="calendar-sports-overlay-panel" role="dialog" aria-modal="true" aria-label="Sports event options">
               <div class="calendar-sports-overlay-header">
-                <h3>Sports Event Options</h3>
+                <h3>Choose Sports Event Options</h3>
                 <button type="button" class="btn btn-secondary" data-calendar-sports-close>Close</button>
               </div>
               <p class="calendar-sports-overlay-text">This event is marked as Sports. Use Fixture Creator for fixture-aware scheduling, or continue with the normal calendar form.</p>
