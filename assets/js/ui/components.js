@@ -2729,11 +2729,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return legValidation;
     }
 
-    const homeAwayValidation = validateHomeAwayBalancePerLeg(repairedFixtures, normalizedTeams);
-    if (!homeAwayValidation.ok) {
-      return homeAwayValidation;
-    }
-
     const changedIndexes = repairedFixtures
       .map((entry, index) => ({
         index,
@@ -2867,14 +2862,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-    const homeAwayValidation = validateHomeAwayBalancePerLeg(lastFixtures, teams);
-    if (!homeAwayValidation.ok) {
-      lastFixtures = [];
-      renderFixtures(lastFixtures);
-      if (statusNode) statusNode.textContent = homeAwayValidation.message;
-      return;
-    }
-
     saveFixtureCatalog(lastFixtures);
     loadFixtureDates();
     if (autoFillDates && isAdminMode) {
@@ -2923,9 +2910,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, teams);
     if (!integrity.ok) return false;
-    const balance = validateHomeAwayBalancePerLeg(sanitizedFixtures, teams);
-    if (!balance.ok) return false;
-
     const setup = profile.readSetup();
     lastSportKey = key;
     lastSportLabel = profile.label;
