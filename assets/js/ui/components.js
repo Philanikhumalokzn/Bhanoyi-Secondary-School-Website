@@ -2186,6 +2186,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (dayOverlay instanceof HTMLElement) {
       dayOverlay.classList.add('is-hidden');
     }
+    if (dayOverlayCloseButton instanceof HTMLButtonElement) {
+      dayOverlayCloseButton.blur();
+    }
   };
 
   const writeEventToForm = (eventEntry, anchorElement = null) => {
@@ -2277,6 +2280,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
     renderDayOverlayList(normalized);
     dayOverlay.classList.remove('is-hidden');
+    const firstRow = dayOverlay.querySelector('[data-calendar-day-event-id]');
+    if (firstRow instanceof HTMLButtonElement) {
+      firstRow.focus();
+    } else if (dayOverlayCloseButton instanceof HTMLButtonElement) {
+      dayOverlayCloseButton.focus();
+    }
   };
 
   const refreshDayOverlay = () => {
@@ -2427,6 +2436,31 @@ const hydrateSchoolCalendar = (calendarShell) => {
       writeEventToForm(eventEntry);
     }
     hideDayOverlay();
+  });
+
+  dayOverlay?.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      hideDayOverlay();
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const row = target.closest('[data-calendar-day-event-id]');
+      if (!(row instanceof HTMLElement)) return;
+      event.preventDefault();
+      const eventId = String(row.dataset.calendarDayEventId || '').trim();
+      if (!eventId) return;
+      const eventEntry = calendar.getEventById(eventId);
+      if (!eventEntry) return;
+      if (isAdminMode) {
+        writeEventToForm(eventEntry);
+      }
+      hideDayOverlay();
+    }
   });
 
   const hydrateTermsForm = () => {
