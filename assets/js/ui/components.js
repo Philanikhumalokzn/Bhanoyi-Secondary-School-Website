@@ -191,6 +191,27 @@ const showSmartToast = (message, { tone = 'info' } = {}) => {
   window.setTimeout(closeToast, timeout);
 };
 
+const portalOverlayToBody = (node, portalKey = '') => {
+  if (!(node instanceof HTMLElement) || typeof document === 'undefined') return node;
+
+  const key = String(portalKey || '').trim();
+  if (key) {
+    node.dataset.overlayPortalKey = key;
+    const existing = Array.from(document.querySelectorAll('[data-overlay-portal-key]')).find(
+      (entry) => entry instanceof HTMLElement && entry.dataset.overlayPortalKey === key
+    );
+    if (existing instanceof HTMLElement && existing !== node) {
+      existing.remove();
+    }
+  }
+
+  if (node.parentElement !== document.body) {
+    document.body.appendChild(node);
+  }
+
+  return node;
+};
+
 const renderSectionAttachments = (section) => {
   const attachments = Array.isArray(section.attachments) ? section.attachments : [];
   if (!attachments.length) {
@@ -940,6 +961,11 @@ const hydrateMatchLog = (matchLogNode) => {
   const jerseyInput = eventForm?.querySelector('input[name="jerseyNumber"]');
   const assistInput = eventForm?.querySelector('input[name="assistName"]');
   const notesInput = eventForm?.querySelector('textarea[name="notes"]');
+
+  portalOverlayToBody(
+    modal,
+    `match-log-modal:${matchLogNode.dataset.matchLogId || config.sectionKey || 'default'}`
+  );
 
   if (!modal || !typeStep || !detailsStep || !typeListNode || !nextButton || !backButton || !saveButton || !eventForm) {
     return;
@@ -4147,6 +4173,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const sportsOverlayContinueButton = calendarShell.querySelector('[data-calendar-sports-continue]');
   const sportsFrameWrap = calendarShell.querySelector('[data-calendar-sports-frame-wrap]');
   const sportsFrame = calendarShell.querySelector('[data-calendar-sports-frame]');
+
+  portalOverlayToBody(dayOverlay, 'calendar-day-overlay');
+  portalOverlayToBody(sportsOverlay, 'calendar-sports-overlay');
+  portalOverlayToBody(editorBackdrop, 'calendar-editor-backdrop');
+
   const adminOnlyBlocks = Array.from(calendarShell.querySelectorAll('[data-calendar-admin-only]'));
   const workflowSteps = Array.from(calendarShell.querySelectorAll('[data-calendar-workflow-step]'))
     .map((stepNode) => {
