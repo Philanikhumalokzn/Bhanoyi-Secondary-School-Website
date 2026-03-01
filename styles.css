@@ -2290,6 +2290,15 @@ body.news-read-open {
   font-size: 0.86rem;
 }
 
+.fixture-approval-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 9px;
+  display: grid;
+  gap: 8px;
+}
+
 .fixture-creator-actions {
   display: flex;
   gap: 6px;
@@ -2539,6 +2548,24 @@ body.news-read-open {
   font-size: 0.8rem;
   padding: 5px 7px;
   min-width: 120px;
+}
+
+.fixture-row-unfair td {
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: color-mix(in srgb, var(--surface-alt) 74%, var(--surface));
+}
+
+.fixture-unfair-flag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--surface) 84%, var(--surface-alt));
 }
 
 .fixture-table tbody tr:nth-child(even) td {

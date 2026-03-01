@@ -1385,6 +1385,13 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               .join('')}
           </div>
           <p class="fixture-creator-status" data-fixture-status aria-live="polite">Select teams and generate fixtures.</p>
+          <div class="fixture-approval-panel is-hidden" data-fixture-approval-panel>
+            <p class="fixture-creator-status" data-fixture-approval-status aria-live="polite"></p>
+            <div class="fixture-creator-actions">
+              <button type="button" class="btn btn-secondary" data-fixture-approve-resolved>Approve after fixes</button>
+              <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>Approve with unfairnesses</button>
+            </div>
+          </div>
           <div class="fixture-table-wrap">
             <table class="fixture-table">
               <thead>
@@ -1518,6 +1525,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const generateButton = fixtureNode.querySelector('[data-fixture-generate]');
   const exportButton = fixtureNode.querySelector('[data-fixture-export]');
   const exportCsvButton = fixtureNode.querySelector('[data-fixture-export-csv]');
+  const approvalPanelNode = fixtureNode.querySelector('[data-fixture-approval-panel]');
+  const approvalStatusNode = fixtureNode.querySelector('[data-fixture-approval-status]');
+  const approveResolvedButton = fixtureNode.querySelector('[data-fixture-approve-resolved]');
+  const approveAnywayButton = fixtureNode.querySelector('[data-fixture-approve-anyway]');
 
   if (!bodyNode || !generateButton || !exportButton) return;
 
@@ -1528,6 +1539,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
   let lastPreviewDateMap = null;
   let lastPreviewFixtureSignature = '';
   let lastPreviewMatchesPerDay = 1;
+  let pendingFixtureApproval = false;
+  let approvedWithUnfairness = false;
+  let currentUnfairnessReport = {
+    hasUnfairness: false,
+    fixtureReasons: {},
+    teamIssues: [],
+    affectedFixtureCount: 0
+  };
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
@@ -2634,6 +2653,119 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return { ok: true };
   };
 
+  const buildHomeAwayUnfairnessReport = (fixtures, teamIds) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (!normalizedTeams.length) {
+      return {
+        hasUnfairness: false,
+        fixtureReasons: {},
+        teamIssues: [],
+        affectedFixtureCount: 0
+      };
+    }
+
+    const fixtureReasons = {};
+    const teamIssues = [];
+    const appendFixtureReason = (fixtureId, reason) => {
+      const normalizedId = String(fixtureId || '').trim();
+      const normalizedReason = String(reason || '').trim();
+      if (!normalizedId || !normalizedReason) return;
+      const existing = Array.isArray(fixtureReasons[normalizedId]) ? fixtureReasons[normalizedId] : [];
+      if (!existing.includes(normalizedReason)) {
+        existing.push(normalizedReason);
+      }
+      fixtureReasons[normalizedId] = existing;
+    };
+
+    const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    legLabels.forEach((legLabel) => {
+      const legFixtures = (fixtures || []).filter((entry) => String(entry.leg || '').trim() === legLabel);
+      if (!legFixtures.length) return;
+
+      const homeCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      const awayCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      legFixtures.forEach((fixture) => {
+        const homeId = String(fixture.homeId || '').trim();
+        const awayId = String(fixture.awayId || '').trim();
+        if (homeId in homeCount) homeCount[homeId] += 1;
+        if (awayId in awayCount) awayCount[awayId] += 1;
+      });
+
+      normalizedTeams
+        .map((teamId) => ({
+          teamId,
+          home: homeCount[teamId] || 0,
+          away: awayCount[teamId] || 0,
+          delta: Math.abs((homeCount[teamId] || 0) - (awayCount[teamId] || 0))
+        }))
+        .filter((entry) => entry.delta > 1)
+        .forEach((issue) => {
+          const explanation = `${teamNameById(issue.teamId)} has ${issue.home} home vs ${issue.away} away in ${legLabel} leg (difference ${issue.delta}).`;
+          teamIssues.push(explanation);
+          legFixtures.forEach((fixture) => {
+            if (fixture.homeId !== issue.teamId && fixture.awayId !== issue.teamId) return;
+            appendFixtureReason(getFixtureId(fixture), explanation);
+          });
+        });
+    });
+
+    const flattenedReasons = Object.fromEntries(
+      Object.entries(fixtureReasons).map(([fixtureId, reasons]) => [fixtureId, reasons.join(' ')])
+    );
+
+    return {
+      hasUnfairness: Object.keys(flattenedReasons).length > 0,
+      fixtureReasons: flattenedReasons,
+      teamIssues,
+      affectedFixtureCount: Object.keys(flattenedReasons).length
+    };
+  };
+
+  const fairnessTeamIdsForFixtures = (fixtures) => {
+    const selected = Array.from(new Set(selectedTeamIds()));
+    if (selected.length) return selected;
+    return Array.from(new Set((fixtures || []).flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean)));
+  };
+
+  const refreshCurrentUnfairnessReport = (fixtures) => {
+    currentUnfairnessReport = buildHomeAwayUnfairnessReport(fixtures, fairnessTeamIdsForFixtures(fixtures));
+  };
+
+  const refreshFixtureApprovalUi = () => {
+    if (!(approvalPanelNode instanceof HTMLElement) || !(approvalStatusNode instanceof HTMLElement)) return;
+
+    const shouldShow = isAdminMode && pendingFixtureApproval && lastFixtures.length > 0;
+    approvalPanelNode.classList.toggle('is-hidden', !shouldShow);
+    if (!shouldShow) return;
+
+    if (currentUnfairnessReport.hasUnfairness) {
+      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) are highlighted with fairness concerns. Hover highlighted rows for details, then approve after fixes or approve with unfairnesses.`;
+    } else {
+      approvalStatusNode.textContent = 'All detected fairness concerns are resolved. Approve after fixes to finalize this fixture set.';
+    }
+
+    if (approveResolvedButton instanceof HTMLButtonElement) {
+      approveResolvedButton.disabled = currentUnfairnessReport.hasUnfairness;
+    }
+    if (approveAnywayButton instanceof HTMLButtonElement) {
+      approveAnywayButton.disabled = false;
+    }
+  };
+
+  const persistActiveSportState = () => {
+    const activeSport = selectedSportKey();
+    if (!activeSport) return;
+
+    fixtureCreatorState.lastSport = activeSport;
+    fixtureCreatorState.sports[activeSport] = {
+      selectedTeamIds: selectedTeamIds(),
+      fixtures: lastFixtures.map((entry) => ({ ...entry })),
+      setup: readSportSetupValues(activeSport),
+      formatLabel: String(lastFormatLabel || '').trim()
+    };
+    saveFixtureCreatorState();
+  };
+
   const reconcileRoundRobinAfterManualEdit = ({ fixtures, teamIds, editedIndex, nextHomeId, nextAwayId }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
@@ -2765,14 +2897,26 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const renderFixtures = (fixtures) => {
     if (!fixtures.length) {
+      currentUnfairnessReport = {
+        hasUnfairness: false,
+        fixtureReasons: {},
+        teamIssues: [],
+        affectedFixtureCount: 0
+      };
+      pendingFixtureApproval = false;
+      approvedWithUnfairness = false;
       bodyNode.innerHTML = '<tr><td colspan="8" class="fixture-empty">Select sport and at least two teams to generate fixtures.</td></tr>';
       if (statusNode) {
         statusNode.textContent = selectedSportKey()
           ? 'Select at least two teams to generate fixtures.'
           : 'Choose Soccer or Netball first, then generate fixtures.';
       }
+      refreshFixtureApprovalUi();
       return;
     }
+
+    refreshCurrentUnfairnessReport(fixtures);
+    const unfairnessByFixtureId = currentUnfairnessReport.fixtureReasons || {};
 
     const activeTeamIds = Array.from(new Set(selectedTeamIds()));
     const fallbackFixtureTeamIds = Array.from(
@@ -2791,10 +2935,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
     bodyNode.innerHTML = fixtures
       .map(
         (fixture, index) => `
-          <tr data-fixture-row="${index}">
+          <tr data-fixture-row="${index}" class="${unfairnessByFixtureId[getFixtureId(fixture)] ? 'fixture-row-unfair' : ''}" ${
+            unfairnessByFixtureId[getFixtureId(fixture)]
+              ? `title="${escapeHtmlAttribute(unfairnessByFixtureId[getFixtureId(fixture)])}"`
+              : ''
+          }>
             <td>${fixture.round}</td>
             <td>${fixture.leg}</td>
-            <td>R${fixture.round}M${fixture.match}</td>
+            <td>
+              R${fixture.round}M${fixture.match}
+              ${
+                unfairnessByFixtureId[getFixtureId(fixture)]
+                  ? '<span class="fixture-unfair-flag">Fairness issue</span>'
+                  : ''
+              }
+            </td>
             <td>
               ${(() => {
                 const fixtureId = getFixtureId(fixture);
@@ -2841,8 +2996,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .join('');
 
     if (statusNode) {
-      statusNode.textContent = `${lastSportLabel}: ${fixtures.length} fixtures generated (${fixtures.filter((entry) => entry.leg === 'First').length} first-leg + ${fixtures.filter((entry) => entry.leg === 'Return').length} return-leg).`;
+      if (isAdminMode && pendingFixtureApproval) {
+        statusNode.textContent = currentUnfairnessReport.hasUnfairness
+          ? `Preview state: ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows for details and approve when ready.`
+          : 'Preview state: fairness concerns resolved. Click "Approve after fixes" to finalize this fixture set.';
+      } else if (isAdminMode && approvedWithUnfairness && currentUnfairnessReport.hasUnfairness) {
+        statusNode.textContent = `Fixtures approved with fairness warnings (${currentUnfairnessReport.affectedFixtureCount} highlighted fixture${currentUnfairnessReport.affectedFixtureCount === 1 ? '' : 's'}).`;
+      } else {
+        statusNode.textContent = `${lastSportLabel}: ${fixtures.length} fixtures generated (${fixtures.filter((entry) => entry.leg === 'First').length} first-leg + ${fixtures.filter((entry) => entry.leg === 'Return').length} return-leg).`;
+      }
     }
+
+    refreshFixtureApprovalUi();
   };
 
   const generateFixtures = ({ autoFillDates = false } = {}) => {
@@ -2878,6 +3043,22 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
+    refreshCurrentUnfairnessReport(lastFixtures);
+    if (isAdminMode && currentUnfairnessReport.hasUnfairness) {
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+      loadFixtureDates();
+      if (autoFillDates) {
+        autoFillFixtureDates(lastFixtures);
+        loadFixtureDates();
+      }
+      renderFixtures(lastFixtures);
+      showSmartToast('Fixtures generated in preview mode: fairness concerns detected.', { tone: 'info' });
+      return;
+    }
+
+    pendingFixtureApproval = false;
+    approvedWithUnfairness = false;
     saveFixtureCatalog(lastFixtures);
     loadFixtureDates();
     if (autoFillDates && isAdminMode) {
@@ -2885,17 +3066,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       loadFixtureDates();
     }
 
-    const activeSport = selectedSportKey();
-    if (activeSport) {
-      fixtureCreatorState.lastSport = activeSport;
-      fixtureCreatorState.sports[activeSport] = {
-        selectedTeamIds: selectedTeamIds(),
-        fixtures: lastFixtures.map((entry) => ({ ...entry })),
-        setup: readSportSetupValues(activeSport),
-        formatLabel: String(lastFormatLabel || '').trim()
-      };
-      saveFixtureCreatorState();
-    }
+    persistActiveSportState();
 
     renderFixtures(lastFixtures);
   };
@@ -2930,12 +3101,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSportKey = key;
     lastSportLabel = profile.label;
     lastFormatLabel = String(setup.formatLabel || saved.formatLabel || '').trim();
+    pendingFixtureApproval = false;
     lastFixtures = sanitizedFixtures.map((entry) => ({
       ...entry,
       sportKey: key,
       sportLabel: profile.label,
       formatLabel: String(entry.formatLabel || lastFormatLabel || '').trim()
     }));
+
+    refreshCurrentUnfairnessReport(lastFixtures);
+    approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
 
     saveFixtureCatalog(lastFixtures);
     loadFixtureDates();
@@ -3378,23 +3553,27 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
 
       lastFixtures = repairResult.fixtures;
-      saveFixtureCatalog(lastFixtures);
-      const activeSport = selectedSportKey();
-      if (activeSport) {
-        fixtureCreatorState.lastSport = activeSport;
-        fixtureCreatorState.sports[activeSport] = {
-          selectedTeamIds: selectedTeamIds(),
-          fixtures: lastFixtures.map((entry) => ({ ...entry })),
-          setup: readSportSetupValues(activeSport),
-          formatLabel: String(lastFormatLabel || '').trim()
-        };
-        saveFixtureCreatorState();
+      refreshCurrentUnfairnessReport(lastFixtures);
+      if (isAdminMode && (pendingFixtureApproval || currentUnfairnessReport.hasUnfairness)) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      } else {
+        pendingFixtureApproval = false;
+        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+        saveFixtureCatalog(lastFixtures);
+        persistActiveSportState();
       }
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = repairResult.affectedOtherCount > 0
-          ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
-          : 'Fixture updated with round-robin integrity preserved.';
+        if (pendingFixtureApproval) {
+          statusNode.textContent = currentUnfairnessReport.hasUnfairness
+            ? `Preview state: fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+            : 'Preview state: fairness concerns resolved. Click "Approve after fixes" to finalize.';
+        } else {
+          statusNode.textContent = repairResult.affectedOtherCount > 0
+            ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
+            : 'Fixture updated with round-robin integrity preserved.';
+        }
       }
       return;
     }
@@ -3431,25 +3610,73 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
 
       lastFixtures = repairResult.fixtures;
-      saveFixtureCatalog(lastFixtures);
-      const activeSport = selectedSportKey();
-      if (activeSport) {
-        fixtureCreatorState.lastSport = activeSport;
-        fixtureCreatorState.sports[activeSport] = {
-          selectedTeamIds: selectedTeamIds(),
-          fixtures: lastFixtures.map((entry) => ({ ...entry })),
-          setup: readSportSetupValues(activeSport),
-          formatLabel: String(lastFormatLabel || '').trim()
-        };
-        saveFixtureCreatorState();
+      refreshCurrentUnfairnessReport(lastFixtures);
+      if (isAdminMode && (pendingFixtureApproval || currentUnfairnessReport.hasUnfairness)) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      } else {
+        pendingFixtureApproval = false;
+        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+        saveFixtureCatalog(lastFixtures);
+        persistActiveSportState();
       }
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = repairResult.affectedOtherCount > 0
-          ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
-          : 'Fixture updated with round-robin integrity preserved.';
+        if (pendingFixtureApproval) {
+          statusNode.textContent = currentUnfairnessReport.hasUnfairness
+            ? `Preview state: fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+            : 'Preview state: fairness concerns resolved. Click "Approve after fixes" to finalize.';
+        } else {
+          statusNode.textContent = repairResult.affectedOtherCount > 0
+            ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
+            : 'Fixture updated with round-robin integrity preserved.';
+        }
       }
     }
+  });
+
+  const approveFixturePreview = ({ allowUnfairness = false } = {}) => {
+    if (!isAdminMode) return;
+    if (!lastFixtures.length) return;
+
+    refreshCurrentUnfairnessReport(lastFixtures);
+    const hasUnfairness = currentUnfairnessReport.hasUnfairness;
+
+    if (hasUnfairness && !allowUnfairness) {
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        statusNode.textContent = 'Resolve highlighted fairness concerns, then click "Approve after fixes".';
+      }
+      showSmartToast('Resolve highlighted fairness concerns before approval.', { tone: 'info' });
+      return;
+    }
+
+    pendingFixtureApproval = false;
+    approvedWithUnfairness = hasUnfairness && allowUnfairness;
+    saveFixtureCatalog(lastFixtures);
+    persistActiveSportState();
+    renderFixtures(lastFixtures);
+
+    if (statusNode) {
+      statusNode.textContent = approvedWithUnfairness
+        ? `Fixtures approved with fairness warnings (${currentUnfairnessReport.affectedFixtureCount} highlighted fixture${currentUnfairnessReport.affectedFixtureCount === 1 ? '' : 's'}).`
+        : 'Fixtures approved after fairness validation.';
+    }
+
+    showSmartToast(
+      approvedWithUnfairness ? 'Fixtures approved with fairness warnings.' : 'Fixtures approved.',
+      { tone: approvedWithUnfairness ? 'info' : 'success' }
+    );
+  };
+
+  approveResolvedButton?.addEventListener('click', () => {
+    approveFixturePreview({ allowUnfairness: false });
+  });
+
+  approveAnywayButton?.addEventListener('click', () => {
+    approveFixturePreview({ allowUnfairness: true });
   });
 
   sportSelect?.addEventListener('change', () => {
