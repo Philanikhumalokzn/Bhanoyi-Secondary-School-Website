@@ -2357,6 +2357,7 @@ body.news-read-open {
   border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
+  position: relative;
 }
 
 .sports-workflow-toggle {
@@ -2386,6 +2387,10 @@ body.news-read-open {
   border-bottom-color: var(--border);
 }
 
+.sports-workflow-step.is-expanded {
+  z-index: 6;
+}
+
 .sports-workflow-step.is-expanded .sports-workflow-toggle::after {
   transform: rotate(0deg);
 }
@@ -2401,6 +2406,8 @@ body.news-read-open {
 .sports-workflow-step.is-expanded .sports-workflow-body {
   opacity: 1;
   transform: translateY(0);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .fixture-creator-actions {
@@ -2693,6 +2700,7 @@ body.news-read-open {
   border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
+  position: relative;
 }
 
 .calendar-workflow-toggle {
@@ -2722,6 +2730,10 @@ body.news-read-open {
   border-bottom-color: var(--border);
 }
 
+.calendar-workflow-step.is-expanded {
+  z-index: 6;
+}
+
 .calendar-workflow-step.is-expanded .calendar-workflow-toggle::after {
   transform: rotate(0deg);
 }
@@ -2737,6 +2749,8 @@ body.news-read-open {
 .calendar-workflow-step.is-expanded .calendar-workflow-body {
   opacity: 1;
   transform: translateY(0);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .school-calendar-admin {

@@ -617,6 +617,15 @@ const getDefaultMatchPair = (teams = [], leftCandidate = '', rightCandidate = ''
   };
 };
 
+const getExpandedWorkflowBodyMaxHeight = (body) => {
+  if (!(body instanceof HTMLElement)) {
+    return '0px';
+  }
+  const viewportCap = Math.max(280, Math.floor(window.innerHeight * 0.68));
+  const target = Math.min(body.scrollHeight, viewportCap);
+  return `${Math.max(0, target)}px`;
+};
+
 const initSportsWorkflowSteps = (rootNode) => {
   const steps = Array.from(rootNode.querySelectorAll('[data-sports-workflow-step]'))
     .map((stepNode) => {
@@ -638,7 +647,7 @@ const initSportsWorkflowSteps = (rootNode) => {
     entry.stepNode.classList.toggle('is-expanded', expanded);
     entry.stepNode.classList.toggle('is-collapsed', !expanded);
     entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    entry.body.style.maxHeight = expanded ? `${entry.body.scrollHeight}px` : '0px';
+    entry.body.style.maxHeight = expanded ? getExpandedWorkflowBodyMaxHeight(entry.body) : '0px';
   };
 
   steps.forEach((entry) => {
@@ -653,7 +662,7 @@ const initSportsWorkflowSteps = (rootNode) => {
   window.addEventListener('resize', () => {
     steps.forEach((entry) => {
       if (!entry.stepNode.classList.contains('is-expanded')) return;
-      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+      entry.body.style.maxHeight = getExpandedWorkflowBodyMaxHeight(entry.body);
     });
   });
 
@@ -4152,7 +4161,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     entry.stepNode.classList.toggle('is-expanded', expanded);
     entry.stepNode.classList.toggle('is-collapsed', !expanded);
     entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    entry.body.style.maxHeight = expanded ? `${entry.body.scrollHeight}px` : '0px';
+    entry.body.style.maxHeight = expanded ? getExpandedWorkflowBodyMaxHeight(entry.body) : '0px';
   };
 
   workflowSteps.forEach((entry) => {
@@ -4177,7 +4186,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   window.addEventListener('resize', () => {
     workflowSteps.forEach((entry) => {
       if (!entry.stepNode.classList.contains('is-expanded')) return;
-      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+      entry.body.style.maxHeight = getExpandedWorkflowBodyMaxHeight(entry.body);
     });
   });
 

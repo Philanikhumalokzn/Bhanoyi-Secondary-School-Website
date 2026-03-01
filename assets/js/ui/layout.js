@@ -108,6 +108,13 @@ const initCollapsiblePageSections = (pageKey) => {
 
   if (!preparedSections.length) return;
 
+  const refreshExpandedSectionHeights = () => {
+    preparedSections.forEach((entry) => {
+      if (!entry.section.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+    });
+  };
+
   const collapseSection = (entry) => {
     entry.section.classList.add('is-collapsed');
     entry.section.classList.remove('is-expanded');
@@ -162,11 +169,21 @@ const initCollapsiblePageSections = (pageKey) => {
   });
 
   window.addEventListener('resize', () => {
-    preparedSections.forEach((entry) => {
-      if (!entry.section.classList.contains('is-expanded')) return;
-      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
-    });
+    refreshExpandedSectionHeights();
   });
+
+  if (typeof ResizeObserver === 'function') {
+    preparedSections.forEach((entry) => {
+      const observer = new ResizeObserver(() => {
+        refreshExpandedSectionHeights();
+      });
+      observer.observe(entry.body);
+      const container = entry.body.firstElementChild;
+      if (container instanceof HTMLElement) {
+        observer.observe(container);
+      }
+    });
+  }
 };
 
 export const renderSite = (siteContent, page) => {
