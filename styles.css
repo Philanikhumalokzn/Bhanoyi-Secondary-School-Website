@@ -2432,6 +2432,89 @@ body.news-read-open {
   padding: 10px;
 }
 
+.calendar-day-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--surface) 10%, #000 40%);
+  display: grid;
+  place-items: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+.calendar-day-overlay-panel {
+  width: min(680px, 100%);
+  max-height: min(78vh, 760px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.calendar-day-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-day-overlay-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.calendar-day-overlay-list {
+  display: grid;
+  gap: 8px;
+}
+
+.calendar-day-event-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  color: var(--text);
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.calendar-day-event-row:hover,
+.calendar-day-event-row:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.calendar-day-event-time {
+  font-weight: 700;
+  color: var(--primary-strong);
+}
+
+.calendar-day-event-title {
+  font-weight: 600;
+}
+
+.calendar-day-event-type {
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.calendar-day-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
 .fc .fc-toolbar-title {
   font-size: 1.1rem;
   color: var(--text);
@@ -2674,6 +2757,11 @@ body.news-read-open {
   .school-calendar-actions .btn {
     width: 100%;
     text-align: center;
+  }
+
+  .calendar-day-event-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .news-overlay {

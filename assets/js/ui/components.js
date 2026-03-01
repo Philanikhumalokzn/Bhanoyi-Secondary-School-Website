@@ -1506,8 +1506,16 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
                   <input type="date" name="start" required />
                 </label>
                 <label>
+                  Start Time (optional)
+                  <input type="time" name="startTime" />
+                </label>
+                <label>
                   End Date (optional)
                   <input type="date" name="end" />
+                </label>
+                <label>
+                  End Time (optional)
+                  <input type="time" name="endTime" />
                 </label>
               </div>
               <label>
@@ -1579,6 +1587,15 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
             <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
           </div>
           <div class="school-calendar-root" data-school-calendar></div>
+          <div class="calendar-day-overlay is-hidden" data-calendar-day-overlay>
+            <div class="calendar-day-overlay-panel" role="dialog" aria-modal="true" aria-label="Events for selected day">
+              <div class="calendar-day-overlay-header">
+                <h3 data-calendar-day-title>Events</h3>
+                <button type="button" class="btn btn-secondary" data-calendar-day-close>Close</button>
+              </div>
+              <div class="calendar-day-overlay-list" data-calendar-day-list></div>
+            </div>
+          </div>
         </article>
       </div>
     </section>
@@ -1612,6 +1629,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const termsSaveButton = calendarShell.querySelector('[data-terms-save]');
   const newButton = calendarShell.querySelector('[data-calendar-new]');
   const deleteButton = calendarShell.querySelector('[data-calendar-delete]');
+  const dayOverlay = calendarShell.querySelector('[data-calendar-day-overlay]');
+  const dayOverlayTitle = calendarShell.querySelector('[data-calendar-day-title]');
+  const dayOverlayList = calendarShell.querySelector('[data-calendar-day-list]');
+  const dayOverlayCloseButton = calendarShell.querySelector('[data-calendar-day-close]');
   if (!calendarRoot) return;
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
@@ -1635,9 +1656,60 @@ const hydrateSchoolCalendar = (calendarShell) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const datePart = raw.match(/^(\d{4}-\d{2}-\d{2})T/);
+    if (datePart) return datePart[1];
     const parsed = new Date(raw);
     if (Number.isNaN(parsed.getTime())) return '';
-    return parsed.toISOString().slice(0, 10);
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${parsed.getFullYear()}-${month}-${day}`;
+  };
+
+  const normalizeTimeString = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const matched = raw.match(/^(\d{2}:\d{2})/);
+    if (matched) return matched[1];
+    const timePart = raw.match(/T(\d{2}:\d{2})/);
+    if (timePart) return timePart[1];
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const hours = String(parsed.getHours()).padStart(2, '0');
+    const minutes = String(parsed.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
+  const normalizeDateTimeString = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const direct = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+    if (direct) {
+      return `${direct[1]}T${direct[2]}`;
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const datePart = normalizeDateString(parsed);
+    const timePart = normalizeTimeString(parsed);
+    if (!datePart || !timePart) return '';
+    return `${datePart}T${timePart}`;
+  };
+
+  const combineDateAndTime = (dateValue, timeValue) => {
+    const date = normalizeDateString(dateValue);
+    const time = normalizeTimeString(timeValue);
+    if (!date) return '';
+    if (!time) return date;
+    return `${date}T${time}`;
+  };
+
+  const eventStartStamp = (eventEntry) => {
+    if (eventEntry.start instanceof Date && !Number.isNaN(eventEntry.start.getTime())) {
+      return eventEntry.start.getTime();
+    }
+    const fallback = normalizeDateTimeString(eventEntry.startStr || eventEntry.start || '') || normalizeDateString(eventEntry.startStr || eventEntry.start || '');
+    if (!fallback) return Number.MAX_SAFE_INTEGER;
+    const parsed = new Date(fallback.includes('T') ? fallback : `${fallback}T00:00`);
+    return Number.isNaN(parsed.getTime()) ? Number.MAX_SAFE_INTEGER : parsed.getTime();
   };
 
   const toEpochDay = (dateString) => {
@@ -1858,21 +1930,42 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (!Array.isArray(parsed)) return [];
       return parsed
         .filter((entry) => entry && typeof entry === 'object' && entry.id && entry.title && entry.start)
-        .map((entry) => ({
-          id: String(entry.id),
-          title: String(entry.title),
-          start: normalizeDateString(entry.start),
-          end: normalizeDateString(entry.end),
-          allDay: true,
-          backgroundColor: String(entry.backgroundColor || '').trim() || undefined,
-          borderColor: String(entry.borderColor || '').trim() || undefined,
-          textColor: String(entry.textColor || '').trim() || undefined,
-          extendedProps: {
-            eventType: normalizeEventTypeLabel(entry.eventType || ''),
-            fixtureId: String(entry.fixtureId || ''),
-            notes: String(entry.notes || '')
+        .map((entry) => {
+          const savedStart = String(entry.start || '').trim();
+          const savedEnd = String(entry.end || '').trim();
+          const normalizedStartDateTime = normalizeDateTimeString(savedStart);
+          const normalizedStartDate = normalizeDateString(savedStart);
+          const normalizedEndDateTime = normalizeDateTimeString(savedEnd);
+          const normalizedEndDate = normalizeDateString(savedEnd);
+
+          const isTimed = Boolean(normalizedStartDateTime && savedStart.includes('T')) || entry.allDay === false;
+          const startValue = isTimed
+            ? normalizedStartDateTime
+            : normalizedStartDate;
+
+          let endValue = '';
+          if (isTimed) {
+            endValue = normalizedEndDateTime || '';
+          } else if (normalizedEndDate) {
+            endValue = addDays(normalizedEndDate, 1);
           }
-        }))
+
+          return {
+            id: String(entry.id),
+            title: String(entry.title),
+            start: startValue,
+            end: endValue || undefined,
+            allDay: !isTimed,
+            backgroundColor: String(entry.backgroundColor || '').trim() || undefined,
+            borderColor: String(entry.borderColor || '').trim() || undefined,
+            textColor: String(entry.textColor || '').trim() || undefined,
+            extendedProps: {
+              eventType: normalizeEventTypeLabel(entry.eventType || ''),
+              fixtureId: String(entry.fixtureId || ''),
+              notes: String(entry.notes || '')
+            }
+          };
+        })
         .filter((entry) => Boolean(entry.start));
     } catch {
       return [];
@@ -1881,18 +1974,41 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   const saveEvents = (events) => {
     const persistedEvents = events.filter((entry) => !String(entry.id || '').startsWith('termbg:'));
-    const serialized = persistedEvents.map((entry) => ({
-      id: entry.id,
-      title: entry.title,
-      start: normalizeDateString(entry.startStr || entry.start || ''),
-      end: normalizeDateString(entry.endStr || entry.end || ''),
-      backgroundColor: String(entry.backgroundColor || '').trim(),
-      borderColor: String(entry.borderColor || '').trim(),
-      textColor: String(entry.textColor || '').trim(),
-      eventType: normalizeEventTypeLabel(entry.extendedProps?.eventType || ''),
-      fixtureId: String(entry.extendedProps?.fixtureId || ''),
-      notes: String(entry.extendedProps?.notes || '')
-    }));
+    const serialized = persistedEvents.map((entry) => {
+      const isAllDay = entry.allDay !== false;
+      const rawStart = String(entry.startStr || entry.start || '').trim();
+      const rawEnd = String(entry.endStr || entry.end || '').trim();
+
+      const normalizedStartDate = normalizeDateString(rawStart);
+      const normalizedStartDateTime = normalizeDateTimeString(rawStart);
+      const normalizedEndDate = normalizeDateString(rawEnd);
+      const normalizedEndDateTime = normalizeDateTimeString(rawEnd);
+
+      let storedStart = isAllDay ? normalizedStartDate : normalizedStartDateTime || normalizedStartDate;
+      let storedEnd = '';
+
+      if (isAllDay) {
+        if (normalizedEndDate) {
+          storedEnd = addDays(normalizedEndDate, -1);
+        }
+      } else {
+        storedEnd = normalizedEndDateTime || '';
+      }
+
+      return {
+        id: entry.id,
+        title: entry.title,
+        start: storedStart,
+        end: storedEnd,
+        allDay: isAllDay,
+        backgroundColor: String(entry.backgroundColor || '').trim(),
+        borderColor: String(entry.borderColor || '').trim(),
+        textColor: String(entry.textColor || '').trim(),
+        eventType: normalizeEventTypeLabel(entry.extendedProps?.eventType || ''),
+        fixtureId: String(entry.extendedProps?.fixtureId || ''),
+        notes: String(entry.extendedProps?.notes || '')
+      };
+    });
     localStorage.setItem(eventsStorageKey, JSON.stringify(serialized));
 
     try {
@@ -2024,6 +2140,149 @@ const hydrateSchoolCalendar = (calendarShell) => {
   };
 
   const events = loadEvents();
+  let activeOverlayDate = '';
+
+  const formatOverlayDateTitle = (dateString) => {
+    const date = new Date(`${normalizeDateString(dateString)}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return normalizeDateString(dateString);
+    return date.toLocaleDateString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const formatTimeLabel = (eventEntry) => {
+    if (eventEntry.allDay) return 'All day';
+    const start = normalizeDateTimeString(eventEntry.startStr || eventEntry.start || '');
+    const end = normalizeDateTimeString(eventEntry.endStr || eventEntry.end || '');
+    const startTime = normalizeTimeString(start);
+    const endTime = normalizeTimeString(end);
+    if (startTime && endTime) return `${startTime} - ${endTime}`;
+    if (startTime) return startTime;
+    return 'Timed event';
+  };
+
+  const eventOccursOnDate = (eventEntry, dateString) => {
+    const targetDay = toEpochDay(dateString);
+    if (!Number.isFinite(targetDay)) return false;
+
+    const startDay = toEpochDay(eventEntry.startStr || eventEntry.start || '');
+    if (!Number.isFinite(startDay)) return false;
+
+    if (eventEntry.allDay) {
+      const endRaw = normalizeDateString(eventEntry.endStr || eventEntry.end || '');
+      if (!endRaw) return targetDay === startDay;
+      const endDayExclusive = toEpochDay(endRaw);
+      return targetDay >= startDay && targetDay < endDayExclusive;
+    }
+
+    return targetDay === startDay;
+  };
+
+  const hideDayOverlay = () => {
+    activeOverlayDate = '';
+    if (dayOverlay instanceof HTMLElement) {
+      dayOverlay.classList.add('is-hidden');
+    }
+  };
+
+  const writeEventToForm = (eventEntry, anchorElement = null) => {
+    if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
+    showColorPopover(eventEntry, anchorElement || null);
+    const formData = new FormData(form);
+    formData.set('id', String(eventEntry.id || ''));
+    formData.set('title', String(eventEntry.title || ''));
+
+    const startRaw = String(eventEntry.startStr || eventEntry.start || '');
+    const endRaw = String(eventEntry.endStr || eventEntry.end || '');
+    const isAllDay = eventEntry.allDay !== false;
+
+    const startDate = normalizeDateString(startRaw);
+    const startTime = isAllDay ? '' : normalizeTimeString(startRaw);
+
+    let endDate = '';
+    let endTime = '';
+    if (endRaw) {
+      if (isAllDay) {
+        const exclusive = normalizeDateString(endRaw);
+        endDate = exclusive ? addDays(exclusive, -1) : '';
+      } else {
+        endDate = normalizeDateString(endRaw);
+        endTime = normalizeTimeString(endRaw);
+      }
+    }
+
+    formData.set('start', startDate);
+    formData.set('startTime', startTime);
+    formData.set('end', endDate);
+    formData.set('endTime', endTime);
+    formData.set('eventType', ensureEventType(eventEntry.extendedProps?.eventType || '') || (eventTypes[0] || ''));
+    formData.set('fixtureId', String(eventEntry.extendedProps?.fixtureId || ''));
+    formData.set('notes', String(eventEntry.extendedProps?.notes || ''));
+
+    Array.from(form.elements).forEach((field) => {
+      if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement)) return;
+      const name = field.name;
+      if (!name) return;
+      field.value = String(formData.get(name) || '');
+    });
+    toggleCustomTypeField();
+    if (eventTypeCustomInput instanceof HTMLInputElement) {
+      eventTypeCustomInput.value = '';
+    }
+
+    if (statusNode) {
+      statusNode.textContent = 'Editing selected event.';
+    }
+  };
+
+  const renderDayOverlayList = (dateString) => {
+    if (!(dayOverlayList instanceof HTMLElement)) return;
+
+    const dayEvents = calendar
+      .getEvents()
+      .filter((entry) => entry.display !== 'background' && eventOccursOnDate(entry, dateString))
+      .sort((left, right) => eventStartStamp(left) - eventStartStamp(right));
+
+    if (!dayEvents.length) {
+      dayOverlayList.innerHTML = '<p class="calendar-day-empty">No events on this day.</p>';
+      return;
+    }
+
+    dayOverlayList.innerHTML = dayEvents
+      .map((entry) => {
+        const eventType = escapeHtmlText(String(entry.extendedProps?.eventType || 'General'));
+        const title = escapeHtmlText(String(entry.title || 'Untitled event'));
+        const eventId = escapeHtmlAttribute(String(entry.id || ''));
+        const timeLabel = escapeHtmlText(formatTimeLabel(entry));
+        return `
+          <button type="button" class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
+            <span class="calendar-day-event-time">${timeLabel}</span>
+            <span class="calendar-day-event-title">${title}</span>
+            <span class="calendar-day-event-type">${eventType}</span>
+          </button>
+        `;
+      })
+      .join('');
+  };
+
+  const showDayOverlay = (dateString) => {
+    const normalized = normalizeDateString(dateString);
+    if (!(dayOverlay instanceof HTMLElement) || !normalized) return;
+    activeOverlayDate = normalized;
+    if (dayOverlayTitle instanceof HTMLElement) {
+      dayOverlayTitle.textContent = `Events • ${formatOverlayDateTitle(normalized)}`;
+    }
+    renderDayOverlayList(normalized);
+    dayOverlay.classList.remove('is-hidden');
+  };
+
+  const refreshDayOverlay = () => {
+    if (!activeOverlayDate) return;
+    renderDayOverlayList(activeOverlayDate);
+  };
 
   swatchWrap?.addEventListener('click', (event) => {
     const button = (event.target instanceof HTMLElement)
@@ -2073,36 +2332,19 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (info.event.display === 'background') return;
       if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
       info.jsEvent.preventDefault();
-      showColorPopover(info.event, info.el);
-      const formData = new FormData(form);
-      formData.set('id', String(info.event.id || ''));
-      formData.set('title', String(info.event.title || ''));
-      formData.set('start', normalizeDateString(info.event.startStr || ''));
-      formData.set('end', normalizeDateString(info.event.endStr || ''));
-      formData.set('eventType', ensureEventType(info.event.extendedProps?.eventType || '') || (eventTypes[0] || ''));
-      formData.set('fixtureId', String(info.event.extendedProps?.fixtureId || ''));
-      formData.set('notes', String(info.event.extendedProps?.notes || ''));
-
-      Array.from(form.elements).forEach((field) => {
-        if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement)) return;
-        const name = field.name;
-        if (!name) return;
-        field.value = String(formData.get(name) || '');
-      });
-      toggleCustomTypeField();
-      if (eventTypeCustomInput instanceof HTMLInputElement) {
-        eventTypeCustomInput.value = '';
-      }
-
-      if (statusNode) {
-        statusNode.textContent = 'Editing selected event.';
-      }
+      writeEventToForm(info.event, info.el);
     },
     dateClick: (info) => {
-      if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
-      const startInput = form.querySelector('input[name="start"]');
-      if (startInput instanceof HTMLInputElement) {
-        startInput.value = info.dateStr;
+      showDayOverlay(info.dateStr);
+      if (isAdminMode && form instanceof HTMLFormElement) {
+        clearForm();
+        const startInput = form.querySelector('input[name="start"]');
+        if (startInput instanceof HTMLInputElement) {
+          startInput.value = info.dateStr;
+        }
+        if (statusNode) {
+          statusNode.textContent = 'Ready to add a new event for selected date.';
+        }
       }
     },
     eventDrop: (info) => {
@@ -2112,7 +2354,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
       }
 
       const fixtureId = String(info.event.extendedProps?.fixtureId || '').trim();
-      const rawStart = normalizeDateString(info.event.startStr || '');
+      const rawStartDate = normalizeDateString(info.event.startStr || '');
+      const rawStartTime = normalizeTimeString(info.event.startStr || '');
+      const rawStart = combineDateAndTime(rawStartDate, rawStartTime);
       if (!rawStart) {
         info.revert();
         if (statusNode) statusNode.textContent = 'Unable to move event to an invalid date.';
@@ -2127,20 +2371,26 @@ const hydrateSchoolCalendar = (calendarShell) => {
         return;
       }
 
-      const snappedStart = fixtureId ? snapDateToActiveTerms(rawStart) : rawStart;
-      if (fixtureId && snappedStart !== rawStart) {
+      const snappedStartDate = fixtureId ? snapDateToActiveTerms(rawStartDate) : rawStartDate;
+      const snappedStart = combineDateAndTime(snappedStartDate, rawStartTime);
+      if (fixtureId && snappedStartDate !== rawStartDate) {
         info.event.setStart(snappedStart);
       }
 
       saveEvents(calendar.getEvents());
+      refreshDayOverlay();
 
       if (form instanceof HTMLFormElement) {
         const idInput = form.querySelector('input[name="id"]');
         const selectedId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
         if (selectedId && selectedId === String(info.event.id || '').trim()) {
           const startInput = form.querySelector('input[name="start"]');
+          const startTimeInput = form.querySelector('input[name="startTime"]');
           if (startInput instanceof HTMLInputElement) {
-            startInput.value = snappedStart;
+            startInput.value = snappedStartDate;
+          }
+          if (startTimeInput instanceof HTMLInputElement) {
+            startTimeInput.value = rawStartTime;
           }
         }
       }
@@ -2155,6 +2405,29 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   calendar.render();
   renderTermBackgroundEvents(calendar);
+
+  dayOverlayCloseButton?.addEventListener('click', () => {
+    hideDayOverlay();
+  });
+
+  dayOverlay?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target === dayOverlay) {
+      hideDayOverlay();
+      return;
+    }
+    const row = target.closest('[data-calendar-day-event-id]');
+    if (!(row instanceof HTMLElement)) return;
+    const eventId = String(row.dataset.calendarDayEventId || '').trim();
+    if (!eventId) return;
+    const eventEntry = calendar.getEventById(eventId);
+    if (!eventEntry) return;
+    if (isAdminMode) {
+      writeEventToForm(eventEntry);
+    }
+    hideDayOverlay();
+  });
 
   const hydrateTermsForm = () => {
     if (!(termsForm instanceof HTMLFormElement)) return;
@@ -2216,20 +2489,47 @@ const hydrateSchoolCalendar = (calendarShell) => {
       event.preventDefault();
       const titleInput = form.querySelector('input[name="title"]');
       const startInput = form.querySelector('input[name="start"]');
+      const startTimeInput = form.querySelector('input[name="startTime"]');
       const endInput = form.querySelector('input[name="end"]');
+      const endTimeInput = form.querySelector('input[name="endTime"]');
       const fixtureInput = form.querySelector('input[name="fixtureId"]');
       const notesInput = form.querySelector('textarea[name="notes"]');
       const idInput = form.querySelector('input[name="id"]');
 
       const title = (titleInput instanceof HTMLInputElement ? titleInput.value : '').trim();
-      const rawStart = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
-      const end = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
+      const startDate = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
+      const startTime = normalizeTimeString(startTimeInput instanceof HTMLInputElement ? startTimeInput.value : '');
+      const endDateInput = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
+      const endTime = normalizeTimeString(endTimeInput instanceof HTMLInputElement ? endTimeInput.value : '');
       const eventType = resolveEventTypeFromForm();
       const fixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
       const notes = (notesInput instanceof HTMLTextAreaElement ? notesInput.value : '').trim();
       const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
 
-      const start = fixtureId ? snapDateToActiveTerms(rawStart) : rawStart;
+      const snappedStartDate = fixtureId ? snapDateToActiveTerms(startDate) : startDate;
+      const effectiveStartDate = snappedStartDate || startDate;
+
+      const isTimedEvent = Boolean(startTime);
+      const start = combineDateAndTime(effectiveStartDate, startTime);
+
+      let end = '';
+      if (isTimedEvent) {
+        const effectiveEndDate = endDateInput || effectiveStartDate;
+        const effectiveEndTime = endTime || startTime;
+        end = combineDateAndTime(effectiveEndDate, effectiveEndTime);
+        if (end && start) {
+          const startStamp = new Date(start).getTime();
+          const endStamp = new Date(end).getTime();
+          if (Number.isFinite(startStamp) && Number.isFinite(endStamp) && endStamp < startStamp) {
+            end = '';
+          }
+        }
+      } else if (endDateInput) {
+        const clampedEnd = toEpochDay(endDateInput) < toEpochDay(effectiveStartDate)
+          ? effectiveStartDate
+          : endDateInput;
+        end = addDays(clampedEnd, 1);
+      }
 
       if (!title || !start || !eventType) {
         if (statusNode) statusNode.textContent = 'Title, event type, and start date are required.';
@@ -2250,7 +2550,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
           title,
           start,
           end: end || undefined,
-          allDay: true,
+          allDay: !isTimedEvent,
           extendedProps: {
             eventType,
             fixtureId,
@@ -2262,15 +2562,17 @@ const hydrateSchoolCalendar = (calendarShell) => {
         eventEntry.setProp('title', title);
         eventEntry.setStart(start);
         eventEntry.setEnd(end || null);
+        eventEntry.setAllDay(!isTimedEvent);
         eventEntry.setExtendedProp('eventType', eventType);
         eventEntry.setExtendedProp('fixtureId', fixtureId);
         eventEntry.setExtendedProp('notes', notes);
       }
 
       saveEvents(calendar.getEvents());
+      refreshDayOverlay();
       if (statusNode) {
-        statusNode.textContent = fixtureId && start !== rawStart
-          ? `Event saved. Date snapped to active term (${start}).`
+        statusNode.textContent = fixtureId && effectiveStartDate !== startDate
+          ? `Event saved. Date snapped to active term (${effectiveStartDate}).`
           : 'Event saved.';
       }
       clearForm();
@@ -2293,8 +2595,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
         if (statusNode) statusNode.textContent = 'Selected event not found.';
         return;
       }
+      const confirmDelete = window.confirm('Delete this calendar event?');
+      if (!confirmDelete) return;
       eventEntry.remove();
       saveEvents(calendar.getEvents());
+      refreshDayOverlay();
       clearForm();
       if (statusNode) statusNode.textContent = 'Event deleted.';
     });
@@ -2326,8 +2631,43 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (!(button instanceof HTMLButtonElement)) return;
       const index = Number.parseInt(button.dataset.eventTypeDelete || '', 10);
       if (!Number.isInteger(index) || index < 0 || index >= eventTypes.length) return;
+      const removedType = eventTypes[index];
+      const usageCount = calendar
+        .getEvents()
+        .filter(
+          (entry) =>
+            entry.display !== 'background' &&
+            normalizeEventTypeLabel(entry.extendedProps?.eventType || '') === removedType
+        ).length;
+
+      const confirmDelete = window.confirm(
+        usageCount > 0
+          ? `Delete event type "${removedType}"? ${usageCount} event(s) currently use it.`
+          : `Delete event type "${removedType}"?`
+      );
+      if (!confirmDelete) return;
+
+      const fallbackType = eventTypes.find((type, idx) => idx !== index) || 'General';
+      if (!eventTypes.includes(fallbackType)) {
+        eventTypes.push(fallbackType);
+      }
+
+      if (usageCount > 0) {
+        calendar
+          .getEvents()
+          .filter(
+            (entry) =>
+              entry.display !== 'background' &&
+              normalizeEventTypeLabel(entry.extendedProps?.eventType || '') === removedType
+          )
+          .forEach((entry) => {
+            entry.setExtendedProp('eventType', fallbackType);
+          });
+      }
+
       eventTypes.splice(index, 1);
       eventTypes = saveEventTypes(eventTypes);
+      saveEvents(calendar.getEvents());
       renderEventTypeOptions();
       renderEventTypesEditor();
       if (eventTypesStatusNode) {
