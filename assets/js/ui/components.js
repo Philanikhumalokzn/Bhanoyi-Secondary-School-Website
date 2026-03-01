@@ -609,13 +609,21 @@ const renderMatchLogSection = (section, sectionIndex) => {
       <div class="container">
         <h2>${section.title || 'Live Match Event Log'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        <article class="panel section-overlay-launcher" data-section-overlay-launcher="true">
+          <h3>Live Match Log</h3>
+          <p>Open the full live event workspace in an overlay.</p>
+          <div class="section-overlay-launcher-actions">
+            <button type="button" class="btn btn-secondary" data-open-section-overlay="${fallbackSectionKey}-match-log">Open Live Match Log</button>
+          </div>
+        </article>
+        <article class="panel match-log-shell is-collapsed-section" data-section-overlay-content="${fallbackSectionKey}-match-log" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="match-log-header">
             <div>
               <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
               <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
             </div>
             <div class="match-log-header-actions">
+              <button type="button" class="btn btn-secondary section-overlay-close-btn" data-section-overlay-close>Close</button>
               <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
               <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
             </div>
@@ -1246,10 +1254,18 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
       <div class="container">
         <h2>${section.title || 'Season Fixture Creator'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        <article class="panel section-overlay-launcher" data-section-overlay-launcher="true">
+          <h3>Season Fixture</h3>
+          <p>Open the full fixture planner and sync workflow in an overlay.</p>
+          <div class="section-overlay-launcher-actions">
+            <button type="button" class="btn btn-secondary" data-open-section-overlay="${fallbackSectionKey}-fixture-creator">Open Season Fixture</button>
+          </div>
+        </article>
+        <article class="panel fixture-creator-shell is-collapsed-section" data-section-overlay-content="${fallbackSectionKey}-fixture-creator" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="fixture-creator-header">
             <p class="fixture-creator-meta" data-fixture-meta>Choose a sport format to begin.</p>
             <div class="fixture-creator-actions">
+              <button type="button" class="btn btn-secondary section-overlay-close-btn" data-section-overlay-close>Close</button>
               <label class="fixture-autofill-toggle">
                 <input type="checkbox" data-fixture-auto-fill />
                 <span>Auto-fill dates (use rules)</span>
@@ -3782,7 +3798,17 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
       <div class="container">
         <h2>${section.title || 'School Calendar'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        <article class="panel section-overlay-launcher" data-section-overlay-launcher="true">
+          <h3>Calendar Workspace</h3>
+          <p>Open the full calendar workspace in an overlay.</p>
+          <div class="section-overlay-launcher-actions">
+            <button type="button" class="btn btn-secondary" data-open-section-overlay="${fallbackSectionKey}-calendar-workspace">Open Calendar</button>
+          </div>
+        </article>
+        <article class="panel school-calendar-shell is-collapsed-section" data-section-overlay-content="${fallbackSectionKey}-calendar-workspace" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <div class="section-overlay-inline-head">
+            <button type="button" class="btn btn-secondary section-overlay-close-btn" data-section-overlay-close>Close</button>
+          </div>
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
           <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
             <div class="calendar-editor-head">
@@ -6419,6 +6445,79 @@ export const initLatestNewsReaders = () => {
       event.preventDefault();
       openLatestNewsReadOverlay(slide);
     });
+  });
+};
+
+export const initSectionOverlays = () => {
+  const openButtons = Array.from(document.querySelectorAll('[data-open-section-overlay]'));
+  if (!openButtons.length) return;
+
+  let activeOverlay = null;
+  let backdrop = document.querySelector('[data-section-overlay-runtime-backdrop]');
+
+  const ensureBackdrop = () => {
+    if (backdrop instanceof HTMLElement) return backdrop;
+    const node = document.createElement('div');
+    node.className = 'section-overlay-runtime-backdrop is-hidden';
+    node.setAttribute('data-section-overlay-runtime-backdrop', 'true');
+    document.body.appendChild(node);
+    backdrop = node;
+    return node;
+  };
+
+  const closeOverlay = (overlay = activeOverlay) => {
+    if (!(overlay instanceof HTMLElement)) return;
+    overlay.classList.remove('is-section-overlay-active');
+    const backdropNode = ensureBackdrop();
+    backdropNode.classList.add('is-hidden');
+    document.body.classList.remove('section-overlay-open');
+    if (activeOverlay === overlay) {
+      activeOverlay = null;
+    }
+  };
+
+  const openOverlay = (overlay) => {
+    if (!(overlay instanceof HTMLElement)) return;
+    if (activeOverlay && activeOverlay !== overlay) {
+      closeOverlay(activeOverlay);
+    }
+    const backdropNode = ensureBackdrop();
+    overlay.classList.add('is-section-overlay-active');
+    backdropNode.classList.remove('is-hidden');
+    document.body.classList.add('section-overlay-open');
+    activeOverlay = overlay;
+  };
+
+  openButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.addEventListener('click', () => {
+      const overlayId = String(button.dataset.openSectionOverlay || '').trim();
+      if (!overlayId) return;
+      const overlay = document.querySelector(`[data-section-overlay-content="${overlayId}"]`);
+      if (!(overlay instanceof HTMLElement)) return;
+      openOverlay(overlay);
+    });
+  });
+
+  const closeButtons = Array.from(document.querySelectorAll('[data-section-overlay-close]'));
+  closeButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', () => {
+      const overlay = button.closest('[data-section-overlay-content]');
+      if (!(overlay instanceof HTMLElement)) return;
+      closeOverlay(overlay);
+    });
+  });
+
+  ensureBackdrop().addEventListener('click', () => {
+    closeOverlay(activeOverlay);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key !== 'Escape') return;
+    if (!activeOverlay) return;
+    closeOverlay(activeOverlay);
   });
 };
 

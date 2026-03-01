@@ -321,6 +321,62 @@ h1 {
   padding: 18px;
 }
 
+.section-overlay-launcher {
+  display: grid;
+  gap: 8px;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-alt) 58%, var(--surface));
+}
+
+.section-overlay-launcher h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.section-overlay-launcher p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.section-overlay-launcher-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.is-collapsed-section {
+  display: none;
+}
+
+.is-collapsed-section.is-section-overlay-active {
+  display: grid;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(1160px, calc(100vw - 24px));
+  max-height: min(86vh, 960px);
+  overflow: auto;
+  z-index: 1110;
+  box-shadow: 0 16px 30px rgba(13, 34, 56, 0.22);
+}
+
+.section-overlay-runtime-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1105;
+  background: color-mix(in srgb, var(--surface) 10%, #000 44%);
+}
+
+body.section-overlay-open {
+  overflow: hidden;
+}
+
+.section-overlay-inline-head {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .cards,
 .three-col,
 .section-grid,
