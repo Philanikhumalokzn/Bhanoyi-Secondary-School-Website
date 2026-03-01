@@ -2874,10 +2874,11 @@ body.news-read-open {
 }
 
 .calendar-event-content {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
+  width: 100%;
 }
 
 .calendar-event-time {
@@ -2888,6 +2889,10 @@ body.news-read-open {
 
 .calendar-event-title {
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fc .school-term-bg {

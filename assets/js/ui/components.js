@@ -2351,7 +2351,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           minutesPerQuarter,
           breakMinutes,
           halfTimeMinutes,
-          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no quarter break' : `quarter break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time break' : `half-time ${halfTimeMinutes} min`})`
+          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time' : `half-time ${halfTimeMinutes} min`})`
         };
       }
     }
@@ -4646,6 +4646,39 @@ const hydrateSchoolCalendar = (calendarShell) => {
     });
   };
 
+  const truncateCalendarTitle = (value, maxLength = 22) => {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    if (maxLength <= 3) return '...';
+    return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+  };
+
+  const shortFixtureTeamCode = (value) => {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return 'TBD';
+    const compact = normalized.replace(/[^A-Za-z0-9]/g, '');
+    const source = compact || normalized.replace(/\s+/g, '');
+    return source.slice(0, 3).toUpperCase() || normalized.slice(0, 3).toUpperCase();
+  };
+
+  const compactCalendarEventTitle = (eventEntry) => {
+    const rawTitle = String(eventEntry?.title || '').trim();
+    const fixtureId = String(eventEntry?.extendedProps?.fixtureId || '').trim();
+
+    if (fixtureId) {
+      const matched = rawTitle.match(/^(.+?)\s+(?:vs|v\.?|versus)\s+(.+)$/i);
+      if (matched) {
+        const homeCode = shortFixtureTeamCode(matched[1]);
+        const awayCode = shortFixtureTeamCode(matched[2]);
+        return `${homeCode} vs ${awayCode}`;
+      }
+      return truncateCalendarTitle(rawTitle, 13);
+    }
+
+    return truncateCalendarTitle(rawTitle, 20);
+  };
+
   const formatTimeLabel = (eventEntry) => {
     if (eventEntry.allDay) return 'All day';
     const start = normalizeDateTimeString(eventEntry.startStr || eventEntry.start || '');
@@ -4878,6 +4911,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       if (arg.event.display === 'background') return true;
       const typeLabel = normalizeEventTypeLabel(arg.event.extendedProps?.eventType || 'General');
       const icon = resolveEventTypeIcon(typeLabel);
+      const compactTitle = compactCalendarEventTitle(arg.event);
 
       const wrapper = document.createElement('div');
       wrapper.className = 'calendar-event-content';
@@ -4891,7 +4925,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
       const titleNode = document.createElement('span');
       titleNode.className = 'calendar-event-title';
-      titleNode.textContent = `${icon} ${arg.event.title}`;
+      titleNode.textContent = `${icon} ${compactTitle || arg.event.title}`;
       wrapper.appendChild(titleNode);
 
       return { domNodes: [wrapper] };
