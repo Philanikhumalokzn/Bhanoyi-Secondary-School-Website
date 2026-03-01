@@ -698,51 +698,63 @@ const renderMatchLogSection = (section, sectionIndex) => {
               <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
             </div>
           </header>
-          <div class="match-log-team-pickers">
-            <label>
-              Left column
-              <select data-team-select="left">
-                ${renderHouseOptions(leftTeam.id)}
-              </select>
-            </label>
-            <label>
-              Right column
-              <select data-team-select="right">
-                ${renderHouseOptions(rightTeam.id)}
-              </select>
-            </label>
-          </div>
-          <div class="match-log-table-wrap">
-            <table class="match-log-table">
-              <thead>
-                <tr>
-                  <th class="match-log-team-col">
-                    <div class="match-log-team-head">
-                      <h3 class="match-log-team-title">
-                        <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
-                        <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
-                      </h3>
-                      <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
-                    </div>
-                  </th>
-                  <th class="match-log-minute-col">Minute</th>
-                  <th class="match-log-team-col">
-                    <div class="match-log-team-head match-log-team-head-right">
-                      <h3 class="match-log-team-title">
-                        <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
-                        <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
-                      </h3>
-                      <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody data-match-table-body>
-                <tr>
-                  <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
-                </tr>
-              </tbody>
-            </table>
+          <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
+            <h3>Match Event Workspace</h3>
+            <p>Open team selectors, timeline table, and quick event controls.</p>
+            <div class="section-overlay-launcher-actions">
+              <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-match-workspace">Start logging</button>
+            </div>
+          </article>
+          <div class="sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-match-workspace">
+            <div class="sub-overlay-inline-head">
+              <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Workspace</button>
+            </div>
+            <div class="match-log-team-pickers">
+              <label>
+                Left column
+                <select data-team-select="left">
+                  ${renderHouseOptions(leftTeam.id)}
+                </select>
+              </label>
+              <label>
+                Right column
+                <select data-team-select="right">
+                  ${renderHouseOptions(rightTeam.id)}
+                </select>
+              </label>
+            </div>
+            <div class="match-log-table-wrap">
+              <table class="match-log-table">
+                <thead>
+                  <tr>
+                    <th class="match-log-team-col">
+                      <div class="match-log-team-head">
+                        <h3 class="match-log-team-title">
+                          <span class="match-log-team-name" data-left-team-name>${leftTeam.name}</span>
+                          <span class="match-log-team-score">(<span data-left-team-score>${initialScores[leftTeam.id] || 0}</span>)</span>
+                        </h3>
+                        <button type="button" class="btn btn-secondary" data-match-open-event-side="left">Add event</button>
+                      </div>
+                    </th>
+                    <th class="match-log-minute-col">Minute</th>
+                    <th class="match-log-team-col">
+                      <div class="match-log-team-head match-log-team-head-right">
+                        <h3 class="match-log-team-title">
+                          <span class="match-log-team-name" data-right-team-name>${rightTeam.name}</span>
+                          <span class="match-log-team-score">(<span data-right-team-score>${initialScores[rightTeam.id] || 0}</span>)</span>
+                        </h3>
+                        <button type="button" class="btn btn-secondary" data-match-open-event-side="right">Add event</button>
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody data-match-table-body>
+                  <tr>
+                    <td class="match-log-empty-cell" colspan="3">No events logged yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <div class="match-log-modal is-hidden" data-match-modal>
             <div class="match-log-modal-backdrop" data-match-close-modal></div>
@@ -846,6 +858,8 @@ const renderMatchEventItem = (event, definition) => {
 const hydrateMatchLog = (matchLogNode) => {
   const rawConfig = (matchLogNode.dataset.matchLogConfig || '').trim();
   if (!rawConfig) return;
+
+  initScopedSubOverlays(matchLogNode);
 
   let config;
   try {
