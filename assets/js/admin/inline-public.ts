@@ -3395,6 +3395,161 @@ const wireMatchLogInline = (section: Element) => {
   renderReadControls();
 };
 
+const wireFixtureCreatorInline = (section: Element) => {
+  const container = section.querySelector('.container');
+  const shell = section.querySelector('[data-fixture-creator="true"]') as HTMLElement | null;
+  if (!container || !shell) return;
+
+  const controls = document.createElement('div');
+  controls.className = 'inline-admin-controls';
+  container.appendChild(controls);
+
+  let config: {
+    sport?: string;
+    competition?: string;
+    venue?: string;
+    houseOptions?: Array<{ id: string; name: string }>;
+  } = {};
+
+  try {
+    const parsed = JSON.parse((shell.dataset.fixtureConfig || '{}').trim());
+    if (parsed && typeof parsed === 'object') {
+      config = parsed as typeof config;
+    }
+  } catch {
+    config = {};
+  }
+
+  const readState = {
+    sport: String(config.sport || '').trim(),
+    competition: String(config.competition || '').trim(),
+    venue: String(config.venue || '').trim(),
+    houseOptions: Array.isArray(config.houseOptions)
+      ? config.houseOptions
+          .map((entry) => ({
+            id: String(entry?.id || '').trim(),
+            name: String(entry?.name || '').trim()
+          }))
+          .filter((entry) => Boolean(entry.id))
+      : []
+  };
+
+  if (!readState.houseOptions.length) {
+    const fallbackInputs = Array.from(section.querySelectorAll('[data-fixture-team]')) as HTMLInputElement[];
+    readState.houseOptions = fallbackInputs.map((input, index) => ({
+      id: input.value || `house_${index + 1}`,
+      name: input.parentElement?.querySelector('span')?.textContent?.trim() || `House ${index + 1}`
+    }));
+  }
+
+  let editorWrap: HTMLElement | null = null;
+  let sportInput: HTMLInputElement | null = null;
+  let competitionInput: HTMLInputElement | null = null;
+  let venueInput: HTMLInputElement | null = null;
+  let houseEditors: Array<{ id: string; input: HTMLInputElement }> = [];
+
+  const renderReadControls = () => {
+    controls.innerHTML = '';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = 'Edit Fixture Setup';
+    editBtn.addEventListener('click', enterEdit);
+    controls.appendChild(editBtn);
+  };
+
+  const exitEdit = () => {
+    if (editorWrap) {
+      editorWrap.remove();
+      editorWrap = null;
+    }
+    sportInput = null;
+    competitionInput = null;
+    venueInput = null;
+    houseEditors = [];
+  };
+
+  const renderEditControls = () => {
+    controls.innerHTML = '';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save Fixture Setup';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const houseOptions = houseEditors
+          .map((entry) => ({
+            id: entry.id,
+            name: entry.input.value.trim() || entry.id
+          }))
+          .filter((entry) => Boolean(entry.id));
+
+        if (houseOptions.length < 2) {
+          showStatus('At least two houses are required for fixtures.');
+          return;
+        }
+
+        await saveSectionOverride(section, {
+          type: 'fixture-creator',
+          sport: (sportInput?.value || readState.sport).trim(),
+          competition: (competitionInput?.value || readState.competition).trim(),
+          venue: (venueInput?.value || readState.venue).trim(),
+          houseOptions
+        });
+        showStatus('Fixture setup saved. Refreshing...');
+        window.location.reload();
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : 'Failed to save fixture setup.');
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      exitEdit();
+      renderReadControls();
+    });
+
+    controls.appendChild(saveBtn);
+    controls.appendChild(cancelBtn);
+  };
+
+  const enterEdit = () => {
+    if (editorWrap) return;
+
+    editorWrap = document.createElement('div');
+    editorWrap.className = 'inline-admin-controls';
+
+    const sportEditor = createTextEditor('Sport label', readState.sport || 'Football / Netball');
+    sportInput = sportEditor.input;
+    sportEditor.wrapper.classList.add('inline-match-house-editor');
+    editorWrap.appendChild(sportEditor.wrapper);
+
+    const competitionEditor = createTextEditor('Competition', readState.competition || 'Inter-House League');
+    competitionInput = competitionEditor.input;
+    competitionEditor.wrapper.classList.add('inline-match-house-editor');
+    editorWrap.appendChild(competitionEditor.wrapper);
+
+    const venueEditor = createTextEditor('Venue', readState.venue || 'Main Field');
+    venueInput = venueEditor.input;
+    venueEditor.wrapper.classList.add('inline-match-house-editor');
+    editorWrap.appendChild(venueEditor.wrapper);
+
+    houseEditors = [];
+    readState.houseOptions.forEach((house, index) => {
+      const editor = createTextEditor(`House ${index + 1} Name`, house.name || `House ${index + 1}`);
+      editor.wrapper.classList.add('inline-match-house-editor');
+      houseEditors.push({ id: house.id, input: editor.input });
+      editorWrap?.appendChild(editor.wrapper);
+    });
+
+    controls.after(editorWrap);
+    renderEditControls();
+  };
+
+  renderReadControls();
+};
+
 const wireFooterInline = () => {
   const footer = document.querySelector('.site-footer');
   if (!footer) return;
@@ -4168,6 +4323,11 @@ const bindInlineActions = () => {
     document.querySelectorAll('[data-editable-section="true"][data-section-type="match-log"]')
   );
   editableMatchLogSections.forEach(wireMatchLogInline);
+
+  const editableFixtureCreatorSections = Array.from(
+    document.querySelectorAll('[data-editable-section="true"][data-section-type="fixture-creator"]')
+  );
+  editableFixtureCreatorSections.forEach(wireFixtureCreatorInline);
 
   const latestNewsSection = document.querySelector(
     '[data-editable-section="true"][data-section-key="latest_news"]'

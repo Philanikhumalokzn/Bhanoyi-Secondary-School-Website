@@ -9,6 +9,7 @@ export default defineConfig({
         about: resolve(__dirname, 'about.html'),
         academics: resolve(__dirname, 'academics.html'),
         sports: resolve(__dirname, 'sports.html'),
+        calendar: resolve(__dirname, 'calendar.html'),
         admissions: resolve(__dirname, 'admissions.html'),
         policies: resolve(__dirname, 'policies.html'),
         contact: resolve(__dirname, 'contact.html'),

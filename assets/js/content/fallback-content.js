@@ -14,6 +14,7 @@ export const fallbackSiteContent = {
     { key: 'about', label: 'About', href: 'about.html' },
     { key: 'academics', label: 'Academics', href: 'academics.html' },
     { key: 'sports', label: 'Sports', href: 'sports.html' },
+    { key: 'calendar', label: 'Calendar', href: 'calendar.html' },
     { key: 'admissions', label: 'Admissions', href: 'admissions.html' },
     { key: 'policies', label: 'Policies', href: 'policies.html' },
     { key: 'contact', label: 'Contact', href: 'contact.html' }
@@ -96,6 +97,26 @@ export const fallbackSiteContent = {
             { id: 'house_4', name: 'House 4' },
             { id: 'house_5', name: 'House 5' }
           ]
+        }
+      ]
+    },
+    calendar: {
+      key: 'calendar',
+      metaTitle: 'School Calendar | Bhanoyi Secondary School',
+      metaDescription: 'School calendar with fixtures and events for Bhanoyi Secondary School.',
+      hero: {
+        eyebrow: 'Schedule and events',
+        title: 'School Calendar',
+        lead: 'View school events, match dates, and key activities in one place.',
+        cta: [{ label: 'Open Sports', href: 'sports.html', variant: 'secondary' }]
+      },
+      sections: [
+        {
+          type: 'calendar',
+          title: 'School Calendar',
+          sectionKey: 'school_calendar',
+          body: 'Admins can add and manage school events here. Fixture date edits from Sports open this calendar.',
+          fixtureSectionKey: 'sports_fixture_creator'
         }
       ]
     }

@@ -1,6 +1,7 @@
 import {
   initFixtureCreators,
   initMatchEventLogs,
+  initSchoolCalendars,
   initLatestNewsReaders,
   initLatestNewsRotators,
   renderFooter,
@@ -173,4 +174,5 @@ export const renderSite = (siteContent, page) => {
   initLatestNewsReaders();
   initMatchEventLogs();
   initFixtureCreators();
+  initSchoolCalendars();
 };

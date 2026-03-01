@@ -1,3 +1,7 @@
+import { Calendar } from '@fullcalendar/core';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import interactionPlugin from '@fullcalendar/interaction';
+
 const escapeHtmlAttribute = (value = '') =>
   String(value)
     .replace(/&/g, '&amp;')
@@ -1176,7 +1180,7 @@ const renderFixtureCreatorSection = (section, sectionIndex) => {
   };
 
   return `
-    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="fixture-creator" data-section-key="${fallbackSectionKey}">
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="fixture-creator" data-section-key="${fallbackSectionKey}">
       <div class="container">
         <h2>${section.title || 'Season Fixture Creator'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
@@ -1208,13 +1212,14 @@ const renderFixtureCreatorSection = (section, sectionIndex) => {
                   <th>Round</th>
                   <th>Leg</th>
                   <th>Match</th>
+                  <th>Date</th>
                   <th>Home</th>
                   <th>Away</th>
                 </tr>
               </thead>
               <tbody data-fixture-body>
                 <tr>
-                  <td colspan="5" class="fixture-empty">No fixtures generated yet.</td>
+                  <td colspan="6" class="fixture-empty">No fixtures generated yet.</td>
                 </tr>
               </tbody>
             </table>
@@ -1307,6 +1312,51 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   let lastFixtures = [];
 
+  const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
+  const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  let fixtureDates = {};
+
+  const loadFixtureDates = () => {
+    try {
+      const raw = localStorage.getItem(fixtureDateStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        fixtureDates = parsed;
+      }
+    } catch {
+      fixtureDates = {};
+    }
+  };
+
+  const getFixtureId = (fixture) =>
+    `${fixtureSectionKey}:${fixture.round}:${fixture.leg}:${fixture.match}:${fixture.homeId}:${fixture.awayId}`;
+
+  const fixtureDateLabel = (fixtureId) => {
+    const value = String(fixtureDates[fixtureId] || '').trim();
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    }).format(date);
+  };
+
+  const buildCalendarHref = (fixture, fixtureId) => {
+    const params = new URLSearchParams();
+    params.set('fixtureSectionKey', fixtureSectionKey);
+    params.set('fixtureId', fixtureId);
+    params.set('fixtureLabel', `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`);
+    const existing = String(fixtureDates[fixtureId] || '').trim();
+    if (existing) {
+      params.set('date', existing);
+    }
+    return withAdminQuery(`calendar.html?${params.toString()}`);
+  };
+
   const selectedTeamIds = () =>
     teamPickInputs
       .filter((input) => input instanceof HTMLInputElement && input.checked)
@@ -1317,7 +1367,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const renderFixtures = (fixtures) => {
     if (!fixtures.length) {
-      bodyNode.innerHTML = '<tr><td colspan="5" class="fixture-empty">Select at least two teams to generate fixtures.</td></tr>';
+      bodyNode.innerHTML = '<tr><td colspan="6" class="fixture-empty">Select at least two teams to generate fixtures.</td></tr>';
       if (statusNode) {
         statusNode.textContent = 'Select at least two teams to generate fixtures.';
       }
@@ -1331,6 +1381,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
             <td>${fixture.round}</td>
             <td>${fixture.leg}</td>
             <td>R${fixture.round}M${fixture.match}</td>
+            <td>
+              ${(() => {
+                const fixtureId = getFixtureId(fixture);
+                const label = fixtureDateLabel(fixtureId) || (isAdminMode ? 'Set date in calendar' : 'TBD');
+                if (!isAdminMode) {
+                  return `<span class="fixture-date-label">${escapeHtmlText(label)}</span>`;
+                }
+                return `<a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">${escapeHtmlText(label)}</a>`;
+              })()}
+            </td>
             <td>${escapeHtmlText(teamNameById(fixture.homeId))}</td>
             <td>${escapeHtmlText(teamNameById(fixture.awayId))}</td>
           </tr>
@@ -1365,15 +1425,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ['Sport', config.sport || ''].map(escapeCsvValue).join(','),
       ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
       '',
-      ['Round', 'Leg', 'Match', 'Home', 'Away'].map(escapeCsvValue).join(',')
+      ['Round', 'Leg', 'Match', 'Date', 'Home', 'Away'].map(escapeCsvValue).join(',')
     ];
 
     lastFixtures.forEach((fixture) => {
+      const fixtureId = getFixtureId(fixture);
       lines.push(
         [
           fixture.round,
           fixture.leg,
           `R${fixture.round}M${fixture.match}`,
+          fixtureDateLabel(fixtureId) || '',
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
         ]
@@ -1404,12 +1466,325 @@ const hydrateFixtureCreator = (fixtureNode) => {
     input.addEventListener('change', generateFixtures);
   });
 
+  loadFixtureDates();
   generateFixtures();
+};
+
+const renderSchoolCalendarSection = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const config = {
+    sectionKey: fallbackSectionKey,
+    fixtureSectionKey: (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="calendar" data-section-key="${fallbackSectionKey}">
+      <div class="container">
+        <h2>${section.title || 'School Calendar'}</h2>
+        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
+            <h3>Calendar Event Editor</h3>
+            <form class="school-calendar-form" data-calendar-form>
+              <label>
+                Event Title
+                <input type="text" name="title" maxlength="140" placeholder="e.g. Inter-House Match" required />
+              </label>
+              <div class="school-calendar-form-grid">
+                <label>
+                  Start Date
+                  <input type="date" name="start" required />
+                </label>
+                <label>
+                  End Date (optional)
+                  <input type="date" name="end" />
+                </label>
+              </div>
+              <label>
+                Linked Fixture ID (optional)
+                <input type="text" name="fixtureId" maxlength="180" placeholder="Auto-filled from fixture table" />
+              </label>
+              <label>
+                Notes (optional)
+                <textarea name="notes" rows="2" maxlength="280" placeholder="Event notes"></textarea>
+              </label>
+              <div class="school-calendar-actions">
+                <button type="submit" class="btn btn-primary" data-calendar-save>Save event</button>
+                <button type="button" class="btn btn-secondary" data-calendar-new>New</button>
+                <button type="button" class="btn btn-secondary" data-calendar-delete>Delete</button>
+              </div>
+            </form>
+            <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
+          </div>
+          <div class="school-calendar-root" data-school-calendar></div>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const hydrateSchoolCalendar = (calendarShell) => {
+  const rawConfig = (calendarShell.dataset.schoolCalendarConfig || '').trim();
+  if (!rawConfig) return;
+
+  let config;
+  try {
+    config = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  const calendarRoot = calendarShell.querySelector('[data-school-calendar]');
+  const adminPanel = calendarShell.querySelector('[data-calendar-admin-panel]');
+  const form = calendarShell.querySelector('[data-calendar-form]');
+  const statusNode = calendarShell.querySelector('[data-calendar-status]');
+  const newButton = calendarShell.querySelector('[data-calendar-new]');
+  const deleteButton = calendarShell.querySelector('[data-calendar-delete]');
+  if (!calendarRoot) return;
+
+  const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  if (adminPanel) {
+    adminPanel.classList.toggle('is-hidden', !isAdminMode);
+  }
+
+  const sectionKey = String(config.sectionKey || 'school_calendar').trim() || 'school_calendar';
+  const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const eventsStorageKey = `bhanoyi.schoolCalendarEvents.${sectionKey}`;
+  const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
+
+  const params = new URLSearchParams(window.location.search);
+  const incomingFixtureId = (params.get('fixtureId') || '').trim();
+  const incomingFixtureLabel = (params.get('fixtureLabel') || '').trim();
+  const incomingDate = (params.get('date') || '').trim();
+
+  const normalizeDateString = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toISOString().slice(0, 10);
+  };
+
+  const loadEvents = () => {
+    try {
+      const raw = localStorage.getItem(eventsStorageKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((entry) => entry && typeof entry === 'object' && entry.id && entry.title && entry.start)
+        .map((entry) => ({
+          id: String(entry.id),
+          title: String(entry.title),
+          start: normalizeDateString(entry.start),
+          end: normalizeDateString(entry.end),
+          allDay: true,
+          extendedProps: {
+            fixtureId: String(entry.fixtureId || ''),
+            notes: String(entry.notes || '')
+          }
+        }))
+        .filter((entry) => Boolean(entry.start));
+    } catch {
+      return [];
+    }
+  };
+
+  const saveEvents = (events) => {
+    const serialized = events.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      start: normalizeDateString(entry.startStr || entry.start || ''),
+      end: normalizeDateString(entry.endStr || entry.end || ''),
+      fixtureId: String(entry.extendedProps?.fixtureId || ''),
+      notes: String(entry.extendedProps?.notes || '')
+    }));
+    localStorage.setItem(eventsStorageKey, JSON.stringify(serialized));
+
+    try {
+      const rawMap = localStorage.getItem(fixtureDateStorageKey);
+      const fixtureMap = rawMap ? JSON.parse(rawMap) : {};
+      const nextMap = fixtureMap && typeof fixtureMap === 'object' ? fixtureMap : {};
+
+      Object.keys(nextMap).forEach((key) => {
+        if (key.startsWith(`${fixtureSectionKey}:`)) {
+          delete nextMap[key];
+        }
+      });
+
+      serialized.forEach((entry) => {
+        const fixtureId = String(entry.fixtureId || '').trim();
+        const start = normalizeDateString(entry.start);
+        if (fixtureId && start) {
+          nextMap[fixtureId] = start;
+        }
+      });
+
+      localStorage.setItem(fixtureDateStorageKey, JSON.stringify(nextMap));
+    } catch {
+      return;
+    }
+  };
+
+  const events = loadEvents();
+  const calendar = new Calendar(calendarRoot, {
+    plugins: [dayGridPlugin, interactionPlugin],
+    initialView: 'dayGridMonth',
+    height: 'auto',
+    events,
+    eventClick: (info) => {
+      if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
+      info.jsEvent.preventDefault();
+      const formData = new FormData(form);
+      formData.set('id', String(info.event.id || ''));
+      formData.set('title', String(info.event.title || ''));
+      formData.set('start', normalizeDateString(info.event.startStr || ''));
+      formData.set('end', normalizeDateString(info.event.endStr || ''));
+      formData.set('fixtureId', String(info.event.extendedProps?.fixtureId || ''));
+      formData.set('notes', String(info.event.extendedProps?.notes || ''));
+
+      Array.from(form.elements).forEach((field) => {
+        if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
+        const name = field.name;
+        if (!name) return;
+        field.value = String(formData.get(name) || '');
+      });
+
+      if (statusNode) {
+        statusNode.textContent = 'Editing selected event.';
+      }
+    },
+    dateClick: (info) => {
+      if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
+      const startInput = form.querySelector('input[name="start"]');
+      if (startInput instanceof HTMLInputElement) {
+        startInput.value = info.dateStr;
+      }
+    }
+  });
+
+  calendar.render();
+
+  const clearForm = () => {
+    if (!(form instanceof HTMLFormElement)) return;
+    form.reset();
+    const hiddenId = form.querySelector('input[name="id"]');
+    if (hiddenId instanceof HTMLInputElement) {
+      hiddenId.value = '';
+    }
+    if (incomingFixtureId) {
+      const fixtureInput = form.querySelector('input[name="fixtureId"]');
+      if (fixtureInput instanceof HTMLInputElement) {
+        fixtureInput.value = incomingFixtureId;
+      }
+    }
+    if (incomingDate) {
+      const startInput = form.querySelector('input[name="start"]');
+      if (startInput instanceof HTMLInputElement) {
+        startInput.value = normalizeDateString(incomingDate);
+      }
+    }
+    if (incomingFixtureLabel) {
+      const titleInput = form.querySelector('input[name="title"]');
+      if (titleInput instanceof HTMLInputElement && !titleInput.value.trim()) {
+        titleInput.value = incomingFixtureLabel;
+      }
+    }
+  };
+
+  if (isAdminMode && form instanceof HTMLFormElement) {
+    const hiddenId = document.createElement('input');
+    hiddenId.type = 'hidden';
+    hiddenId.name = 'id';
+    form.appendChild(hiddenId);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const titleInput = form.querySelector('input[name="title"]');
+      const startInput = form.querySelector('input[name="start"]');
+      const endInput = form.querySelector('input[name="end"]');
+      const fixtureInput = form.querySelector('input[name="fixtureId"]');
+      const notesInput = form.querySelector('textarea[name="notes"]');
+      const idInput = form.querySelector('input[name="id"]');
+
+      const title = (titleInput instanceof HTMLInputElement ? titleInput.value : '').trim();
+      const start = normalizeDateString(startInput instanceof HTMLInputElement ? startInput.value : '');
+      const end = normalizeDateString(endInput instanceof HTMLInputElement ? endInput.value : '');
+      const fixtureId = (fixtureInput instanceof HTMLInputElement ? fixtureInput.value : '').trim();
+      const notes = (notesInput instanceof HTMLTextAreaElement ? notesInput.value : '').trim();
+      const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+
+      if (!title || !start) {
+        if (statusNode) statusNode.textContent = 'Title and start date are required.';
+        return;
+      }
+
+      let eventEntry = eventId ? calendar.getEventById(eventId) : null;
+      if (!eventEntry) {
+        eventEntry = calendar.addEvent({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          title,
+          start,
+          end: end || undefined,
+          allDay: true,
+          extendedProps: {
+            fixtureId,
+            notes
+          }
+        });
+      } else {
+        eventEntry.setProp('title', title);
+        eventEntry.setStart(start);
+        eventEntry.setEnd(end || null);
+        eventEntry.setExtendedProp('fixtureId', fixtureId);
+        eventEntry.setExtendedProp('notes', notes);
+      }
+
+      saveEvents(calendar.getEvents());
+      if (statusNode) statusNode.textContent = 'Event saved.';
+      clearForm();
+    });
+
+    newButton?.addEventListener('click', () => {
+      clearForm();
+      if (statusNode) statusNode.textContent = 'Ready for a new event.';
+    });
+
+    deleteButton?.addEventListener('click', () => {
+      const idInput = form.querySelector('input[name="id"]');
+      const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+      if (!eventId) {
+        if (statusNode) statusNode.textContent = 'Select an event first.';
+        return;
+      }
+      const eventEntry = calendar.getEventById(eventId);
+      if (!eventEntry) {
+        if (statusNode) statusNode.textContent = 'Selected event not found.';
+        return;
+      }
+      eventEntry.remove();
+      saveEvents(calendar.getEvents());
+      clearForm();
+      if (statusNode) statusNode.textContent = 'Event deleted.';
+    });
+
+    clearForm();
+  }
+
+  const targetDate = normalizeDateString(incomingDate);
+  if (targetDate) {
+    calendar.gotoDate(targetDate);
+  }
 };
 
 const renderSectionByType = (section, sectionIndex, context = {}) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const effectiveSection = resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context);
+
+  if (effectiveSection.type === 'calendar') {
+    return renderSchoolCalendarSection(effectiveSection, sectionIndex);
+  }
 
   if (effectiveSection.type === 'fixture-creator') {
     return renderFixtureCreatorSection(effectiveSection, sectionIndex);
@@ -2242,6 +2617,11 @@ export const initMatchEventLogs = () => {
 export const initFixtureCreators = () => {
   const creators = Array.from(document.querySelectorAll('[data-fixture-creator="true"]'));
   creators.forEach((creator) => hydrateFixtureCreator(creator));
+};
+
+export const initSchoolCalendars = () => {
+  const calendars = Array.from(document.querySelectorAll('[data-school-calendar-shell="true"]'));
+  calendars.forEach((calendar) => hydrateSchoolCalendar(calendar));
 };
 
 export const renderFooter = (siteContent) => `
