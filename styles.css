@@ -373,6 +373,37 @@ h1 {
   isolation: isolate;
 }
 
+:where(
+  .page-section-collapsible.is-expanded,
+  .sports-workflow-step.is-expanded,
+  .calendar-workflow-step.is-expanded
+)
+  :where(
+    .page-section-collapsible.is-expanded,
+    .sports-workflow-step.is-expanded,
+    .calendar-workflow-step.is-expanded
+  ) {
+  z-index: 260;
+}
+
+:where(
+  .page-section-collapsible.is-expanded,
+  .sports-workflow-step.is-expanded,
+  .calendar-workflow-step.is-expanded
+)
+  :where(
+    .page-section-collapsible.is-expanded,
+    .sports-workflow-step.is-expanded,
+    .calendar-workflow-step.is-expanded
+  )
+  :where(
+    .page-section-collapsible.is-expanded,
+    .sports-workflow-step.is-expanded,
+    .calendar-workflow-step.is-expanded
+  ) {
+  z-index: 320;
+}
+
 .section-alt {
   background: var(--surface-alt);
 }
