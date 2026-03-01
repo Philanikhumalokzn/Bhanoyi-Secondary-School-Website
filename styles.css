@@ -317,7 +317,7 @@ h1 {
 .page-section-collapsible:focus-visible .container,
 .page-section-collapsible.is-expanded .container {
   border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  box-shadow: 0 8px 18px rgba(13, 34, 56, 0.12);
+  box-shadow: none;
 }
 
 .page-section-collapsible-heading {
