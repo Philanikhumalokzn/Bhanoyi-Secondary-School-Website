@@ -2644,6 +2644,57 @@ body.news-read-open {
   gap: 12px;
 }
 
+.calendar-workflow-step {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.calendar-workflow-toggle {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.calendar-workflow-toggle::after {
+  content: '▾';
+  color: var(--primary);
+  transform: rotate(-90deg);
+  transition: transform 180ms ease;
+}
+
+.calendar-workflow-step.is-expanded .calendar-workflow-toggle {
+  border-bottom-color: var(--border);
+}
+
+.calendar-workflow-step.is-expanded .calendar-workflow-toggle::after {
+  transform: rotate(0deg);
+}
+
+.calendar-workflow-body {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: max-height 240ms ease, opacity 180ms ease, transform 180ms ease;
+}
+
+.calendar-workflow-step.is-expanded .calendar-workflow-body {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .school-calendar-admin {
   border: 1px solid var(--border);
   border-radius: 10px;

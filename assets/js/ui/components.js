@@ -3784,113 +3784,137 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
-          <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
-            <div class="calendar-editor-head">
-              <h3>Create Event</h3>
-              <button type="button" class="btn btn-secondary" data-calendar-editor-close>Close editor</button>
+          <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step>
+            <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="true">
+              <span>View Calendar Month</span>
+            </button>
+            <div class="calendar-workflow-body" data-calendar-workflow-body>
+              <div class="school-calendar-root" data-school-calendar></div>
             </div>
-            <form class="school-calendar-form" data-calendar-form>
-              <label>
-                Event Title
-                <input type="text" name="title" maxlength="140" placeholder="e.g. Inter-House Match" required />
-              </label>
-              <div class="school-calendar-form-grid">
-                <label>
-                  Event Type
-                  <select name="eventType" data-calendar-event-type></select>
-                </label>
-                <label data-calendar-event-type-custom-row class="is-hidden">
-                  Custom Event Type
-                  <input type="text" name="eventTypeCustom" maxlength="60" placeholder="e.g. Community Outreach" />
-                </label>
+          </section>
+          <section class="calendar-workflow-step is-collapsed" data-calendar-workflow-step data-calendar-admin-only>
+            <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="false">
+              <span>Create Event</span>
+            </button>
+            <div class="calendar-workflow-body" data-calendar-workflow-body>
+              <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
+                <div class="calendar-editor-head">
+                  <h3>Create Event</h3>
+                  <button type="button" class="btn btn-secondary" data-calendar-editor-close>Close editor</button>
+                </div>
+                <form class="school-calendar-form" data-calendar-form>
+                  <label>
+                    Event Title
+                    <input type="text" name="title" maxlength="140" placeholder="e.g. Inter-House Match" required />
+                  </label>
+                  <div class="school-calendar-form-grid">
+                    <label>
+                      Event Type
+                      <select name="eventType" data-calendar-event-type></select>
+                    </label>
+                    <label data-calendar-event-type-custom-row class="is-hidden">
+                      Custom Event Type
+                      <input type="text" name="eventTypeCustom" maxlength="60" placeholder="e.g. Community Outreach" />
+                    </label>
+                  </div>
+                  <div class="school-calendar-form-grid">
+                    <label>
+                      Start Date
+                      <input type="date" name="start" required />
+                    </label>
+                    <label>
+                      Start Time (optional)
+                      <input type="time" name="startTime" />
+                    </label>
+                    <label>
+                      End Date (optional)
+                      <input type="date" name="end" />
+                    </label>
+                    <label>
+                      End Time (optional)
+                      <input type="time" name="endTime" />
+                    </label>
+                  </div>
+                  <label>
+                    Linked Fixture ID (optional)
+                    <input type="text" name="fixtureId" maxlength="180" placeholder="Auto-filled from fixture table" />
+                  </label>
+                  <label>
+                    Notes (optional)
+                    <textarea name="notes" rows="2" maxlength="280" placeholder="Event notes"></textarea>
+                  </label>
+                  <div class="school-calendar-actions">
+                    <button type="submit" class="btn btn-primary" data-calendar-save>Save event</button>
+                    <button type="button" class="btn btn-secondary" data-calendar-new>New</button>
+                    <button type="button" class="btn btn-secondary" data-calendar-delete>Delete</button>
+                  </div>
+                </form>
+                <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
               </div>
-              <div class="school-calendar-form-grid">
-                <label>
-                  Start Date
-                  <input type="date" name="start" required />
-                </label>
-                <label>
-                  Start Time (optional)
-                  <input type="time" name="startTime" />
-                </label>
-                <label>
-                  End Date (optional)
-                  <input type="date" name="end" />
-                </label>
-                <label>
-                  End Time (optional)
-                  <input type="time" name="endTime" />
-                </label>
-              </div>
-              <label>
-                Linked Fixture ID (optional)
-                <input type="text" name="fixtureId" maxlength="180" placeholder="Auto-filled from fixture table" />
-              </label>
-              <label>
-                Notes (optional)
-                <textarea name="notes" rows="2" maxlength="280" placeholder="Event notes"></textarea>
-              </label>
-              <div class="school-calendar-actions">
-                <button type="submit" class="btn btn-primary" data-calendar-save>Save event</button>
-                <button type="button" class="btn btn-secondary" data-calendar-new>New</button>
-                <button type="button" class="btn btn-secondary" data-calendar-delete>Delete</button>
-              </div>
-            </form>
-            <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
-            <hr class="school-calendar-divider" />
-            <h3>Manage Event Types</h3>
-            <div class="school-event-types-editor" data-event-types-editor>
-              <div class="school-event-types-list" data-event-types-list></div>
-              <div class="school-calendar-actions">
-                <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
-                <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
-              </div>
-              <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
             </div>
-            <hr class="school-calendar-divider" />
-            <h3>Set School Terms</h3>
-            <form class="school-terms-form" data-terms-form>
-              <div class="school-terms-grid">
-                <label>
-                  Term 1 Start
-                  <input type="date" name="term_1_start" />
-                </label>
-                <label>
-                  Term 1 End
-                  <input type="date" name="term_1_end" />
-                </label>
-                <label>
-                  Term 2 Start
-                  <input type="date" name="term_2_start" />
-                </label>
-                <label>
-                  Term 2 End
-                  <input type="date" name="term_2_end" />
-                </label>
-                <label>
-                  Term 3 Start
-                  <input type="date" name="term_3_start" />
-                </label>
-                <label>
-                  Term 3 End
-                  <input type="date" name="term_3_end" />
-                </label>
-                <label>
-                  Term 4 Start
-                  <input type="date" name="term_4_start" />
-                </label>
-                <label>
-                  Term 4 End
-                  <input type="date" name="term_4_end" />
-                </label>
+          </section>
+          <section class="calendar-workflow-step is-collapsed" data-calendar-workflow-step data-calendar-admin-only>
+            <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="false">
+              <span>Manage Event Types</span>
+            </button>
+            <div class="calendar-workflow-body" data-calendar-workflow-body>
+              <div class="school-event-types-editor" data-event-types-editor>
+                <div class="school-event-types-list" data-event-types-list></div>
+                <div class="school-calendar-actions">
+                  <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
+                  <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
+                </div>
+                <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
               </div>
-              <div class="school-calendar-actions">
-                <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
-              </div>
-            </form>
-            <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
-          </div>
-          <div class="school-calendar-root" data-school-calendar></div>
+            </div>
+          </section>
+          <section class="calendar-workflow-step is-collapsed" data-calendar-workflow-step data-calendar-admin-only>
+            <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="false">
+              <span>Set School Terms</span>
+            </button>
+            <div class="calendar-workflow-body" data-calendar-workflow-body>
+              <form class="school-terms-form" data-terms-form>
+                <div class="school-terms-grid">
+                  <label>
+                    Term 1 Start
+                    <input type="date" name="term_1_start" />
+                  </label>
+                  <label>
+                    Term 1 End
+                    <input type="date" name="term_1_end" />
+                  </label>
+                  <label>
+                    Term 2 Start
+                    <input type="date" name="term_2_start" />
+                  </label>
+                  <label>
+                    Term 2 End
+                    <input type="date" name="term_2_end" />
+                  </label>
+                  <label>
+                    Term 3 Start
+                    <input type="date" name="term_3_start" />
+                  </label>
+                  <label>
+                    Term 3 End
+                    <input type="date" name="term_3_end" />
+                  </label>
+                  <label>
+                    Term 4 Start
+                    <input type="date" name="term_4_start" />
+                  </label>
+                  <label>
+                    Term 4 End
+                    <input type="date" name="term_4_end" />
+                  </label>
+                </div>
+                <div class="school-calendar-actions">
+                  <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
+                </div>
+              </form>
+              <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
+            </div>
+          </section>
           <div class="calendar-day-overlay is-hidden" data-calendar-day-overlay>
             <div class="calendar-day-overlay-panel" role="dialog" aria-modal="true" aria-label="Events for selected day">
               <div class="calendar-day-overlay-header">
@@ -3962,15 +3986,64 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const sportsOverlayContinueButton = calendarShell.querySelector('[data-calendar-sports-continue]');
   const sportsFrameWrap = calendarShell.querySelector('[data-calendar-sports-frame-wrap]');
   const sportsFrame = calendarShell.querySelector('[data-calendar-sports-frame]');
+  const adminOnlyBlocks = Array.from(calendarShell.querySelectorAll('[data-calendar-admin-only]'));
+  const workflowSteps = Array.from(calendarShell.querySelectorAll('[data-calendar-workflow-step]'))
+    .map((stepNode) => {
+      if (!(stepNode instanceof HTMLElement)) return null;
+      const toggle = stepNode.querySelector('[data-calendar-workflow-toggle]');
+      const body = stepNode.querySelector('[data-calendar-workflow-body]');
+      if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
+      return { stepNode, toggle, body };
+    })
+    .filter(Boolean);
   if (!calendarRoot) return;
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   if (adminPanel) {
     adminPanel.classList.toggle('is-hidden', !isAdminMode);
   }
+  adminOnlyBlocks.forEach((block) => {
+    if (!(block instanceof HTMLElement)) return;
+    block.classList.toggle('is-hidden', !isAdminMode);
+  });
+
+  const setWorkflowStepExpanded = (entry, expanded) => {
+    if (!entry) return;
+    entry.stepNode.classList.toggle('is-expanded', expanded);
+    entry.stepNode.classList.toggle('is-collapsed', !expanded);
+    entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    entry.body.style.maxHeight = expanded ? `${entry.body.scrollHeight}px` : '0px';
+  };
+
+  workflowSteps.forEach((entry) => {
+    const startsExpanded = entry.stepNode.classList.contains('is-expanded');
+    setWorkflowStepExpanded(entry, startsExpanded);
+
+    entry.toggle.addEventListener('click', () => {
+      const isExpanded = entry.stepNode.classList.contains('is-expanded');
+      setWorkflowStepExpanded(entry, !isExpanded);
+    });
+  });
+
+  const expandWorkflowStepFor = (node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const parentStep = node.closest('[data-calendar-workflow-step]');
+    if (!(parentStep instanceof HTMLElement)) return;
+    const matched = workflowSteps.find((entry) => entry.stepNode === parentStep);
+    if (!matched) return;
+    setWorkflowStepExpanded(matched, true);
+  };
+
+  window.addEventListener('resize', () => {
+    workflowSteps.forEach((entry) => {
+      if (!entry.stepNode.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = `${entry.body.scrollHeight}px`;
+    });
+  });
 
   const openEventEditorOverlay = () => {
     if (!isAdminMode || !(adminPanel instanceof HTMLElement)) return;
+    expandWorkflowStepFor(adminPanel);
     adminPanel.classList.remove('is-hidden');
     adminPanel.classList.add('is-event-editor-open');
     if (editorBackdrop instanceof HTMLElement) {
