@@ -3401,12 +3401,30 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
     }
 
-    if (!normalizedTeams.includes(nextHomeId) || !normalizedTeams.includes(nextAwayId)) {
+    let resolvedHomeId = String(nextHomeId || '').trim();
+    let resolvedAwayId = String(nextAwayId || '').trim();
+
+    if (!normalizedTeams.includes(resolvedHomeId) || !normalizedTeams.includes(resolvedAwayId)) {
       return { ok: false, message: 'Selected teams must be from the active fixture team list.' };
     }
 
-    if (nextHomeId === nextAwayId) {
-      return { ok: false, message: 'Home and away teams must be different.' };
+    if (resolvedHomeId === resolvedAwayId) {
+      const currentFixture = fixtures[editedIndex] || null;
+      const currentHomeId = String(currentFixture?.homeId || '').trim();
+      const currentAwayId = String(currentFixture?.awayId || '').trim();
+
+      const canInvertCurrentFixture =
+        currentHomeId &&
+        currentAwayId &&
+        currentHomeId !== currentAwayId &&
+        (resolvedHomeId === currentHomeId || resolvedHomeId === currentAwayId);
+
+      if (!canInvertCurrentFixture) {
+        return { ok: false, message: 'Home and away teams must be different.' };
+      }
+
+      resolvedHomeId = currentAwayId;
+      resolvedAwayId = currentHomeId;
     }
 
     const allUnorderedPairs = [];
@@ -3430,7 +3448,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       };
     }
 
-    const editedPairKey = unorderedPairKey(nextHomeId, nextAwayId);
+    const editedPairKey = unorderedPairKey(resolvedHomeId, resolvedAwayId);
     if (!editedPairKey || !allUnorderedPairs.includes(editedPairKey)) {
       return { ok: false, message: 'Unable to apply this edit while preserving round-robin rules.' };
     }
@@ -3438,8 +3456,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const repairedFixtures = fixtures.map((entry) => ({ ...entry }));
     repairedFixtures[editedIndex] = {
       ...repairedFixtures[editedIndex],
-      homeId: nextHomeId,
-      awayId: nextAwayId
+      homeId: resolvedHomeId,
+      awayId: resolvedAwayId
     };
 
     for (const legLabel of legs) {
