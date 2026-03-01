@@ -1353,6 +1353,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   <th>Leg</th>
                   <th>Match</th>
                   <th>Date</th>
+                  <th>Kickoff</th>
                   <th>Format</th>
                   <th>Home</th>
                   <th>Away</th>
@@ -1360,7 +1361,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               </thead>
               <tbody data-fixture-body>
                 <tr>
-                  <td colspan="7" class="fixture-empty">No fixtures generated yet.</td>
+                  <td colspan="8" class="fixture-empty">No fixtures generated yet.</td>
                 </tr>
               </tbody>
             </table>
@@ -2566,7 +2567,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const renderFixtures = (fixtures) => {
     if (!fixtures.length) {
-      bodyNode.innerHTML = '<tr><td colspan="7" class="fixture-empty">Select sport and at least two teams to generate fixtures.</td></tr>';
+      bodyNode.innerHTML = '<tr><td colspan="8" class="fixture-empty">Select sport and at least two teams to generate fixtures.</td></tr>';
       if (statusNode) {
         statusNode.textContent = selectedSportKey()
           ? 'Select at least two teams to generate fixtures.'
@@ -2609,10 +2610,20 @@ const hydrateFixtureCreator = (fixtureNode) => {
                 return `
                   <div class="fixture-date-edit-wrap">
                     <input type="date" class="fixture-inline-input" data-fixture-date-input value="${escapeHtmlAttribute(dateValue)}" />
-                    <input type="time" class="fixture-inline-input" data-fixture-time-input value="${escapeHtmlAttribute(timeValue)}" />
                     <a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">Open calendar</a>
                   </div>
                 `;
+              })()}
+            </td>
+            <td>
+              ${(() => {
+                const fixtureId = getFixtureId(fixture);
+                const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
+                const timeValue = stamp.time;
+                if (!isAdminMode) {
+                  return `<span class="fixture-date-label">${escapeHtmlText(timeValue || 'TBD')}</span>`;
+                }
+                return `<input type="time" class="fixture-inline-input" data-fixture-time-input value="${escapeHtmlAttribute(timeValue)}" />`;
               })()}
             </td>
             <td>${escapeHtmlText(fixture.formatLabel || '')}</td>
@@ -2703,17 +2714,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ['Format', lastFormatLabel || ''].map(escapeCsvValue).join(','),
       ['Venue', config.venue || ''].map(escapeCsvValue).join(','),
       '',
-      ['Round', 'Leg', 'Match', 'Date', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
+      ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'].map(escapeCsvValue).join(',')
     ];
 
     lastFixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
+      const stamp = splitFixtureStamp(fixtureDates[fixtureId]);
+      const dateLabel = stamp.date || '';
+      const kickoffLabel = stamp.time || '';
       lines.push(
         [
           fixture.round,
           fixture.leg,
           `R${fixture.round}M${fixture.match}`,
-          fixtureDateLabel(fixtureId) || '',
+          dateLabel,
+          kickoffLabel,
           fixture.formatLabel || '',
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
