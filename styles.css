@@ -2599,6 +2599,36 @@ body.news-read-open {
   gap: 10px;
 }
 
+.calendar-event-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1220;
+  background: color-mix(in srgb, var(--surface) 10%, #000 44%);
+}
+
+.school-calendar-admin.is-event-editor-open {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(860px, calc(100vw - 24px));
+  max-height: min(84vh, 920px);
+  overflow: auto;
+  z-index: 1225;
+  box-shadow: 0 16px 30px rgba(13, 34, 56, 0.22);
+}
+
+.calendar-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-editor-head h3 {
+  margin: 0;
+}
+
 .school-calendar-admin h3 {
   margin: 0;
 }
@@ -2754,6 +2784,13 @@ body.news-read-open {
 
 .calendar-day-event-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.calendar-day-event-open {
+  display: grid;
   grid-template-columns: 120px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
@@ -2767,10 +2804,16 @@ body.news-read-open {
   cursor: pointer;
 }
 
-.calendar-day-event-row:hover,
-.calendar-day-event-row:focus-visible {
+.calendar-day-event-open:hover,
+.calendar-day-event-open:focus-visible {
   border-color: var(--primary);
   outline: none;
+}
+
+.calendar-day-event-delete {
+  min-width: 70px;
+  padding: 6px 10px;
+  font-size: 0.76rem;
 }
 
 .calendar-day-event-time {

@@ -2123,7 +2123,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       const playedToday = new Set();
 
-      dailyFixtures.forEach((fixture, slotIndex) => {
+      const orderedDailyFixtures = [...dailyFixtures].sort((left, right) => {
+        const leftRound = parsePositiveInt(left?.round, 1);
+        const rightRound = parsePositiveInt(right?.round, 1);
+        if (leftRound !== rightRound) return leftRound - rightRound;
+        const leftMatch = parsePositiveInt(left?.match, 1);
+        const rightMatch = parsePositiveInt(right?.match, 1);
+        return leftMatch - rightMatch;
+      });
+
+      orderedDailyFixtures.forEach((fixture, slotIndex) => {
         const fixtureId = getFixtureId(fixture);
         const slotTime = rules.kickoffTime
           ? addMinutesToTime(rules.kickoffTime, slotIndex * Math.max(1, rules.kickoffGapMinutes))
@@ -3774,8 +3783,12 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
         <h2>${section.title || 'School Calendar'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
           <div class="school-calendar-admin is-hidden" data-calendar-admin-panel>
-            <h3>Calendar Event Editor</h3>
+            <div class="calendar-editor-head">
+              <h3>Calendar Event Editor</h3>
+              <button type="button" class="btn btn-secondary" data-calendar-editor-close>Close editor</button>
+            </div>
             <form class="school-calendar-form" data-calendar-form>
               <label>
                 Event Title
@@ -3924,6 +3937,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const adminPanel = calendarShell.querySelector('[data-calendar-admin-panel]');
   const form = calendarShell.querySelector('[data-calendar-form]');
   const statusNode = calendarShell.querySelector('[data-calendar-status]');
+  const editorBackdrop = calendarShell.querySelector('[data-calendar-editor-backdrop]');
+  const editorCloseButton = calendarShell.querySelector('[data-calendar-editor-close]');
   const eventTypeSelect = calendarShell.querySelector('[data-calendar-event-type]');
   const eventTypeCustomRow = calendarShell.querySelector('[data-calendar-event-type-custom-row]');
   const eventTypeCustomInput = form?.querySelector('input[name="eventTypeCustom"]');
@@ -3953,6 +3968,23 @@ const hydrateSchoolCalendar = (calendarShell) => {
   if (adminPanel) {
     adminPanel.classList.toggle('is-hidden', !isAdminMode);
   }
+
+  const openEventEditorOverlay = () => {
+    if (!isAdminMode || !(adminPanel instanceof HTMLElement)) return;
+    adminPanel.classList.remove('is-hidden');
+    adminPanel.classList.add('is-event-editor-open');
+    if (editorBackdrop instanceof HTMLElement) {
+      editorBackdrop.classList.remove('is-hidden');
+    }
+  };
+
+  const closeEventEditorOverlay = () => {
+    if (!(adminPanel instanceof HTMLElement)) return;
+    adminPanel.classList.remove('is-event-editor-open');
+    if (editorBackdrop instanceof HTMLElement) {
+      editorBackdrop.classList.add('is-hidden');
+    }
+  };
 
   const sectionKey = String(config.sectionKey || 'school_calendar').trim() || 'school_calendar';
   const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
@@ -4760,6 +4792,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   const writeEventToForm = (eventEntry, anchorElement = null) => {
     if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
+    openEventEditorOverlay();
     showColorPopover(eventEntry, anchorElement || null);
     const formData = new FormData(form);
     formData.set('id', String(eventEntry.id || ''));
@@ -4831,11 +4864,18 @@ const hydrateSchoolCalendar = (calendarShell) => {
         const eventId = escapeHtmlAttribute(String(entry.id || ''));
         const timeLabel = escapeHtmlText(formatTimeLabel(entry));
         return `
-          <button type="button" class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
-            <span class="calendar-day-event-time">${timeLabel}</span>
-            <span class="calendar-day-event-title">${title}</span>
-            <span class="calendar-day-event-type">${eventTypeWithIcon}</span>
-          </button>
+          <div class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
+            <button type="button" class="calendar-day-event-open" data-calendar-day-event-open="${eventId}">
+              <span class="calendar-day-event-time">${timeLabel}</span>
+              <span class="calendar-day-event-title">${title}</span>
+              <span class="calendar-day-event-type">${eventTypeWithIcon}</span>
+            </button>
+            ${
+              isAdminMode
+                ? `<button type="button" class="btn btn-secondary calendar-day-event-delete" data-calendar-day-event-delete="${eventId}" aria-label="Delete ${title}">Delete</button>`
+                : ''
+            }
+          </div>
         `;
       })
       .join('');
@@ -4850,7 +4890,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
     renderDayOverlayList(normalized);
     dayOverlay.classList.remove('is-hidden');
-    const firstRow = dayOverlay.querySelector('[data-calendar-day-event-id]');
+    const firstRow = dayOverlay.querySelector('[data-calendar-day-event-open]');
     if (firstRow instanceof HTMLButtonElement) {
       firstRow.focus();
     } else if (dayOverlayCloseButton instanceof HTMLButtonElement) {
@@ -4878,6 +4918,46 @@ const hydrateSchoolCalendar = (calendarShell) => {
         statusNode.textContent = 'Ready to add a new event for selected date.';
       }
     }
+  };
+
+  const deleteCalendarEventById = (eventId, { closeEditor = false } = {}) => {
+    const normalizedId = String(eventId || '').trim();
+    if (!normalizedId) {
+      if (statusNode) statusNode.textContent = 'Select an event first.';
+      showSmartToast('Select an event first.', { tone: 'error' });
+      return false;
+    }
+
+    const eventEntry = calendar.getEventById(normalizedId);
+    if (!eventEntry) {
+      if (statusNode) statusNode.textContent = 'Selected event not found.';
+      showSmartToast('Selected event not found.', { tone: 'error' });
+      return false;
+    }
+
+    const title = String(eventEntry.title || 'this event').trim() || 'this event';
+    const confirmDelete = window.confirm(`Delete event "${title}"?`);
+    if (!confirmDelete) return false;
+
+    eventEntry.remove();
+    saveEvents(calendar.getEvents());
+    refreshDayOverlay();
+
+    if (form instanceof HTMLFormElement) {
+      const idInput = form.querySelector('input[name="id"]');
+      const selectedId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
+      if (selectedId && selectedId === normalizedId) {
+        clearForm();
+      }
+    }
+
+    if (closeEditor) {
+      closeEventEditorOverlay();
+    }
+
+    if (statusNode) statusNode.textContent = 'Event deleted.';
+    showSmartToast('Event deleted.', { tone: 'success' });
+    return true;
   };
 
   swatchWrap?.addEventListener('click', (event) => {
@@ -4951,7 +5031,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
     },
     eventClick: (info) => {
       if (info.event.display === 'background') return;
-      if (!isAdminMode || !(form instanceof HTMLFormElement)) return;
+      if (!isAdminMode || !(form instanceof HTMLFormElement)) {
+        showDayOverlay(info.event.startStr || info.event.start || '');
+        return;
+      }
       info.jsEvent.preventDefault();
       writeEventToForm(info.event, info.el);
     },
@@ -5092,16 +5175,25 @@ const hydrateSchoolCalendar = (calendarShell) => {
       hideDayOverlay();
       return;
     }
-    const row = target.closest('[data-calendar-day-event-id]');
-    if (!(row instanceof HTMLElement)) return;
-    const eventId = String(row.dataset.calendarDayEventId || '').trim();
+
+    const deleteButton = target.closest('[data-calendar-day-event-delete]');
+    if (deleteButton instanceof HTMLButtonElement) {
+      const eventId = String(deleteButton.dataset.calendarDayEventDelete || '').trim();
+      if (!eventId) return;
+      deleteCalendarEventById(eventId, { closeEditor: false });
+      return;
+    }
+
+    const openButton = target.closest('[data-calendar-day-event-open]');
+    if (!(openButton instanceof HTMLButtonElement)) return;
+    const eventId = String(openButton.dataset.calendarDayEventOpen || '').trim();
     if (!eventId) return;
     const eventEntry = calendar.getEventById(eventId);
     if (!eventEntry) return;
     if (isAdminMode) {
       writeEventToForm(eventEntry);
+      hideDayOverlay();
     }
-    hideDayOverlay();
   });
 
   dayOverlay?.addEventListener('keydown', (event) => {
@@ -5115,18 +5207,32 @@ const hydrateSchoolCalendar = (calendarShell) => {
     if (event.key === 'Enter' || event.key === ' ') {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
-      const row = target.closest('[data-calendar-day-event-id]');
+      const row = target.closest('[data-calendar-day-event-open]');
       if (!(row instanceof HTMLElement)) return;
       event.preventDefault();
-      const eventId = String(row.dataset.calendarDayEventId || '').trim();
+      const eventId = String(row.dataset.calendarDayEventOpen || '').trim();
       if (!eventId) return;
       const eventEntry = calendar.getEventById(eventId);
       if (!eventEntry) return;
       if (isAdminMode) {
         writeEventToForm(eventEntry);
+        hideDayOverlay();
       }
-      hideDayOverlay();
     }
+  });
+
+  editorCloseButton?.addEventListener('click', () => {
+    closeEventEditorOverlay();
+  });
+
+  editorBackdrop?.addEventListener('click', () => {
+    closeEventEditorOverlay();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key !== 'Escape') return;
+    closeEventEditorOverlay();
   });
 
   sportsOverlayCloseButton?.addEventListener('click', () => {
@@ -5347,25 +5453,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     deleteButton?.addEventListener('click', () => {
       const idInput = form.querySelector('input[name="id"]');
       const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
-      if (!eventId) {
-        if (statusNode) statusNode.textContent = 'Select an event first.';
-        showSmartToast('Select an event first.', { tone: 'error' });
-        return;
-      }
-      const eventEntry = calendar.getEventById(eventId);
-      if (!eventEntry) {
-        if (statusNode) statusNode.textContent = 'Selected event not found.';
-        showSmartToast('Selected event not found.', { tone: 'error' });
-        return;
-      }
-      const confirmDelete = window.confirm('Delete this calendar event?');
-      if (!confirmDelete) return;
-      eventEntry.remove();
-      saveEvents(calendar.getEvents());
-      refreshDayOverlay();
-      clearForm();
-      if (statusNode) statusNode.textContent = 'Event deleted.';
-      showSmartToast('Event deleted.', { tone: 'success' });
+      deleteCalendarEventById(eventId, { closeEditor: false });
     });
 
     if (eventTypeSelect instanceof HTMLSelectElement) {
