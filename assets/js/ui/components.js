@@ -191,6 +191,76 @@ const showSmartToast = (message, { tone = 'info' } = {}) => {
   window.setTimeout(closeToast, timeout);
 };
 
+const initScopedSubOverlays = (rootNode) => {
+  if (!(rootNode instanceof HTMLElement)) return;
+
+  const openButtons = Array.from(rootNode.querySelectorAll('[data-open-sub-overlay]'));
+  if (!openButtons.length) return;
+
+  let activeOverlay = null;
+  let backdrop = rootNode.querySelector('[data-sub-overlay-runtime-backdrop]');
+
+  const ensureBackdrop = () => {
+    if (backdrop instanceof HTMLElement) return backdrop;
+    const node = document.createElement('div');
+    node.className = 'sub-overlay-runtime-backdrop is-hidden';
+    node.setAttribute('data-sub-overlay-runtime-backdrop', 'true');
+    rootNode.appendChild(node);
+    backdrop = node;
+    return node;
+  };
+
+  const closeOverlay = (overlay = activeOverlay) => {
+    if (!(overlay instanceof HTMLElement)) return;
+    overlay.classList.remove('is-sub-overlay-active');
+    ensureBackdrop().classList.add('is-hidden');
+    if (activeOverlay === overlay) {
+      activeOverlay = null;
+    }
+  };
+
+  const openOverlay = (overlay) => {
+    if (!(overlay instanceof HTMLElement)) return;
+    if (activeOverlay && activeOverlay !== overlay) {
+      closeOverlay(activeOverlay);
+    }
+    ensureBackdrop().classList.remove('is-hidden');
+    overlay.classList.add('is-sub-overlay-active');
+    activeOverlay = overlay;
+  };
+
+  openButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.addEventListener('click', () => {
+      const overlayId = String(button.dataset.openSubOverlay || '').trim();
+      if (!overlayId) return;
+      const overlay = rootNode.querySelector(`[data-sub-overlay-content="${overlayId}"]`);
+      if (!(overlay instanceof HTMLElement)) return;
+      openOverlay(overlay);
+    });
+  });
+
+  const closeButtons = Array.from(rootNode.querySelectorAll('[data-sub-overlay-close]'));
+  closeButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', () => {
+      const overlay = button.closest('[data-sub-overlay-content]');
+      if (!(overlay instanceof HTMLElement)) return;
+      closeOverlay(overlay);
+    });
+  });
+
+  ensureBackdrop().addEventListener('click', () => {
+    closeOverlay(activeOverlay);
+  });
+
+  rootNode.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
+    if (event.key !== 'Escape') return;
+    closeOverlay(activeOverlay);
+  });
+};
+
 const renderSectionAttachments = (section) => {
   const attachments = Array.isArray(section.attachments) ? section.attachments : [];
   if (!attachments.length) {
@@ -1276,7 +1346,17 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
             </div>
           </header>
           <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
-          <div class="fixture-date-rules" data-fixture-date-rules>
+          <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
+            <h3>Date Rules</h3>
+            <p>Open scheduling rules, weekday limits, exclusions, and date preview tools.</p>
+            <div class="section-overlay-launcher-actions">
+              <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-fixture-rules">Open Date Rules</button>
+            </div>
+          </article>
+          <div class="fixture-date-rules sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-fixture-rules" data-fixture-date-rules>
+            <div class="sub-overlay-inline-head">
+              <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Date Rules</button>
+            </div>
             <h3>Date Rules for Auto-fill</h3>
             <div class="fixture-creator-sport-grid">
               <label>
@@ -1499,6 +1579,8 @@ const buildSingleRoundRobin = (teamIds = []) => {
 const hydrateFixtureCreator = (fixtureNode) => {
   const rawConfig = (fixtureNode.dataset.fixtureConfig || '').trim();
   if (!rawConfig) return;
+
+  initScopedSubOverlays(fixtureNode);
 
   let config;
   try {
@@ -3863,58 +3945,80 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
               </div>
             </form>
             <p class="school-calendar-status" data-calendar-status aria-live="polite"></p>
-            <hr class="school-calendar-divider" />
-            <h3>Event Types</h3>
-            <div class="school-event-types-editor" data-event-types-editor>
-              <div class="school-event-types-list" data-event-types-list></div>
-              <div class="school-calendar-actions">
-                <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
-                <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
+            <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
+              <h3>Event Types</h3>
+              <p>Manage event categories and icons used in calendar entries.</p>
+              <div class="section-overlay-launcher-actions">
+                <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-calendar-event-types">Open Event Types</button>
               </div>
-              <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
+            </article>
+            <div class="sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-calendar-event-types">
+              <div class="sub-overlay-inline-head">
+                <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Event Types</button>
+              </div>
+              <h3>Event Types</h3>
+              <div class="school-event-types-editor" data-event-types-editor>
+                <div class="school-event-types-list" data-event-types-list></div>
+                <div class="school-calendar-actions">
+                  <button type="button" class="btn btn-secondary" data-event-type-add>Add type</button>
+                  <button type="button" class="btn btn-secondary" data-event-types-save>Save types</button>
+                </div>
+                <p class="school-calendar-status" data-event-types-status aria-live="polite"></p>
+              </div>
             </div>
-            <hr class="school-calendar-divider" />
-            <h3>School Terms</h3>
-            <form class="school-terms-form" data-terms-form>
-              <div class="school-terms-grid">
-                <label>
-                  Term 1 Start
-                  <input type="date" name="term_1_start" />
-                </label>
-                <label>
-                  Term 1 End
-                  <input type="date" name="term_1_end" />
-                </label>
-                <label>
-                  Term 2 Start
-                  <input type="date" name="term_2_start" />
-                </label>
-                <label>
-                  Term 2 End
-                  <input type="date" name="term_2_end" />
-                </label>
-                <label>
-                  Term 3 Start
-                  <input type="date" name="term_3_start" />
-                </label>
-                <label>
-                  Term 3 End
-                  <input type="date" name="term_3_end" />
-                </label>
-                <label>
-                  Term 4 Start
-                  <input type="date" name="term_4_start" />
-                </label>
-                <label>
-                  Term 4 End
-                  <input type="date" name="term_4_end" />
-                </label>
+            <article class="panel sub-overlay-launcher-card" data-sub-overlay-launcher="true">
+              <h3>School Terms</h3>
+              <p>Configure term ranges used for fixture constraints and calendar snapping.</p>
+              <div class="section-overlay-launcher-actions">
+                <button type="button" class="btn btn-secondary" data-open-sub-overlay="${fallbackSectionKey}-calendar-terms">Open Terms</button>
               </div>
-              <div class="school-calendar-actions">
-                <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
+            </article>
+            <div class="sub-overlay-panel is-sub-collapsed" data-sub-overlay-content="${fallbackSectionKey}-calendar-terms">
+              <div class="sub-overlay-inline-head">
+                <button type="button" class="btn btn-secondary" data-sub-overlay-close>Close Terms</button>
               </div>
-            </form>
-            <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
+              <h3>School Terms</h3>
+              <form class="school-terms-form" data-terms-form>
+                <div class="school-terms-grid">
+                  <label>
+                    Term 1 Start
+                    <input type="date" name="term_1_start" />
+                  </label>
+                  <label>
+                    Term 1 End
+                    <input type="date" name="term_1_end" />
+                  </label>
+                  <label>
+                    Term 2 Start
+                    <input type="date" name="term_2_start" />
+                  </label>
+                  <label>
+                    Term 2 End
+                    <input type="date" name="term_2_end" />
+                  </label>
+                  <label>
+                    Term 3 Start
+                    <input type="date" name="term_3_start" />
+                  </label>
+                  <label>
+                    Term 3 End
+                    <input type="date" name="term_3_end" />
+                  </label>
+                  <label>
+                    Term 4 Start
+                    <input type="date" name="term_4_start" />
+                  </label>
+                  <label>
+                    Term 4 End
+                    <input type="date" name="term_4_end" />
+                  </label>
+                </div>
+                <div class="school-calendar-actions">
+                  <button type="button" class="btn btn-secondary" data-terms-save>Save terms</button>
+                </div>
+              </form>
+              <p class="school-calendar-status" data-terms-status aria-live="polite"></p>
+            </div>
           </div>
           <div class="school-calendar-root" data-school-calendar></div>
           <div class="calendar-day-overlay is-hidden" data-calendar-day-overlay>
@@ -3951,6 +4055,8 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
 const hydrateSchoolCalendar = (calendarShell) => {
   const rawConfig = (calendarShell.dataset.schoolCalendarConfig || '').trim();
   if (!rawConfig) return;
+
+  initScopedSubOverlays(calendarShell);
 
   let config;
   try {

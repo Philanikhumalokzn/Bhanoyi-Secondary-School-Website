@@ -377,6 +377,52 @@ body.section-overlay-open {
   justify-content: flex-end;
 }
 
+.sub-overlay-launcher-card {
+  display: grid;
+  gap: 8px;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-alt) 62%, var(--surface));
+}
+
+.sub-overlay-launcher-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.sub-overlay-launcher-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.sub-overlay-panel {
+  display: none;
+}
+
+.sub-overlay-panel.is-sub-overlay-active {
+  display: grid;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(980px, calc(100vw - 24px));
+  max-height: min(84vh, 900px);
+  overflow: auto;
+  z-index: 1235;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 12px;
+  box-shadow: 0 14px 28px rgba(13, 34, 56, 0.2);
+}
+
+.sub-overlay-runtime-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1230;
+  background: color-mix(in srgb, var(--surface) 10%, #000 44%);
+}
+
 .cards,
 .three-col,
 .section-grid,
