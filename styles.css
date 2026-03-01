@@ -2854,6 +2854,16 @@ body.news-read-open {
 }
 
 .fixture-date-link {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+  text-align: left;
   color: var(--primary);
   font-weight: 700;
   text-decoration: none;
@@ -4023,4 +4033,27 @@ body.news-read-open {
 .news-read-overlay {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+.section-alt,
+.sports-workflow-step,
+.calendar-workflow-step,
+.sports-workflow-toggle,
+.calendar-workflow-toggle,
+.panel,
+.card,
+.alert-box,
+.news-overlay-panel,
+.news-read-panel,
+.image-crop-panel,
+.match-log-modal-panel,
+.calendar-day-overlay-panel,
+.calendar-sports-overlay-panel {
+  background: var(--surface) !important;
+}
+
+.btn-primary,
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  background: var(--primary) !important;
 }

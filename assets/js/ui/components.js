@@ -4204,11 +4204,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   bodyNode.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
+    const eventTarget = event.target;
+    const target = eventTarget instanceof Element ? eventTarget : eventTarget?.parentElement;
+    if (!(target instanceof Element)) return;
 
     const logButton = target.closest('[data-fixture-log-open]');
-    if (logButton instanceof HTMLElement) {
+    if (logButton instanceof Element) {
       const fixtureId = String(logButton.getAttribute('data-fixture-log-open') || '').trim();
       if (!fixtureId) return;
 
@@ -4232,7 +4233,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!isAdminMode) return;
 
     const invertTrigger = target.closest('[data-fixture-invert-sides]');
-    if (!(invertTrigger instanceof HTMLElement)) return;
+    if (!(invertTrigger instanceof Element)) return;
 
     const row = invertTrigger.closest('[data-fixture-row]');
     if (!(row instanceof HTMLElement)) return;
