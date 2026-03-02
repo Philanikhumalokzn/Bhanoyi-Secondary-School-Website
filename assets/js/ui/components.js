@@ -1920,8 +1920,8 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
         <h2>${section.title || 'View Season Fixtures'}</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel fixture-creator-shell" data-fixture-creator="true" data-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
-          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-fixtures">
-            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="setup-fixtures">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Set Up and Generate Fixtures</span>
             </button>
             <div class="sports-workflow-body" data-sports-workflow-body>
