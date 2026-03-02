@@ -151,7 +151,7 @@ const initCollapsiblePageSections = (pageKey) => {
     if (!(target instanceof Element)) return false;
     return Boolean(
       target.closest(
-        'a, button, input, select, textarea, label, summary, [role="button"], [contenteditable="true"], [data-no-section-toggle]'
+        'a, button, input, select, textarea, label, summary, [contenteditable="true"], [data-no-section-toggle]'
       )
     );
   };
@@ -165,8 +165,8 @@ const initCollapsiblePageSections = (pageKey) => {
         return;
       }
 
-      const clickedHeading = entry.heading.contains(target);
-      if (!clickedHeading) {
+      const clickedInBody = entry.body.contains(target);
+      if (clickedInBody) {
         return;
       }
 
