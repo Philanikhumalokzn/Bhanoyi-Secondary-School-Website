@@ -2568,6 +2568,17 @@ body.match-log-workspace-open {
   gap: 8px;
 }
 
+.enrollment-import-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr) auto;
+  align-items: end;
+}
+
+.enrollment-import-file-field {
+  min-width: 0;
+}
+
 .enrollment-learner-section h4 {
   margin: 0;
 }
@@ -2605,6 +2616,7 @@ body.match-log-workspace-open {
 }
 
 @media (max-width: 760px) {
+  .enrollment-import-row,
   .enrollment-learner-form {
     grid-template-columns: 1fr;
   }

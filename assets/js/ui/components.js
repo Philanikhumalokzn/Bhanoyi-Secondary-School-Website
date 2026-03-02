@@ -2191,6 +2191,20 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               </label>
               <section class="enrollment-learner-section">
                 <h4>Learners</h4>
+                <div class="enrollment-import-row">
+                  <label class="enrollment-class-modal-field">
+                    Import Format
+                    <select data-enrollment-import-format>
+                      <option value="excel" selected>Excel (.xlsx, .xls)</option>
+                      <option value="csv">CSV (.csv)</option>
+                    </select>
+                  </label>
+                  <label class="enrollment-class-modal-field enrollment-import-file-field">
+                    File
+                    <input type="file" data-enrollment-import-file accept=".xlsx,.xls" />
+                  </label>
+                  <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
+                </div>
                 <div class="enrollment-learner-form">
                   <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                   <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
@@ -2242,6 +2256,9 @@ const hydrateEnrollmentManager = (managerNode) => {
   const learnerNameInput = managerNode.querySelector('[data-enrollment-learner-name]');
   const learnerAdmissionInput = managerNode.querySelector('[data-enrollment-learner-admission]');
   const addLearnerButton = managerNode.querySelector('[data-enrollment-add-learner]');
+  const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
+  const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
+  const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const saveManageButton = managerNode.querySelector('[data-enrollment-save-manage]');
   const closeManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-manage-modal]'));
@@ -2263,6 +2280,9 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(learnerNameInput instanceof HTMLInputElement) ||
     !(learnerAdmissionInput instanceof HTMLInputElement) ||
     !(addLearnerButton instanceof HTMLButtonElement) ||
+    !(importFormatSelect instanceof HTMLSelectElement) ||
+    !(importFileInput instanceof HTMLInputElement) ||
+    !(importLearnersButton instanceof HTMLButtonElement) ||
     !(learnerListNode instanceof HTMLElement) ||
     !(saveManageButton instanceof HTMLButtonElement)
   ) {
@@ -2332,6 +2352,134 @@ const hydrateEnrollmentManager = (managerNode) => {
       learners.push(learner);
     });
     return learners;
+  };
+
+  const normalizeTabularCell = (value) => {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) return value.toISOString().split('T')[0];
+    if (typeof value === 'object') {
+      if (value && typeof value.text === 'string') return normalizeText(value.text, 200);
+      if (value && typeof value.result === 'string') return normalizeText(value.result, 200);
+      if (value && typeof value.richText === 'object' && Array.isArray(value.richText)) {
+        return normalizeText(value.richText.map((entry) => entry?.text || '').join(''), 200);
+      }
+      return normalizeText(String(value), 200);
+    }
+    return normalizeText(String(value), 200);
+  };
+
+  const parseCsvLine = (line) => {
+    const cells = [];
+    let current = '';
+    let index = 0;
+    let inQuotes = false;
+
+    while (index < line.length) {
+      const char = line[index];
+      if (char === '"') {
+        if (inQuotes && line[index + 1] === '"') {
+          current += '"';
+          index += 2;
+          continue;
+        }
+        inQuotes = !inQuotes;
+        index += 1;
+        continue;
+      }
+
+      if (char === ',' && !inQuotes) {
+        cells.push(current);
+        current = '';
+        index += 1;
+        continue;
+      }
+
+      current += char;
+      index += 1;
+    }
+
+    cells.push(current);
+    return cells.map((entry) => normalizeTabularCell(entry));
+  };
+
+  const parseCsvRows = (text) =>
+    String(text || '')
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\uFEFF/, ''))
+      .map((line) => parseCsvLine(line))
+      .filter((cells) => cells.some((entry) => String(entry || '').trim()));
+
+  const extractLearnersFromRows = (rows) => {
+    const tabularRows = Array.isArray(rows)
+      ? rows
+          .map((row) => (Array.isArray(row) ? row.map((cell) => normalizeTabularCell(cell)) : []))
+          .filter((row) => row.some((cell) => cell))
+      : [];
+
+    if (!tabularRows.length) return [];
+
+    const header = tabularRows[0].map((cell) => normalizeText(cell, 120).toLowerCase());
+    const findColumn = (candidates) =>
+      header.findIndex((entry) => candidates.some((candidate) => entry === candidate || entry.includes(candidate)));
+
+    const nameIndex = findColumn(['name', 'learner name', 'student name', 'learner', 'student', 'full name']);
+    const admissionIndex = findColumn(['admission', 'admission no', 'admission number', 'adm no', 'admission id']);
+    const hasHeader = nameIndex >= 0 || admissionIndex >= 0;
+    const startRow = hasHeader ? 1 : 0;
+
+    const learners = [];
+    for (let rowIndex = startRow; rowIndex < tabularRows.length; rowIndex += 1) {
+      const row = tabularRows[rowIndex];
+      if (!Array.isArray(row) || !row.length) continue;
+
+      const fallbackName = row.find((entry) => normalizeText(entry, 120));
+      const fallbackAdmission = row.length > 1 ? normalizeText(row[1], 40) : '';
+
+      const name = nameIndex >= 0 ? normalizeText(row[nameIndex], 120) : normalizeText(fallbackName, 120);
+      const admissionNo =
+        admissionIndex >= 0 && admissionIndex !== nameIndex
+          ? normalizeText(row[admissionIndex], 40)
+          : normalizeText(fallbackAdmission, 40);
+
+      const learner = normalizeLearner({ name, admissionNo });
+      if (!learner) continue;
+      learners.push(learner);
+    }
+
+    return normalizeLearners(learners);
+  };
+
+  const parseLearnersFromCsvFile = async (file) => {
+    const text = await file.text();
+    return extractLearnersFromRows(parseCsvRows(text));
+  };
+
+  const parseLearnersFromExcelFile = async (file) => {
+    const { default: ExcelJS } = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const buffer = await file.arrayBuffer();
+    await workbook.xlsx.load(buffer);
+
+    const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
+    if (!worksheet) return [];
+
+    const rows = [];
+    worksheet.eachRow({ includeEmpty: false }, (row) => {
+      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+      rows.push(values.map((entry) => normalizeTabularCell(entry)));
+    });
+
+    return extractLearnersFromRows(rows);
+  };
+
+  const getImportFormat = () => {
+    const format = String(importFormatSelect.value || '').trim().toLowerCase();
+    return format === 'csv' ? 'csv' : 'excel';
+  };
+
+  const syncImportInputAccept = () => {
+    const format = getImportFormat();
+    importFileInput.accept = format === 'csv' ? '.csv,text/csv' : '.xlsx,.xls';
   };
 
   const defaultProfile = () => ({
@@ -2472,6 +2620,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     manageLearners = [];
     learnerNameInput.value = '';
     learnerAdmissionInput.value = '';
+    importFileInput.value = '';
   };
 
   const getClassProfile = (grade, letter) => {
@@ -2547,8 +2696,15 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerNameInput.disabled = readOnly;
     learnerAdmissionInput.disabled = readOnly;
     addLearnerButton.disabled = readOnly;
+    importFormatSelect.disabled = readOnly;
+    importFileInput.disabled = readOnly;
+    importLearnersButton.disabled = readOnly;
     saveManageButton.disabled = readOnly;
     saveManageButton.classList.toggle('is-hidden', readOnly);
+
+    importFormatSelect.value = 'excel';
+    syncImportInputAccept();
+    importFileInput.value = '';
 
     renderManageLearners();
     manageModal.classList.remove('is-hidden');
@@ -2757,6 +2913,13 @@ const hydrateEnrollmentManager = (managerNode) => {
     button.addEventListener('click', closeModal);
   });
 
+  syncImportInputAccept();
+
+  importFormatSelect.addEventListener('change', () => {
+    syncImportInputAccept();
+    importFileInput.value = '';
+  });
+
   closeManageButtons.forEach((button) => {
     button.addEventListener('click', closeManageModal);
   });
@@ -2829,6 +2992,47 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerNameInput.value = '';
     learnerAdmissionInput.value = '';
     renderManageLearners();
+  });
+
+  importLearnersButton.addEventListener('click', async () => {
+    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+    const file = importFileInput.files && importFileInput.files.length ? importFileInput.files[0] : null;
+    if (!file) {
+      if (statusNode) {
+        statusNode.textContent = 'Choose an import file first.';
+      }
+      return;
+    }
+
+    const format = getImportFormat();
+    try {
+      const importedLearners =
+        format === 'csv' ? await parseLearnersFromCsvFile(file) : await parseLearnersFromExcelFile(file);
+
+      if (!importedLearners.length) {
+        if (statusNode) {
+          statusNode.textContent = `No learners found in the selected ${format.toUpperCase()} file.`;
+        }
+        return;
+      }
+
+      const beforeCount = manageLearners.length;
+      manageLearners = normalizeLearners([...manageLearners, ...importedLearners]);
+      const addedCount = Math.max(0, manageLearners.length - beforeCount);
+      renderManageLearners();
+      importFileInput.value = '';
+
+      if (statusNode) {
+        statusNode.textContent =
+          addedCount > 0
+            ? `${addedCount} learner${addedCount === 1 ? '' : 's'} imported to Class ${selectedManageGrade}${selectedManageLetter}.`
+            : 'Imported list matched existing learners (no new records added).';
+      }
+    } catch {
+      if (statusNode) {
+        statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
+      }
+    }
   });
 
   saveManageButton.addEventListener('click', () => {
