@@ -2166,6 +2166,44 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               </div>
             </article>
           </div>
+          <div class="enrollment-manage-modal is-hidden" data-enrollment-manage-modal>
+            <div class="enrollment-class-modal-backdrop" data-enrollment-close-manage-modal></div>
+            <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Manage class">
+              <h3>Manage Class</h3>
+              <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
+              <div class="enrollment-class-manage-grid">
+                <label class="enrollment-class-modal-field">
+                  Class Teacher
+                  <input type="text" maxlength="120" data-enrollment-manage-teacher placeholder="e.g. Ms. Dlamini" />
+                </label>
+                <label class="enrollment-class-modal-field">
+                  Room
+                  <input type="text" maxlength="40" data-enrollment-manage-room placeholder="e.g. Block B / Room 4" />
+                </label>
+                <label class="enrollment-class-modal-field">
+                  Capacity
+                  <input type="number" min="1" max="120" step="1" data-enrollment-manage-capacity placeholder="e.g. 45" />
+                </label>
+              </div>
+              <label class="enrollment-class-modal-field">
+                Notes
+                <textarea rows="3" maxlength="600" data-enrollment-manage-notes placeholder="Class notes"></textarea>
+              </label>
+              <section class="enrollment-learner-section">
+                <h4>Learners</h4>
+                <div class="enrollment-learner-form">
+                  <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
+                  <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
+                  <button type="button" class="btn btn-secondary" data-enrollment-add-learner>Add learner</button>
+                </div>
+                <div class="enrollment-learner-list" data-enrollment-learner-list></div>
+              </section>
+              <div class="enrollment-class-modal-actions">
+                <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
+                <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
+              </div>
+            </article>
+          </div>
         </article>
       </div>
     </section>
@@ -2195,6 +2233,18 @@ const hydrateEnrollmentManager = (managerNode) => {
   const classSelect = managerNode.querySelector('[data-enrollment-class-select]');
   const addClassButton = managerNode.querySelector('[data-enrollment-add-class]');
   const closeButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-modal]'));
+  const manageModal = managerNode.querySelector('[data-enrollment-manage-modal]');
+  const manageTitleNode = managerNode.querySelector('[data-enrollment-manage-title]');
+  const manageTeacherInput = managerNode.querySelector('[data-enrollment-manage-teacher]');
+  const manageRoomInput = managerNode.querySelector('[data-enrollment-manage-room]');
+  const manageCapacityInput = managerNode.querySelector('[data-enrollment-manage-capacity]');
+  const manageNotesInput = managerNode.querySelector('[data-enrollment-manage-notes]');
+  const learnerNameInput = managerNode.querySelector('[data-enrollment-learner-name]');
+  const learnerAdmissionInput = managerNode.querySelector('[data-enrollment-learner-admission]');
+  const addLearnerButton = managerNode.querySelector('[data-enrollment-add-learner]');
+  const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
+  const saveManageButton = managerNode.querySelector('[data-enrollment-save-manage]');
+  const closeManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-manage-modal]'));
 
   if (
     !(gradeListNode instanceof HTMLElement) ||
@@ -2204,13 +2254,24 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(addGradeButton instanceof HTMLButtonElement) ||
     !(classModal instanceof HTMLElement) ||
     !(classSelect instanceof HTMLSelectElement) ||
-    !(addClassButton instanceof HTMLButtonElement)
+    !(addClassButton instanceof HTMLButtonElement) ||
+    !(manageModal instanceof HTMLElement) ||
+    !(manageTeacherInput instanceof HTMLInputElement) ||
+    !(manageRoomInput instanceof HTMLInputElement) ||
+    !(manageCapacityInput instanceof HTMLInputElement) ||
+    !(manageNotesInput instanceof HTMLTextAreaElement) ||
+    !(learnerNameInput instanceof HTMLInputElement) ||
+    !(learnerAdmissionInput instanceof HTMLInputElement) ||
+    !(addLearnerButton instanceof HTMLButtonElement) ||
+    !(learnerListNode instanceof HTMLElement) ||
+    !(saveManageButton instanceof HTMLButtonElement)
   ) {
     return;
   }
 
   portalOverlayToBody(gradeModal, `enrollment-grade-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
   portalOverlayToBody(classModal, `enrollment-class-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
+  portalOverlayToBody(manageModal, `enrollment-manage-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   const sectionKey = String(config.sectionKey || 'enrollment_manager').trim() || 'enrollment_manager';
@@ -2222,8 +2283,13 @@ const hydrateEnrollmentManager = (managerNode) => {
   let selectedAddGrade = '';
   let activeGrades = [];
   let classesByGrade = {};
+  let classProfilesByGrade = {};
+  let selectedManageGrade = '';
+  let selectedManageLetter = '';
+  let manageLearners = [];
 
   const normalizeLetter = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+  const normalizeText = (value, maxLength = 300) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
 
   const dedupeLetters = (values) => {
     const seen = new Set();
@@ -2244,6 +2310,63 @@ const hydrateEnrollmentManager = (managerNode) => {
       base[grade] = dedupeLetters(values);
     });
     return base;
+  };
+
+  const normalizeLearner = (entry) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const name = normalizeText(entry.name, 120);
+    const admissionNo = normalizeText(entry.admissionNo || entry.admission || '', 40);
+    if (!name) return null;
+    return { name, admissionNo };
+  };
+
+  const normalizeLearners = (values) => {
+    const seen = new Set();
+    const learners = [];
+    (Array.isArray(values) ? values : []).forEach((entry) => {
+      const learner = normalizeLearner(entry);
+      if (!learner) return;
+      const key = `${learner.name.toLowerCase()}::${learner.admissionNo.toLowerCase()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      learners.push(learner);
+    });
+    return learners;
+  };
+
+  const defaultProfile = () => ({
+    teacher: '',
+    room: '',
+    capacity: '',
+    notes: '',
+    learners: []
+  });
+
+  const normalizeProfile = (profile) => {
+    const source = profile && typeof profile === 'object' ? profile : {};
+    const capacityRaw = normalizeText(source.capacity, 4);
+    return {
+      teacher: normalizeText(source.teacher, 120),
+      room: normalizeText(source.room, 40),
+      capacity: /^\d+$/.test(capacityRaw) ? String(Math.max(1, Math.min(120, Number.parseInt(capacityRaw, 10)))) : '',
+      notes: normalizeText(source.notes, 600),
+      learners: normalizeLearners(source.learners)
+    };
+  };
+
+  const normalizeProfilesStore = (store, classStore) => {
+    const source = store && typeof store === 'object' && !Array.isArray(store) ? store : {};
+    const normalized = {};
+    gradeNumbers.forEach((grade) => {
+      const gradeProfiles = source[grade] && typeof source[grade] === 'object' && !Array.isArray(source[grade]) ? source[grade] : {};
+      const classLetters = Array.isArray(classStore[grade]) ? classStore[grade] : [];
+      const mapped = {};
+      classLetters.forEach((letter) => {
+        mapped[letter] = normalizeProfile(gradeProfiles[letter]);
+      });
+      normalized[grade] = mapped;
+    });
+    return normalized;
   };
 
   const loadStore = () => {
@@ -2274,18 +2397,21 @@ const hydrateEnrollmentManager = (managerNode) => {
 
         return {
           activeGrades: normalizedActive,
-          classesByGrade: normalizeClassesStore(rawClasses)
+          classesByGrade: normalizeClassesStore(rawClasses),
+          classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizeClassesStore(rawClasses))
         };
       }
 
       return {
         activeGrades: [...gradeNumbers],
-        classesByGrade: normalizeClassesStore({})
+        classesByGrade: normalizeClassesStore({}),
+        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({}))
       };
     } catch {
       return {
         activeGrades: [...gradeNumbers],
-        classesByGrade: normalizeClassesStore({})
+        classesByGrade: normalizeClassesStore({}),
+        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({}))
       };
     }
   };
@@ -2295,7 +2421,8 @@ const hydrateEnrollmentManager = (managerNode) => {
       storageKey,
       JSON.stringify({
         activeGrades: [...activeGrades],
-        classesByGrade: normalizeClassesStore(classesByGrade)
+        classesByGrade: normalizeClassesStore(classesByGrade),
+        classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade)
       })
     );
   };
@@ -2338,6 +2465,95 @@ const hydrateEnrollmentManager = (managerNode) => {
     classSelect.innerHTML = '';
   };
 
+  const closeManageModal = () => {
+    manageModal.classList.add('is-hidden');
+    selectedManageGrade = '';
+    selectedManageLetter = '';
+    manageLearners = [];
+    learnerNameInput.value = '';
+    learnerAdmissionInput.value = '';
+  };
+
+  const getClassProfile = (grade, letter) => {
+    const normalizedGrade = String(grade || '').trim();
+    const normalizedLetter = normalizeLetter(letter);
+    if (!normalizedGrade || !normalizedLetter) return defaultProfile();
+    const gradeProfiles =
+      classProfilesByGrade[normalizedGrade] &&
+      typeof classProfilesByGrade[normalizedGrade] === 'object' &&
+      !Array.isArray(classProfilesByGrade[normalizedGrade])
+        ? classProfilesByGrade[normalizedGrade]
+        : {};
+    return normalizeProfile(gradeProfiles[normalizedLetter]);
+  };
+
+  const setClassProfile = (grade, letter, profile) => {
+    const normalizedGrade = String(grade || '').trim();
+    const normalizedLetter = normalizeLetter(letter);
+    if (!normalizedGrade || !normalizedLetter) return;
+    if (!classProfilesByGrade[normalizedGrade] || typeof classProfilesByGrade[normalizedGrade] !== 'object') {
+      classProfilesByGrade[normalizedGrade] = {};
+    }
+    classProfilesByGrade[normalizedGrade][normalizedLetter] = normalizeProfile(profile);
+  };
+
+  const renderManageLearners = () => {
+    if (!manageLearners.length) {
+      learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
+      return;
+    }
+
+    learnerListNode.innerHTML = manageLearners
+      .map((learner, index) => {
+        const detail = learner.admissionNo ? ` • ${learner.admissionNo}` : '';
+        return `
+          <div class="enrollment-learner-item">
+            <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
+            ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const openManageModal = (grade, letter) => {
+    const normalizedGrade = String(grade || '').trim();
+    const normalizedLetter = normalizeLetter(letter);
+    if (!normalizedGrade || !normalizedLetter) return;
+    const classes = Array.isArray(classesByGrade[normalizedGrade]) ? classesByGrade[normalizedGrade] : [];
+    if (!classes.includes(normalizedLetter)) return;
+
+    selectedManageGrade = normalizedGrade;
+    selectedManageLetter = normalizedLetter;
+    const classLabel = `Grade ${normalizedGrade}${normalizedLetter}`;
+    if (manageTitleNode instanceof HTMLElement) {
+      manageTitleNode.textContent = classLabel;
+    }
+
+    const profile = getClassProfile(normalizedGrade, normalizedLetter);
+    manageTeacherInput.value = profile.teacher;
+    manageRoomInput.value = profile.room;
+    manageCapacityInput.value = profile.capacity;
+    manageNotesInput.value = profile.notes;
+    manageLearners = [...profile.learners];
+    learnerNameInput.value = '';
+    learnerAdmissionInput.value = '';
+
+    const readOnly = !isAdminMode;
+    manageTeacherInput.disabled = readOnly;
+    manageRoomInput.disabled = readOnly;
+    manageCapacityInput.disabled = readOnly;
+    manageNotesInput.disabled = readOnly;
+    learnerNameInput.disabled = readOnly;
+    learnerAdmissionInput.disabled = readOnly;
+    addLearnerButton.disabled = readOnly;
+    saveManageButton.disabled = readOnly;
+    saveManageButton.classList.toggle('is-hidden', readOnly);
+
+    renderManageLearners();
+    manageModal.classList.remove('is-hidden');
+  };
+
   const openModalForGrade = (grade) => {
     if (!isAdminMode) return;
     const availableLetters = getAvailableLetters(grade);
@@ -2374,7 +2590,13 @@ const hydrateEnrollmentManager = (managerNode) => {
 
                 return `
                   <span class="enrollment-class-item">
-                    <span class="enrollment-class-chip">${escapeHtmlText(classLabel)}</span>
+                    <button
+                      type="button"
+                      class="enrollment-class-chip enrollment-class-chip-button"
+                      data-enrollment-open-manage-grade="${escapeHtmlAttribute(grade)}"
+                      data-enrollment-open-manage-letter="${escapeHtmlAttribute(letter)}"
+                      aria-label="Manage class ${escapeHtmlAttribute(classLabel)}"
+                    >${escapeHtmlText(classLabel)}</button>
                     <button
                       type="button"
                       class="enrollment-class-remove"
@@ -2413,7 +2635,7 @@ const hydrateEnrollmentManager = (managerNode) => {
           : 'No grades currently active.';
       } else {
         statusNode.textContent = isAdminMode
-          ? 'Use Add class to create grade classes (A, B, C, ...).'
+          ? 'Use Add class to create classes and click any class to manage details.'
           : 'Enrollment classes are visible in read-only mode.';
       }
     }
@@ -2422,30 +2644,12 @@ const hydrateEnrollmentManager = (managerNode) => {
   const loaded = loadStore();
   activeGrades = loaded.activeGrades;
   classesByGrade = loaded.classesByGrade;
+  classProfilesByGrade = loaded.classProfilesByGrade;
   render();
 
   gradeListNode.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-
-    const removeGradeButton = target.closest('[data-enrollment-remove-grade]');
-    if (removeGradeButton instanceof HTMLButtonElement) {
-      if (!isAdminMode) return;
-      const grade = String(removeGradeButton.dataset.enrollmentRemoveGrade || '').trim();
-      if (!grade) return;
-
-      const confirmRemove = window.confirm(`Remove Grade ${grade} and all its classes?`);
-      if (!confirmRemove) return;
-
-      activeGrades = activeGrades.filter((entry) => entry !== grade);
-      classesByGrade[grade] = [];
-      saveStore();
-      render();
-      if (statusNode) {
-        statusNode.textContent = `Grade ${grade} removed.`;
-      }
-      return;
-    }
 
     const removeButton = target.closest('[data-enrollment-remove-letter]');
     if (removeButton instanceof HTMLButtonElement) {
@@ -2459,11 +2663,53 @@ const hydrateEnrollmentManager = (managerNode) => {
       if (!confirmRemove) return;
 
       classesByGrade[grade] = dedupeLetters((classesByGrade[grade] || []).filter((entry) => normalizeLetter(entry) !== letter));
+      if (
+        classProfilesByGrade[grade] &&
+        typeof classProfilesByGrade[grade] === 'object' &&
+        !Array.isArray(classProfilesByGrade[grade])
+      ) {
+        delete classProfilesByGrade[grade][letter];
+      }
       saveStore();
       render();
       if (statusNode) {
         statusNode.textContent = `Class ${grade}${letter} removed.`;
       }
+      if (selectedManageGrade === grade && selectedManageLetter === letter) {
+        closeManageModal();
+      }
+      return;
+    }
+
+    const removeGradeButton = target.closest('[data-enrollment-remove-grade]');
+    if (removeGradeButton instanceof HTMLButtonElement && !removeGradeButton.dataset.enrollmentRemoveLetter) {
+      if (!isAdminMode) return;
+      const grade = String(removeGradeButton.dataset.enrollmentRemoveGrade || '').trim();
+      if (!grade) return;
+
+      const confirmRemove = window.confirm(`Remove Grade ${grade} and all its classes?`);
+      if (!confirmRemove) return;
+
+      activeGrades = activeGrades.filter((entry) => entry !== grade);
+      classesByGrade[grade] = [];
+      classProfilesByGrade[grade] = {};
+      saveStore();
+      render();
+      if (statusNode) {
+        statusNode.textContent = `Grade ${grade} removed.`;
+      }
+      if (selectedManageGrade === grade) {
+        closeManageModal();
+      }
+      return;
+    }
+
+    const manageButton = target.closest('[data-enrollment-open-manage-letter]');
+    if (manageButton instanceof HTMLButtonElement) {
+      const grade = String(manageButton.dataset.enrollmentOpenManageGrade || '').trim();
+      const letter = normalizeLetter(manageButton.dataset.enrollmentOpenManageLetter || '');
+      if (!grade || !letter) return;
+      openManageModal(grade, letter);
       return;
     }
 
@@ -2511,10 +2757,32 @@ const hydrateEnrollmentManager = (managerNode) => {
     button.addEventListener('click', closeModal);
   });
 
+  closeManageButtons.forEach((button) => {
+    button.addEventListener('click', closeManageModal);
+  });
+
   classModal.addEventListener('click', (event) => {
     if (event.target === classModal) {
       closeModal();
     }
+  });
+
+  manageModal.addEventListener('click', (event) => {
+    if (event.target === manageModal) {
+      closeManageModal();
+    }
+  });
+
+  learnerListNode.addEventListener('click', (event) => {
+    if (!isAdminMode) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const removeLearnerButton = target.closest('[data-enrollment-remove-learner-index]');
+    if (!(removeLearnerButton instanceof HTMLButtonElement)) return;
+    const index = Number.parseInt(String(removeLearnerButton.dataset.enrollmentRemoveLearnerIndex || ''), 10);
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+    manageLearners.splice(index, 1);
+    renderManageLearners();
   });
 
   addClassButton.addEventListener('click', () => {
@@ -2523,12 +2791,66 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!letter) return;
 
     classesByGrade[selectedGrade] = dedupeLetters([...(classesByGrade[selectedGrade] || []), letter]);
+    setClassProfile(selectedGrade, letter, getClassProfile(selectedGrade, letter));
     saveStore();
     render();
     if (statusNode) {
       statusNode.textContent = `Class ${selectedGrade}${letter} added.`;
     }
     closeModal();
+  });
+
+  addLearnerButton.addEventListener('click', () => {
+    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+    const learner = normalizeLearner({
+      name: learnerNameInput.value,
+      admissionNo: learnerAdmissionInput.value
+    });
+    if (!learner) {
+      if (statusNode) {
+        statusNode.textContent = 'Enter a learner name before adding.';
+      }
+      return;
+    }
+
+    const duplicate = manageLearners.some(
+      (entry) =>
+        entry.name.toLowerCase() === learner.name.toLowerCase() &&
+        String(entry.admissionNo || '').toLowerCase() === String(learner.admissionNo || '').toLowerCase()
+    );
+    if (duplicate) {
+      if (statusNode) {
+        statusNode.textContent = `${learner.name} is already in this class.`;
+      }
+      return;
+    }
+
+    manageLearners = [...manageLearners, learner];
+    learnerNameInput.value = '';
+    learnerAdmissionInput.value = '';
+    renderManageLearners();
+  });
+
+  saveManageButton.addEventListener('click', () => {
+    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+    const capacityRaw = normalizeText(manageCapacityInput.value, 4);
+    const normalizedCapacity = /^\d+$/.test(capacityRaw)
+      ? String(Math.max(1, Math.min(120, Number.parseInt(capacityRaw, 10))))
+      : '';
+
+    setClassProfile(selectedManageGrade, selectedManageLetter, {
+      teacher: normalizeText(manageTeacherInput.value, 120),
+      room: normalizeText(manageRoomInput.value, 40),
+      capacity: normalizedCapacity,
+      notes: normalizeText(manageNotesInput.value, 600),
+      learners: normalizeLearners(manageLearners)
+    });
+
+    saveStore();
+    if (statusNode) {
+      statusNode.textContent = `Class ${selectedManageGrade}${selectedManageLetter} updated.`;
+    }
+    closeManageModal();
   });
 };
 

@@ -2464,6 +2464,14 @@ body.match-log-workspace-open {
   padding: 5px 10px;
 }
 
+.enrollment-class-chip-button {
+  cursor: pointer;
+}
+
+.enrollment-class-chip-button:hover {
+  border-color: var(--primary);
+}
+
 .enrollment-class-remove {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -2530,12 +2538,75 @@ body.match-log-workspace-open {
   font-weight: 600;
 }
 
-.enrollment-class-modal-field select {
+.enrollment-class-modal-field select,
+.enrollment-class-modal-field input,
+.enrollment-class-modal-field textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   font: inherit;
   background: var(--surface);
+}
+
+.enrollment-class-modal-field textarea {
+  resize: vertical;
+}
+
+.enrollment-manage-modal .enrollment-class-modal-panel {
+  width: min(720px, 100%);
+}
+
+.enrollment-class-manage-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.enrollment-learner-section {
+  display: grid;
+  gap: 8px;
+}
+
+.enrollment-learner-section h4 {
+  margin: 0;
+}
+
+.enrollment-learner-form {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(160px, 1.1fr) minmax(130px, 0.8fr) auto;
+}
+
+.enrollment-learner-form input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  background: var(--surface);
+}
+
+.enrollment-learner-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.enrollment-learner-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .enrollment-learner-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 .enrollment-class-modal-actions {
