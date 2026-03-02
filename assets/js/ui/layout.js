@@ -7,7 +7,6 @@ import {
   renderFooter,
   renderHeader,
   renderSectionByIndex,
-  renderHeroNotice,
   renderPageEmailForms,
   renderSectionsWithContext
 } from './components.js';
@@ -229,23 +228,12 @@ export const renderSite = (siteContent, page) => {
     ? page.pageOrder.map((value) => String(value || '').trim()).filter(Boolean)
     : [];
   const validSectionTokens = new Set(orderedSectionIndexes.map((index) => `section:${index}`));
-  const hasNotice = Boolean(page.hero?.notice);
-  const isDesktopViewport = window.matchMedia('(min-width: 860px)').matches;
-  const useDesktopHomeHeroNoticeSplit = page.key === 'home' && hasNotice && isDesktopViewport;
-  const normalizedPageOrder = rawPageOrder.filter((token) => (token === 'hero_notice' && hasNotice) || validSectionTokens.has(token));
+  const normalizedPageOrder = rawPageOrder.filter((token) => validSectionTokens.has(token));
 
   const renderedTokens = new Set();
   const appendToken = (token, parts) => {
     if (renderedTokens.has(token)) return;
     renderedTokens.add(token);
-
-    if (token === 'hero_notice') {
-      if (useDesktopHomeHeroNoticeSplit) {
-        return;
-      }
-      parts.push(renderHeroNotice(page.hero, page.key));
-      return;
-    }
 
     if (token.startsWith('section:')) {
       const index = Number(token.slice('section:'.length));
@@ -258,11 +246,6 @@ export const renderSite = (siteContent, page) => {
   const mainBlocks = [];
   if (normalizedPageOrder.length) {
     normalizedPageOrder.forEach((token) => appendToken(token, mainBlocks));
-  }
-
-  if (hasNotice && !renderedTokens.has('hero_notice') && !useDesktopHomeHeroNoticeSplit) {
-    mainBlocks.unshift(renderHeroNotice(page.hero, page.key));
-    renderedTokens.add('hero_notice');
   }
 
   orderedSectionIndexes.forEach((index) => {
