@@ -1005,6 +1005,86 @@ const toHeroNoticeRecord = (notice: Element): HeroNoticeRecord => ({
   linkLabel: ((notice.querySelector('.hero-notice-link') as HTMLAnchorElement | null)?.textContent ?? 'View notice').trim()
 });
 
+const CALENDAR_EVENT_TYPES_STORAGE_PREFIX = 'bhanoyi.schoolCalendarEventTypes.';
+const DEFAULT_CALENDAR_SECTION_KEY = 'school_calendar';
+
+const normalizeCategoryLabel = (value: string) => String(value || '').replace(/\s+/g, ' ').trim();
+
+const dedupeCategoryLabels = (values: string[]) => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  values.forEach((entry) => {
+    const label = normalizeCategoryLabel(entry);
+    if (!label) return;
+    const key = label.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(label);
+  });
+
+  return normalized;
+};
+
+const getCanonicalCalendarEventTypesStorageKey = () => {
+  if (typeof window === 'undefined') {
+    return `${CALENDAR_EVENT_TYPES_STORAGE_PREFIX}${DEFAULT_CALENDAR_SECTION_KEY}`;
+  }
+
+  try {
+    const exact = `${CALENDAR_EVENT_TYPES_STORAGE_PREFIX}${DEFAULT_CALENDAR_SECTION_KEY}`;
+    if (window.localStorage.getItem(exact)) {
+      return exact;
+    }
+
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index) || '';
+      if (key.startsWith(CALENDAR_EVENT_TYPES_STORAGE_PREFIX)) {
+        return key;
+      }
+    }
+  } catch {
+    return `${CALENDAR_EVENT_TYPES_STORAGE_PREFIX}${DEFAULT_CALENDAR_SECTION_KEY}`;
+  }
+
+  return `${CALENDAR_EVENT_TYPES_STORAGE_PREFIX}${DEFAULT_CALENDAR_SECTION_KEY}`;
+};
+
+const loadCanonicalCalendarEventTypes = () => {
+  try {
+    const raw = window.localStorage.getItem(getCanonicalCalendarEventTypesStorageKey());
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return dedupeCategoryLabels(parsed.map((entry) => String(entry || '')));
+  } catch {
+    return [];
+  }
+};
+
+const saveCanonicalCalendarEventTypes = (types: string[]) => {
+  const key = getCanonicalCalendarEventTypesStorageKey();
+  const normalized = dedupeCategoryLabels(types);
+  try {
+    window.localStorage.setItem(key, JSON.stringify(normalized));
+  } catch {
+    return normalized;
+  }
+  return normalized;
+};
+
+const syncCategoryToCanonicalCalendarEventTypes = (categoryRaw: string) => {
+  const category = normalizeCategoryLabel(categoryRaw);
+  if (!category) return '';
+
+  const existing = loadCanonicalCalendarEventTypes();
+  const matched = existing.find((entry) => entry.toLowerCase() === category.toLowerCase());
+  if (matched) return matched;
+
+  saveCanonicalCalendarEventTypes([...existing, category]);
+  return category;
+};
+
 const getLatestNewsCategories = () => {
   const fromLanes = Array.from(document.querySelectorAll('.latest-news-lane-head h3'))
     .map((el) => (el.textContent ?? '').trim())
@@ -1014,8 +1094,9 @@ const getLatestNewsCategories = () => {
     .map((el) => (el.textContent ?? '').trim())
     .filter(Boolean);
 
-  const defaults = ['Academics', 'Parents', 'Sports', 'Extra-curricular'];
-  return Array.from(new Set([...defaults, ...fromLanes, ...fromCards]));
+  const canonicalCalendarTypes = loadCanonicalCalendarEventTypes();
+  const defaults = canonicalCalendarTypes.length ? canonicalCalendarTypes : ['General'];
+  return dedupeCategoryLabels([...defaults, ...fromLanes, ...fromCards]);
 };
 
 const parseCardImageUrls = (value: string | null | undefined): string[] => {
@@ -1666,7 +1747,8 @@ const openLatestNewsComposer = (options: LatestNewsComposerOptions = {}) => {
     const newCategory = String(formData.get('newCategory') || '').trim();
     const imageFiles = pendingImageFiles.filter((file) => file.size > 0);
 
-    const category = selectedCategory === '__new__' ? newCategory : selectedCategory;
+    const categoryInput = selectedCategory === '__new__' ? newCategory : selectedCategory;
+    const category = syncCategoryToCanonicalCalendarEventTypes(categoryInput);
     const bodyPlain = bodyHtmlToPlainText(body);
     if (!title || !bodyPlain || !category) {
       showStatus('Title, body, and category are required.');
@@ -2356,13 +2438,20 @@ const wireCardInline = (item: Element) => {
           page_key: currentPageKey(),
           section_key: record.sectionKey,
           sort_order: record.sortOrder,
-          category: isLatestNews ? (categoryEditor?.value ?? readState.category).trim() : '',
+          category: isLatestNews
+            ? syncCategoryToCanonicalCalendarEventTypes((categoryEditor?.value ?? readState.category).trim())
+            : '',
           subtitle: isLatestNews ? (subtitleEl?.textContent ?? readState.subtitle).trim() : '',
           title: isLatestNews ? getLatestNewsTitleText() : (titleEl?.textContent ?? '').trim(),
           body: isLatestNews ? getLatestNewsBodyText() : (bodyEl?.textContent ?? '').trim(),
           image_url: formatCardImageUrls(currentImageUrls),
           href: record.clickable ? (urlEditor?.value ?? '#').trim() : '#'
         };
+
+        if (isLatestNews && !payload.category) {
+          showStatus('Category is required.');
+          return;
+        }
 
         await saveCard(payload);
         showStatus('Card saved. Refreshing...');
