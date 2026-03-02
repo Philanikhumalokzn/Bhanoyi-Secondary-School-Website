@@ -2634,17 +2634,17 @@ body.news-read-open {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   max-width: 100%;
   background: var(--surface);
 }
 
 .fixture-creator-shell .sports-workflow-step.is-expanded {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .fixture-creator-shell .sports-workflow-step.is-expanded .sports-workflow-body {
-  overflow-x: hidden;
+  overflow-x: visible;
   overflow-y: visible;
 }
 
