@@ -2173,6 +2173,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
               <div class="enrollment-class-modal-actions enrollment-class-modal-actions-top">
                 <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
+                <button type="button" class="btn btn-secondary" data-enrollment-clear-learners>Clear class list</button>
                 <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
               </div>
               <div class="enrollment-class-manage-grid">
@@ -2270,6 +2271,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
+  const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const saveManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-save-manage]'));
   const closeManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-manage-modal]'));
@@ -2295,6 +2297,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
     !(importLearnersButton instanceof HTMLButtonElement) ||
+    !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
     !saveManageButtons.length
   ) {
@@ -2802,6 +2805,10 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.disabled = readOnly;
     importFileInput.disabled = readOnly;
     importLearnersButton.disabled = readOnly;
+    clearLearnersButtons.forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) return;
+      button.disabled = readOnly;
+    });
     saveManageButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       button.disabled = readOnly;
@@ -3144,6 +3151,33 @@ const hydrateEnrollmentManager = (managerNode) => {
         statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
       }
     }
+  });
+
+  const clearLearnersHandler = () => {
+    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+    if (!manageLearners.length) {
+      if (statusNode) {
+        statusNode.textContent = 'This class has no learners to clear.';
+      }
+      return;
+    }
+
+    const confirmClear = window.confirm(
+      `Clear all learners from Class ${selectedManageGrade}${selectedManageLetter}?`
+    );
+    if (!confirmClear) return;
+
+    manageLearners = [];
+    syncCapacityWithLearners();
+    renderManageLearners();
+    if (statusNode) {
+      statusNode.textContent = `Class ${selectedManageGrade}${selectedManageLetter} learner list cleared.`;
+    }
+  };
+
+  clearLearnersButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.addEventListener('click', clearLearnersHandler);
   });
 
   const saveManageHandler = () => {
