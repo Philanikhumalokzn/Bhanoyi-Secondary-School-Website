@@ -1041,6 +1041,19 @@ const hydrateMatchLog = (matchLogNode) => {
   const matchLogStoreStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
 
   const eventTypes = normalizeMatchEventTypes(config.eventTypes);
+  try {
+    const persistedHouseOptions = (Array.isArray(config.houseOptions) ? config.houseOptions : [])
+      .map((entry, index) => ({
+        id: String(entry?.id || `house_${index + 1}`).trim().toLowerCase(),
+        name: String(entry?.name || `House ${index + 1}`).trim() || `House ${index + 1}`
+      }))
+      .filter((entry) => Boolean(entry.id));
+    if (persistedHouseOptions.length) {
+      localStorage.setItem('bhanoyi.sportsHouseOptions', JSON.stringify(persistedHouseOptions));
+    }
+  } catch {
+    // ignore house option persistence errors
+  }
   const eventTypeByKey = new Map(eventTypes.map((entry) => [entry.key, entry]));
   const baseInitialScores = config.initialScores && typeof config.initialScores === 'object' ? config.initialScores : {};
 
@@ -2313,10 +2326,61 @@ const hydrateEnrollmentManager = (managerNode) => {
   const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
   const gradeNumbers = Array.from({ length: 7 }, (_, index) => String(index + 6));
   const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
-  const schoolHouseOptions = Array.from({ length: 5 }, (_, index) => ({
+  const defaultSchoolHouseOptions = Array.from({ length: 5 }, (_, index) => ({
     id: `house_${index + 1}`,
     name: `House ${index + 1}`
   }));
+  const sportsHouseStorageKey = 'bhanoyi.sportsHouseOptions';
+
+  const loadSchoolHouseOptions = () => {
+    try {
+      const rawStored = localStorage.getItem(sportsHouseStorageKey);
+      if (rawStored) {
+        const parsed = JSON.parse(rawStored);
+        if (Array.isArray(parsed) && parsed.length) {
+          const fromStored = parsed
+            .map((entry, index) => ({
+              id: String(entry?.id || `house_${index + 1}`).trim().toLowerCase(),
+              name: String(entry?.name || `House ${index + 1}`).trim() || `House ${index + 1}`
+            }))
+            .filter((entry) => Boolean(entry.id));
+          if (fromStored.length) {
+            return fromStored;
+          }
+        }
+      }
+
+      const rawFixtureCatalog = localStorage.getItem('bhanoyi.fixtures.sports_fixture_creator');
+      if (rawFixtureCatalog) {
+        const parsedCatalog = JSON.parse(rawFixtureCatalog);
+        if (parsedCatalog && typeof parsedCatalog === 'object' && !Array.isArray(parsedCatalog)) {
+          const byId = new Map();
+          Object.values(parsedCatalog).forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            const homeId = String(entry.homeId || '').trim().toLowerCase();
+            const awayId = String(entry.awayId || '').trim().toLowerCase();
+            const homeName = String(entry.homeName || '').trim();
+            const awayName = String(entry.awayName || '').trim();
+            if (homeId && homeName && !byId.has(homeId)) byId.set(homeId, homeName);
+            if (awayId && awayName && !byId.has(awayId)) byId.set(awayId, awayName);
+          });
+
+          const fromCatalog = Array.from(byId.entries())
+            .map(([id, name]) => ({ id, name }))
+            .slice(0, 5);
+          if (fromCatalog.length >= 2) {
+            return fromCatalog;
+          }
+        }
+      }
+    } catch {
+      return [...defaultSchoolHouseOptions];
+    }
+
+    return [...defaultSchoolHouseOptions];
+  };
+
+  const schoolHouseOptions = loadSchoolHouseOptions();
 
   let selectedGrade = '';
   let selectedAddGrade = '';
@@ -2770,20 +2834,49 @@ const hydrateEnrollmentManager = (managerNode) => {
       .map((learner, index) => {
         const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
         const detail = details ? ` • ${details}` : '';
-        const houseOptionsMarkup = [
-          '<option value="">Assign house</option>',
-          ...schoolHouseOptions.map(
-            (house) =>
-              `<option value="${escapeHtmlAttribute(house.id)}"${learner.houseId === house.id ? ' selected' : ''}>${escapeHtmlText(house.name)}</option>`
+        const houseOptionsMarkup = schoolHouseOptions
+          .map(
+            (house) => `
+              <label class="enrollment-house-choice">
+                <input
+                  type="radio"
+                  name="enrollment_learner_house_${index}"
+                  value="${escapeHtmlAttribute(house.id)}"
+                  data-enrollment-learner-house-index="${index}"
+                  ${learner.houseId === house.id ? 'checked' : ''}
+                  ${isAdminMode ? '' : 'disabled'}
+                />
+                <span>${escapeHtmlText(house.name)}</span>
+              </label>
+            `
           )
-        ].join('');
+          .join('');
+
+        const clearChoice = isAdminMode
+          ? `
+              <label class="enrollment-house-choice enrollment-house-choice-clear">
+                <input
+                  type="radio"
+                  name="enrollment_learner_house_${index}"
+                  value=""
+                  data-enrollment-learner-house-index="${index}"
+                  ${learner.houseId ? '' : 'checked'}
+                />
+                <span>Unassigned</span>
+              </label>
+            `
+          : '';
+
         return `
           <div class="enrollment-learner-item">
-            <span class="enrollment-learner-summary">${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
-            <div class="enrollment-learner-actions">
-              <select data-enrollment-learner-house-index="${index}" ${isAdminMode ? '' : 'disabled'}>
+            <div class="enrollment-learner-summary">
+              <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
+              <div class="enrollment-house-row">
                 ${houseOptionsMarkup}
-              </select>
+                ${clearChoice}
+              </div>
+            </div>
+            <div class="enrollment-learner-actions">
               ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
             </div>
           </div>
@@ -3089,7 +3182,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   learnerListNode.addEventListener('change', (event) => {
     if (!isAdminMode) return;
     const target = event.target;
-    if (!(target instanceof HTMLSelectElement)) return;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
     const rawIndex = target.dataset.enrollmentLearnerHouseIndex;
     if (rawIndex === undefined) return;
     const index = Number.parseInt(String(rawIndex), 10);

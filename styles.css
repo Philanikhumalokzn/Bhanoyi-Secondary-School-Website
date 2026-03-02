@@ -2630,6 +2630,8 @@ body.match-log-workspace-open {
 
 .enrollment-learner-summary {
   min-width: 0;
+  display: grid;
+  gap: 6px;
 }
 
 .enrollment-learner-actions {
@@ -2638,13 +2640,30 @@ body.match-log-workspace-open {
   gap: 6px;
 }
 
-.enrollment-learner-actions select {
+.enrollment-house-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.enrollment-house-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 5px 8px;
-  font: inherit;
+  border-radius: 999px;
+  padding: 3px 8px;
   background: var(--surface);
-  min-width: 130px;
+  font-size: 0.8rem;
+}
+
+.enrollment-house-choice input {
+  margin: 0;
+}
+
+.enrollment-house-choice-clear {
+  border-style: dashed;
 }
 
 @media (max-width: 760px) {
