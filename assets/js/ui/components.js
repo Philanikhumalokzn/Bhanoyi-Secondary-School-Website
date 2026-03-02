@@ -2455,17 +2455,23 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const parseSimplifiedExcelFullName = (value) => {
+    const toTitleToken = (token) => {
+      const normalized = normalizeText(token, 60);
+      if (!normalized) return '';
+      return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+    };
+
     const raw = normalizeText(value, 180);
     if (!raw) return '';
 
     const commaIndex = raw.indexOf(',');
     if (commaIndex < 0) {
-      return normalizeText(raw, 120);
+      return toTitleToken(raw);
     }
 
-    const surname = normalizeText(raw.slice(0, commaIndex), 60);
+    const surname = toTitleToken(raw.slice(0, commaIndex));
     const rightPart = normalizeText(raw.slice(commaIndex + 1), 120);
-    const firstName = normalizeText(rightPart.split(/\s+/)[0], 60);
+    const firstName = toTitleToken(rightPart.split(/\s+/)[0]);
 
     if (!surname && !firstName) return '';
     if (!firstName) return surname;
