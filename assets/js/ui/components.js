@@ -2171,6 +2171,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
             <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Manage class">
               <h3>Manage Class</h3>
               <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
+              <div class="enrollment-class-modal-actions enrollment-class-modal-actions-top">
+                <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
+                <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
+              </div>
               <div class="enrollment-class-manage-grid">
                 <label class="enrollment-class-modal-field">
                   Class Teacher
@@ -2260,7 +2264,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
-  const saveManageButton = managerNode.querySelector('[data-enrollment-save-manage]');
+  const saveManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-save-manage]'));
   const closeManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-manage-modal]'));
 
   if (
@@ -2284,7 +2288,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importFileInput instanceof HTMLInputElement) ||
     !(importLearnersButton instanceof HTMLButtonElement) ||
     !(learnerListNode instanceof HTMLElement) ||
-    !(saveManageButton instanceof HTMLButtonElement)
+    !saveManageButtons.length
   ) {
     return;
   }
@@ -2748,8 +2752,11 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.disabled = readOnly;
     importFileInput.disabled = readOnly;
     importLearnersButton.disabled = readOnly;
-    saveManageButton.disabled = readOnly;
-    saveManageButton.classList.toggle('is-hidden', readOnly);
+    saveManageButtons.forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) return;
+      button.disabled = readOnly;
+      button.classList.toggle('is-hidden', readOnly);
+    });
 
     importFormatSelect.value = 'excel';
     syncImportInputAccept();
@@ -3084,7 +3091,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
   });
 
-  saveManageButton.addEventListener('click', () => {
+  const saveManageHandler = () => {
     if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
     const capacityRaw = normalizeText(manageCapacityInput.value, 4);
     const normalizedCapacity = /^\d+$/.test(capacityRaw)
@@ -3104,6 +3111,11 @@ const hydrateEnrollmentManager = (managerNode) => {
       statusNode.textContent = `Class ${selectedManageGrade}${selectedManageLetter} updated.`;
     }
     closeManageModal();
+  };
+
+  saveManageButtons.forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) return;
+    button.addEventListener('click', saveManageHandler);
   });
 };
 
