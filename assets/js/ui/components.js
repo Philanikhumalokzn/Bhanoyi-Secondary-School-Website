@@ -1325,7 +1325,7 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!nextFixture) return true;
 
     const nextLabel = `${nextFixture.homeName} vs ${nextFixture.awayName}`;
-    const message = `You are switching from ${previousFixture.homeName} vs ${previousFixture.awayName} to ${nextLabel}. If you continue, you will be logging a different fixture. Continue?`;
+    const message = `Switch to ${nextLabel}? This will log events for a different fixture.`;
     return window.confirm(message);
   };
 
