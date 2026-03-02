@@ -3644,7 +3644,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
                 return `
                   <div class="fixture-date-edit-wrap">
                     <input type="date" class="fixture-inline-input" data-fixture-date-input value="${escapeHtmlAttribute(dateValue)}" />
-                    <a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">Open calendar</a>
+                    <a class="fixture-date-link" href="${buildCalendarHref(fixture, fixtureId)}">Open<wbr> calendar</a>
                   </div>
                 `;
               })()}
@@ -3687,7 +3687,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
                       data-fixture-open-log
                       data-fixture-log-id="${escapeHtmlAttribute(fixtureId)}"
                       data-fixture-log-date="${escapeHtmlAttribute(stamp.date || '')}"
-                    >${summaryMeta.eventCount > 0 ? 'Edit log' : 'Log match'}</button>
+                    >${summaryMeta.eventCount > 0 ? 'Edit<wbr> log' : 'Log<wbr> match'}</button>
                   </div>
                 `;
               })()}
