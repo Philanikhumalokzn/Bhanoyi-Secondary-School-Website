@@ -2212,6 +2212,12 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                 <div class="enrollment-learner-form">
                   <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                   <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
+                  <select data-enrollment-learner-gender>
+                    <option value="">Gender (optional)</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
                   <button type="button" class="btn btn-secondary" data-enrollment-add-learner>Add learner</button>
                 </div>
                 <div class="enrollment-learner-list" data-enrollment-learner-list></div>
@@ -2259,6 +2265,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const manageNotesInput = managerNode.querySelector('[data-enrollment-manage-notes]');
   const learnerNameInput = managerNode.querySelector('[data-enrollment-learner-name]');
   const learnerAdmissionInput = managerNode.querySelector('[data-enrollment-learner-admission]');
+  const learnerGenderSelect = managerNode.querySelector('[data-enrollment-learner-gender]');
   const addLearnerButton = managerNode.querySelector('[data-enrollment-add-learner]');
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
@@ -2283,6 +2290,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(manageNotesInput instanceof HTMLTextAreaElement) ||
     !(learnerNameInput instanceof HTMLInputElement) ||
     !(learnerAdmissionInput instanceof HTMLInputElement) ||
+    !(learnerGenderSelect instanceof HTMLSelectElement) ||
     !(addLearnerButton instanceof HTMLButtonElement) ||
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
@@ -2338,24 +2346,47 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const normalizeLearner = (entry) => {
     if (!entry || typeof entry !== 'object') return null;
+    const normalizeGender = (value) => {
+      const raw = normalizeText(value, 20).toLowerCase();
+      if (!raw) return '';
+      if (raw === 'm' || raw === 'male' || raw === 'boy') return 'Male';
+      if (raw === 'f' || raw === 'female' || raw === 'girl') return 'Female';
+      if (raw === 'o' || raw === 'other') return 'Other';
+      return '';
+    };
+
     const name = normalizeText(entry.name, 120);
     const admissionNo = normalizeText(entry.admissionNo || entry.admission || '', 40);
+    const gender = normalizeGender(entry.gender || entry.sex || '');
     if (!name) return null;
-    return { name, admissionNo };
+    return { name, admissionNo, gender };
   };
 
   const normalizeLearners = (values) => {
-    const seen = new Set();
+    const seen = new Map();
     const learners = [];
     (Array.isArray(values) ? values : []).forEach((entry) => {
       const learner = normalizeLearner(entry);
       if (!learner) return;
       const key = `${learner.name.toLowerCase()}::${learner.admissionNo.toLowerCase()}`;
-      if (seen.has(key)) return;
-      seen.add(key);
+      if (seen.has(key)) {
+        const existingIndex = seen.get(key);
+        const existing = learners[existingIndex];
+        learners[existingIndex] = {
+          name: existing.name,
+          admissionNo: existing.admissionNo || learner.admissionNo,
+          gender: existing.gender || learner.gender
+        };
+        return;
+      }
+      seen.set(key, learners.length);
       learners.push(learner);
     });
     return learners;
+  };
+
+  const syncCapacityWithLearners = () => {
+    manageCapacityInput.value = String(manageLearners.length);
   };
 
   const normalizeTabularCell = (value) => {
@@ -2428,7 +2459,8 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     const nameIndex = findColumn(['name', 'learner name', 'student name', 'learner', 'student', 'full name']);
     const admissionIndex = findColumn(['admission', 'admission no', 'admission number', 'adm no', 'admission id']);
-    const hasHeader = nameIndex >= 0 || admissionIndex >= 0;
+    const genderIndex = findColumn(['gender', 'sex']);
+    const hasHeader = nameIndex >= 0 || admissionIndex >= 0 || genderIndex >= 0;
     const startRow = hasHeader ? 1 : 0;
 
     const learners = [];
@@ -2444,8 +2476,12 @@ const hydrateEnrollmentManager = (managerNode) => {
         admissionIndex >= 0 && admissionIndex !== nameIndex
           ? normalizeText(row[admissionIndex], 40)
           : normalizeText(fallbackAdmission, 40);
+      const gender =
+        genderIndex >= 0 && genderIndex !== nameIndex
+          ? normalizeText(row[genderIndex], 20)
+          : '';
 
-      const learner = normalizeLearner({ name, admissionNo });
+      const learner = normalizeLearner({ name, admissionNo, gender });
       if (!learner) continue;
       learners.push(learner);
     }
@@ -2486,11 +2522,19 @@ const hydrateEnrollmentManager = (managerNode) => {
   const extractLearnersFromSimplifiedExcelRows = (rows) => {
     const learners = [];
 
+    const normalizeGender = (value) => {
+      const raw = normalizeText(value, 20).toLowerCase();
+      if (raw === 'm' || raw === 'male' || raw === 'boy') return 'Male';
+      if (raw === 'f' || raw === 'female' || raw === 'girl') return 'Female';
+      if (raw === 'o' || raw === 'other') return 'Other';
+      return '';
+    };
+
     (Array.isArray(rows) ? rows : []).forEach((row) => {
       if (!Array.isArray(row) || !row.length) return;
       const parsedName = parseSimplifiedExcelFullName(row[0]);
       if (!parsedName) return;
-      learners.push({ name: parsedName, admissionNo: '' });
+      learners.push({ name: parsedName, admissionNo: '', gender: normalizeGender(row[1]) });
     });
 
     return normalizeLearners(learners);
@@ -2673,7 +2717,9 @@ const hydrateEnrollmentManager = (managerNode) => {
     manageLearners = [];
     learnerNameInput.value = '';
     learnerAdmissionInput.value = '';
+    learnerGenderSelect.value = '';
     importFileInput.value = '';
+    manageCapacityInput.value = '';
   };
 
   const getClassProfile = (grade, letter) => {
@@ -2707,7 +2753,8 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     learnerListNode.innerHTML = manageLearners
       .map((learner, index) => {
-        const detail = learner.admissionNo ? ` • ${learner.admissionNo}` : '';
+        const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
+        const detail = details ? ` • ${details}` : '';
         return `
           <div class="enrollment-learner-item">
             <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
@@ -2735,19 +2782,22 @@ const hydrateEnrollmentManager = (managerNode) => {
     const profile = getClassProfile(normalizedGrade, normalizedLetter);
     manageTeacherInput.value = profile.teacher;
     manageRoomInput.value = profile.room;
-    manageCapacityInput.value = profile.capacity;
     manageNotesInput.value = profile.notes;
     manageLearners = [...profile.learners];
+    syncCapacityWithLearners();
     learnerNameInput.value = '';
     learnerAdmissionInput.value = '';
+    learnerGenderSelect.value = '';
 
     const readOnly = !isAdminMode;
     manageTeacherInput.disabled = readOnly;
     manageRoomInput.disabled = readOnly;
-    manageCapacityInput.disabled = readOnly;
+    manageCapacityInput.disabled = true;
+    manageCapacityInput.readOnly = true;
     manageNotesInput.disabled = readOnly;
     learnerNameInput.disabled = readOnly;
     learnerAdmissionInput.disabled = readOnly;
+    learnerGenderSelect.disabled = readOnly;
     addLearnerButton.disabled = readOnly;
     importFormatSelect.disabled = readOnly;
     importFileInput.disabled = readOnly;
@@ -3001,6 +3051,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const index = Number.parseInt(String(removeLearnerButton.dataset.enrollmentRemoveLearnerIndex || ''), 10);
     if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
     manageLearners.splice(index, 1);
+    syncCapacityWithLearners();
     renderManageLearners();
   });
 
@@ -3023,7 +3074,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
     const learner = normalizeLearner({
       name: learnerNameInput.value,
-      admissionNo: learnerAdmissionInput.value
+      admissionNo: learnerAdmissionInput.value,
+      gender: learnerGenderSelect.value
     });
     if (!learner) {
       if (statusNode) {
@@ -3047,6 +3099,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     manageLearners = [...manageLearners, learner];
     learnerNameInput.value = '';
     learnerAdmissionInput.value = '';
+    learnerGenderSelect.value = '';
+    syncCapacityWithLearners();
     renderManageLearners();
   });
 
@@ -3075,6 +3129,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       const beforeCount = manageLearners.length;
       manageLearners = normalizeLearners([...manageLearners, ...importedLearners]);
       const addedCount = Math.max(0, manageLearners.length - beforeCount);
+      syncCapacityWithLearners();
       renderManageLearners();
       importFileInput.value = '';
 
@@ -3093,10 +3148,7 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const saveManageHandler = () => {
     if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
-    const capacityRaw = normalizeText(manageCapacityInput.value, 4);
-    const normalizedCapacity = /^\d+$/.test(capacityRaw)
-      ? String(Math.max(1, Math.min(120, Number.parseInt(capacityRaw, 10))))
-      : '';
+    const normalizedCapacity = String(manageLearners.length);
 
     setClassProfile(selectedManageGrade, selectedManageLetter, {
       teacher: normalizeText(manageTeacherInput.value, 120),
