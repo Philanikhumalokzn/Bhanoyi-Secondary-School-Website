@@ -284,5 +284,4 @@ export const renderSite = (siteContent, page) => {
   initMatchEventLogs();
   initFixtureCreators();
   initSchoolCalendars();
-  initCollapsiblePageSections(page.key);
 };
