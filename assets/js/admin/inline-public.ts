@@ -3390,10 +3390,32 @@ const wireMatchLogInline = (section: Element) => {
   if (!container || !shell || !leftSelect || !rightSelect) return;
 
   const isHiddenMatchLogHost = section.classList.contains('match-log-modal-host');
-  const visibleSportsContainer = isHiddenMatchLogHost
-    ? document.querySelector('[data-section-type="fixture-creator"] .container')
-    : null;
-  const controlsHost = (visibleSportsContainer || container) as Element;
+  const sportingCodesSection = document.querySelector('[data-section-key="sporting_codes"]') as HTMLElement | null;
+  const existingHouseManagerSection = document.querySelector('[data-inline-house-manager="true"]') as HTMLElement | null;
+
+  let controlsHost: Element | null = container;
+
+  if (isHiddenMatchLogHost && sportingCodesSection) {
+    let houseManagerSection = existingHouseManagerSection;
+    if (!houseManagerSection) {
+      houseManagerSection = document.createElement('section');
+      houseManagerSection.className = 'section';
+      houseManagerSection.dataset.inlineHouseManager = 'true';
+      houseManagerSection.innerHTML = `
+        <div class="container">
+          <article class="panel">
+            <h2>Manage Houses</h2>
+            <p class="lead">Edit house names used across Sports workflows.</p>
+            <div data-inline-house-controls-host="true"></div>
+          </article>
+        </div>
+      `;
+      sportingCodesSection.insertAdjacentElement('beforebegin', houseManagerSection);
+    }
+
+    controlsHost = houseManagerSection.querySelector('[data-inline-house-controls-host="true"]');
+  }
+
   if (!controlsHost) return;
 
   const controls = document.createElement('div');
