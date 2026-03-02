@@ -9,7 +9,6 @@ import {
   renderSectionByIndex,
   renderHeroNotice,
   renderPageEmailForms,
-  renderHero,
   renderSectionsWithContext
 } from './components.js';
 
@@ -212,7 +211,6 @@ export const renderSite = (siteContent, page) => {
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
   upsertFavicon(siteContent.school.logoPath);
-  const suppressHeroIntro = page.key === 'calendar';
   const themeBackgroundImage = (siteContent.school?.themeBackgroundImage || '').trim();
   const themeBackgroundAttr = themeBackgroundImage.replace(/"/g, '&quot;');
 
@@ -234,24 +232,12 @@ export const renderSite = (siteContent, page) => {
   const hasNotice = Boolean(page.hero?.notice);
   const isDesktopViewport = window.matchMedia('(min-width: 860px)').matches;
   const useDesktopHomeHeroNoticeSplit = page.key === 'home' && hasNotice && isDesktopViewport;
-  const normalizedPageOrder = rawPageOrder.filter(
-    (token) => token === 'hero_intro' || (token === 'hero_notice' && hasNotice) || validSectionTokens.has(token)
-  );
+  const normalizedPageOrder = rawPageOrder.filter((token) => (token === 'hero_notice' && hasNotice) || validSectionTokens.has(token));
 
   const renderedTokens = new Set();
   const appendToken = (token, parts) => {
     if (renderedTokens.has(token)) return;
     renderedTokens.add(token);
-
-    if (token === 'hero_intro') {
-      if (!suppressHeroIntro) {
-        parts.push(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
-      }
-      if (useDesktopHomeHeroNoticeSplit) {
-        renderedTokens.add('hero_notice');
-      }
-      return;
-    }
 
     if (token === 'hero_notice') {
       if (useDesktopHomeHeroNoticeSplit) {
@@ -274,16 +260,8 @@ export const renderSite = (siteContent, page) => {
     normalizedPageOrder.forEach((token) => appendToken(token, mainBlocks));
   }
 
-  if (!suppressHeroIntro && !renderedTokens.has('hero_intro')) {
-    mainBlocks.unshift(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
-    renderedTokens.add('hero_intro');
-    if (useDesktopHomeHeroNoticeSplit) {
-      renderedTokens.add('hero_notice');
-    }
-  }
-
   if (hasNotice && !renderedTokens.has('hero_notice') && !useDesktopHomeHeroNoticeSplit) {
-    mainBlocks.splice(1, 0, renderHeroNotice(page.hero, page.key));
+    mainBlocks.unshift(renderHeroNotice(page.hero, page.key));
     renderedTokens.add('hero_notice');
   }
 
