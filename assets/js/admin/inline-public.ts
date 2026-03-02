@@ -3384,10 +3384,23 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
 
 const wireMatchLogInline = (section: Element) => {
   const container = section.querySelector('.container');
-  const shell = section.querySelector('[data-match-log="true"]');
-  const leftSelect = section.querySelector('[data-team-select="left"]') as HTMLSelectElement | null;
-  const rightSelect = section.querySelector('[data-team-select="right"]') as HTMLSelectElement | null;
-  if (!container || !shell || !leftSelect || !rightSelect) return;
+  const shell = section.querySelector('[data-match-log="true"]') as HTMLElement | null;
+  if (!container || !shell) return;
+
+  let config: {
+    houseOptions?: Array<{ id: string; name: string }>;
+    leftTeamId?: string;
+    rightTeamId?: string;
+  } = {};
+
+  try {
+    const parsed = JSON.parse((shell.dataset.matchLogConfig || '{}').trim());
+    if (parsed && typeof parsed === 'object') {
+      config = parsed as typeof config;
+    }
+  } catch {
+    config = {};
+  }
 
   const isHiddenMatchLogHost = section.classList.contains('match-log-modal-host');
   const sportingCodesSection = document.querySelector('[data-section-key="sporting_codes"]') as HTMLElement | null;
@@ -3435,13 +3448,21 @@ const wireMatchLogInline = (section: Element) => {
   }
 
   const readState = {
-    options: Array.from(leftSelect.options).map((option) => ({
-      id: option.value,
-      name: option.textContent?.trim() || option.value
-    })),
-    leftTeamId: leftSelect.value,
-    rightTeamId: rightSelect.value
+    options: Array.isArray(config.houseOptions)
+      ? config.houseOptions
+          .map((entry, index) => ({
+            id: String(entry?.id || `house_${index + 1}`).trim(),
+            name: String(entry?.name || '').trim() || `House ${index + 1}`
+          }))
+          .filter((entry) => Boolean(entry.id))
+      : [],
+    leftTeamId: String(config.leftTeamId || '').trim(),
+    rightTeamId: String(config.rightTeamId || '').trim()
   };
+
+  if (!readState.options.length) {
+    return;
+  }
 
   let editorWrap: HTMLElement | null = null;
   let editors: Array<{ id: string; input: HTMLInputElement }> = [];
@@ -3486,8 +3507,8 @@ const wireMatchLogInline = (section: Element) => {
         await saveSectionOverride(section, {
           type: 'match-log',
           houseOptions,
-          leftTeamId: leftSelect.value,
-          rightTeamId: rightSelect.value
+          leftTeamId: readState.leftTeamId,
+          rightTeamId: readState.rightTeamId
         });
         showStatus('House names saved. Refreshing...');
         window.location.reload();
