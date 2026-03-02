@@ -2313,6 +2313,10 @@ const hydrateEnrollmentManager = (managerNode) => {
   const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
   const gradeNumbers = Array.from({ length: 7 }, (_, index) => String(index + 6));
   const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
+  const schoolHouseOptions = Array.from({ length: 5 }, (_, index) => ({
+    id: `house_${index + 1}`,
+    name: `House ${index + 1}`
+  }));
 
   let selectedGrade = '';
   let selectedAddGrade = '';
@@ -2358,11 +2362,18 @@ const hydrateEnrollmentManager = (managerNode) => {
       return '';
     };
 
+    const normalizeHouseId = (value) => {
+      const raw = normalizeText(value, 30).toLowerCase().replace(/[^a-z0-9_]/g, '');
+      if (!raw) return '';
+      return schoolHouseOptions.some((house) => house.id === raw) ? raw : '';
+    };
+
     const name = normalizeText(entry.name, 120);
     const admissionNo = normalizeText(entry.admissionNo || entry.admission || '', 40);
     const gender = normalizeGender(entry.gender || entry.sex || '');
+    const houseId = normalizeHouseId(entry.houseId || entry.house || '');
     if (!name) return null;
-    return { name, admissionNo, gender };
+    return { name, admissionNo, gender, houseId };
   };
 
   const normalizeLearners = (values) => {
@@ -2378,7 +2389,8 @@ const hydrateEnrollmentManager = (managerNode) => {
         learners[existingIndex] = {
           name: existing.name,
           admissionNo: existing.admissionNo || learner.admissionNo,
-          gender: existing.gender || learner.gender
+          gender: existing.gender || learner.gender,
+          houseId: existing.houseId || learner.houseId
         };
         return;
       }
@@ -2758,10 +2770,22 @@ const hydrateEnrollmentManager = (managerNode) => {
       .map((learner, index) => {
         const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
         const detail = details ? ` • ${details}` : '';
+        const houseOptionsMarkup = [
+          '<option value="">Assign house</option>',
+          ...schoolHouseOptions.map(
+            (house) =>
+              `<option value="${escapeHtmlAttribute(house.id)}"${learner.houseId === house.id ? ' selected' : ''}>${escapeHtmlText(house.name)}</option>`
+          )
+        ].join('');
         return `
           <div class="enrollment-learner-item">
-            <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
-            ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
+            <span class="enrollment-learner-summary">${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
+            <div class="enrollment-learner-actions">
+              <select data-enrollment-learner-house-index="${index}" ${isAdminMode ? '' : 'disabled'}>
+                ${houseOptionsMarkup}
+              </select>
+              ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
+            </div>
           </div>
         `;
       })
@@ -3060,6 +3084,23 @@ const hydrateEnrollmentManager = (managerNode) => {
     manageLearners.splice(index, 1);
     syncCapacityWithLearners();
     renderManageLearners();
+  });
+
+  learnerListNode.addEventListener('change', (event) => {
+    if (!isAdminMode) return;
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    const rawIndex = target.dataset.enrollmentLearnerHouseIndex;
+    if (rawIndex === undefined) return;
+    const index = Number.parseInt(String(rawIndex), 10);
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const houseId = String(target.value || '').trim();
+    const normalizedHouseId = schoolHouseOptions.some((house) => house.id === houseId) ? houseId : '';
+    manageLearners[index] = {
+      ...manageLearners[index],
+      houseId: normalizedHouseId
+    };
   });
 
   addClassButton.addEventListener('click', () => {

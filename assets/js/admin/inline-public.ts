@@ -3389,9 +3389,28 @@ const wireMatchLogInline = (section: Element) => {
   const rightSelect = section.querySelector('[data-team-select="right"]') as HTMLSelectElement | null;
   if (!container || !shell || !leftSelect || !rightSelect) return;
 
+  const isHiddenMatchLogHost = section.classList.contains('match-log-modal-host');
+  const visibleSportsContainer = isHiddenMatchLogHost
+    ? document.querySelector('[data-section-type="fixture-creator"] .container')
+    : null;
+  const controlsHost = (visibleSportsContainer || container) as Element;
+  if (!controlsHost) return;
+
   const controls = document.createElement('div');
   controls.className = 'inline-admin-controls';
-  container.appendChild(controls);
+  controls.dataset.inlineMatchHouseControls = 'true';
+
+  const existingControls = controlsHost.querySelector('[data-inline-match-house-controls="true"]');
+  if (existingControls) {
+    existingControls.remove();
+  }
+
+  const hostHeading = controlsHost.querySelector('h2');
+  if (hostHeading && hostHeading.parentElement === controlsHost) {
+    hostHeading.insertAdjacentElement('afterend', controls);
+  } else {
+    controlsHost.appendChild(controls);
+  }
 
   const readState = {
     options: Array.from(leftSelect.options).map((option) => ({
@@ -3409,7 +3428,7 @@ const wireMatchLogInline = (section: Element) => {
     controls.innerHTML = '';
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
-    editBtn.textContent = 'Edit Houses';
+    editBtn.textContent = 'Manage Houses';
     editBtn.addEventListener('click', enterEdit);
     controls.appendChild(editBtn);
   };

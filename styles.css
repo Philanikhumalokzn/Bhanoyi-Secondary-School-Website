@@ -2628,6 +2628,25 @@ body.match-log-workspace-open {
   gap: 8px;
 }
 
+.enrollment-learner-summary {
+  min-width: 0;
+}
+
+.enrollment-learner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.enrollment-learner-actions select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font: inherit;
+  background: var(--surface);
+  min-width: 130px;
+}
+
 @media (max-width: 760px) {
   .enrollment-import-row,
   .enrollment-learner-form {
