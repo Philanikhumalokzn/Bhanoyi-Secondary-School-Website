@@ -735,11 +735,18 @@ const renderMatchLogSection = (section, sectionIndex) => {
   const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
   const rightTeam = houseOptions.find((team) => team.id === teamPair.rightTeamId) || houseOptions[1] || leftTeam;
   return `
-    <section class="section ${section.alt ? 'section-alt' : ''}" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
-      <div class="container">
-        <h2>${section.title || 'Live Match Event Log'}</h2>
-        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+    <section class="section ${section.alt ? 'section-alt' : ''} match-log-modal-host" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
+      <div class="match-log-workspace-modal is-hidden" data-match-workspace-modal>
+        <div class="match-log-workspace-backdrop" data-match-workspace-close></div>
+        <article class="panel match-log-workspace-panel" role="dialog" aria-modal="true" aria-label="Log Live Match Events">
+          <header class="match-log-workspace-head">
+            <div>
+              <h2>${section.title || 'Log Live Match Events'}</h2>
+              ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+            </div>
+            <button type="button" class="btn btn-secondary" data-match-workspace-close>Close</button>
+          </header>
+          <article class="match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-log">
             <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
               <span>Set Up Match Logging</span>
@@ -869,6 +876,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
               </section>
             </article>
           </div>
+          </article>
         </article>
       </div>
     </section>
@@ -1048,6 +1056,10 @@ const hydrateMatchLog = (matchLogNode) => {
   const backButton = matchLogNode.querySelector('[data-match-back]');
   const saveButton = matchLogNode.querySelector('[data-match-save]');
   const cancelButtons = Array.from(matchLogNode.querySelectorAll('[data-match-cancel], [data-match-close-modal]'));
+  const workspaceModal = matchLogNode.closest('[data-match-workspace-modal]');
+  const workspaceCloseButtons = Array.from(
+    (workspaceModal instanceof HTMLElement ? workspaceModal.querySelectorAll('[data-match-workspace-close]') : [])
+  );
   const eventForm = matchLogNode.querySelector('[data-match-event-form]');
   const playerLabelNode = matchLogNode.querySelector('[data-player-label]');
   const assistRow = matchLogNode.querySelector('[data-assist-row]');
@@ -1058,6 +1070,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const assistInput = eventForm?.querySelector('input[name="assistName"]');
   const notesInput = eventForm?.querySelector('textarea[name="notes"]');
 
+  portalOverlayToBody(workspaceModal, `match-log-workspace:${sectionKey}`);
   portalOverlayToBody(modal, `match-log-modal:${sectionKey}`);
 
   if (
@@ -1494,6 +1507,19 @@ const hydrateMatchLog = (matchLogNode) => {
     resetModal();
   };
 
+  const openWorkspaceModal = () => {
+    if (!(workspaceModal instanceof HTMLElement)) return;
+    workspaceModal.classList.remove('is-hidden');
+    document.body.classList.add('match-log-workspace-open');
+  };
+
+  const closeWorkspaceModal = () => {
+    if (!(workspaceModal instanceof HTMLElement)) return;
+    workspaceModal.classList.add('is-hidden');
+    closeModal();
+    document.body.classList.remove('match-log-workspace-open');
+  };
+
   const syncModalTeamState = () => {
     const fixture = getCurrentFixture();
     if (!(modalTeamSelect instanceof HTMLSelectElement)) {
@@ -1532,6 +1558,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const openModalForTeam = (teamId) => {
     const fixture = getCurrentFixture();
     if (!fixture || !teamId) return;
+    openWorkspaceModal();
     workflowSteps?.expandStep('log-events');
     activeTeamId = teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
     syncModalTeamState();
@@ -1626,6 +1653,27 @@ const hydrateMatchLog = (matchLogNode) => {
 
   cancelButtons.forEach((button) => {
     button.addEventListener('click', closeModal);
+  });
+
+  workspaceCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeWorkspaceModal);
+  });
+
+  workspaceModal?.addEventListener('click', (event) => {
+    if (event.target === workspaceModal) {
+      closeWorkspaceModal();
+    }
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (!(event instanceof KeyboardEvent) || event.key !== 'Escape') return;
+    if (!(workspaceModal instanceof HTMLElement)) return;
+    if (workspaceModal.classList.contains('is-hidden')) return;
+    if (!modal.classList.contains('is-hidden')) {
+      closeModal();
+      return;
+    }
+    closeWorkspaceModal();
   });
 
   modal.addEventListener('click', (event) => {
@@ -1743,6 +1791,7 @@ const hydrateMatchLog = (matchLogNode) => {
     selectedFixtureId = requestedFixtureId;
     renderFixturePickers();
     applyFixtureSelection();
+    openWorkspaceModal();
 
     const teamId = preferredSide === 'right' ? matchedFixture.awayId : matchedFixture.homeId;
     openModalForTeam(teamId);
@@ -1770,6 +1819,7 @@ const hydrateMatchLog = (matchLogNode) => {
       const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
       selectedDate = matchedFixture?.date || selectedDate;
       renderFixturePickers();
+      openWorkspaceModal();
     }
   }
 
