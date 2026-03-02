@@ -2434,6 +2434,12 @@ body.match-log-workspace-open {
   gap: 8px;
 }
 
+.enrollment-class-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .enrollment-class-chip {
   display: inline-flex;
   align-items: center;
@@ -2444,6 +2450,23 @@ body.match-log-workspace-open {
   font-weight: 700;
   font-size: 0.84rem;
   padding: 5px 10px;
+}
+
+.enrollment-class-remove {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.enrollment-class-remove:hover {
+  border-color: var(--primary);
 }
 
 .enrollment-class-empty {

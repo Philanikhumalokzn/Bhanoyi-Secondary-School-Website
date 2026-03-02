@@ -2269,7 +2269,26 @@ const hydrateEnrollmentManager = (managerNode) => {
         const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
         const chips = classes.length
           ? classes
-              .map((letter) => `<span class="enrollment-class-chip">${escapeHtmlText(`${grade}${letter}`)}</span>`)
+              .map((letter) => {
+                const classLabel = `${grade}${letter}`;
+                if (!isAdminMode) {
+                  return `<span class="enrollment-class-chip">${escapeHtmlText(classLabel)}</span>`;
+                }
+
+                return `
+                  <span class="enrollment-class-item">
+                    <span class="enrollment-class-chip">${escapeHtmlText(classLabel)}</span>
+                    <button
+                      type="button"
+                      class="enrollment-class-remove"
+                      data-enrollment-remove-grade="${escapeHtmlAttribute(grade)}"
+                      data-enrollment-remove-letter="${escapeHtmlAttribute(letter)}"
+                      aria-label="Remove class ${escapeHtmlAttribute(classLabel)}"
+                      title="Remove class ${escapeHtmlAttribute(classLabel)}"
+                    >×</button>
+                  </span>
+                `;
+              })
               .join('')
           : '<span class="enrollment-class-empty">No classes added yet.</span>';
 
@@ -2300,6 +2319,27 @@ const hydrateEnrollmentManager = (managerNode) => {
   gradeListNode.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const removeButton = target.closest('[data-enrollment-remove-letter]');
+    if (removeButton instanceof HTMLButtonElement) {
+      if (!isAdminMode) return;
+
+      const grade = String(removeButton.dataset.enrollmentRemoveGrade || '').trim();
+      const letter = normalizeLetter(removeButton.dataset.enrollmentRemoveLetter || '');
+      if (!grade || !letter) return;
+
+      const confirmRemove = window.confirm(`Remove class ${grade}${letter}?`);
+      if (!confirmRemove) return;
+
+      classesByGrade[grade] = dedupeLetters((classesByGrade[grade] || []).filter((entry) => normalizeLetter(entry) !== letter));
+      saveStore();
+      render();
+      if (statusNode) {
+        statusNode.textContent = `Class ${grade}${letter} removed.`;
+      }
+      return;
+    }
+
     const button = target.closest('[data-enrollment-open-add]');
     if (!(button instanceof HTMLButtonElement)) return;
     const grade = String(button.dataset.enrollmentOpenAdd || '').trim();
