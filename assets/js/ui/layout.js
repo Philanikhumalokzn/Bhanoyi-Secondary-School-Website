@@ -212,6 +212,7 @@ export const renderSite = (siteContent, page) => {
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
   upsertFavicon(siteContent.school.logoPath);
+  const suppressHeroIntro = page.key === 'calendar';
   const themeBackgroundImage = (siteContent.school?.themeBackgroundImage || '').trim();
   const themeBackgroundAttr = themeBackgroundImage.replace(/"/g, '&quot;');
 
@@ -243,7 +244,9 @@ export const renderSite = (siteContent, page) => {
     renderedTokens.add(token);
 
     if (token === 'hero_intro') {
-      parts.push(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
+      if (!suppressHeroIntro) {
+        parts.push(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
+      }
       if (useDesktopHomeHeroNoticeSplit) {
         renderedTokens.add('hero_notice');
       }
@@ -271,7 +274,7 @@ export const renderSite = (siteContent, page) => {
     normalizedPageOrder.forEach((token) => appendToken(token, mainBlocks));
   }
 
-  if (!renderedTokens.has('hero_intro')) {
+  if (!suppressHeroIntro && !renderedTokens.has('hero_intro')) {
     mainBlocks.unshift(renderHero(page.hero, page.key, { includeNotice: useDesktopHomeHeroNoticeSplit }));
     renderedTokens.add('hero_intro');
     if (useDesktopHomeHeroNoticeSplit) {

@@ -4953,10 +4953,19 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   const setWorkflowStepExpanded = (entry, expanded) => {
     if (!entry) return;
+    const isMonthViewStep = entry.stepNode.hasAttribute('data-calendar-default-open');
+    const expandedHeight = isMonthViewStep ? `${Math.max(0, entry.body.scrollHeight)}px` : getExpandedWorkflowBodyMaxHeight(entry.body);
     entry.stepNode.classList.toggle('is-expanded', expanded);
     entry.stepNode.classList.toggle('is-collapsed', !expanded);
     entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    entry.body.style.maxHeight = expanded ? getExpandedWorkflowBodyMaxHeight(entry.body) : '0px';
+    entry.body.style.maxHeight = expanded ? expandedHeight : '0px';
+  };
+
+  const refreshWorkflowHeights = () => {
+    workflowSteps.forEach((entry) => {
+      if (!entry.stepNode.classList.contains('is-expanded')) return;
+      setWorkflowStepExpanded(entry, true);
+    });
   };
 
   workflowSteps.forEach((entry) => {
@@ -4980,10 +4989,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   };
 
   window.addEventListener('resize', () => {
-    workflowSteps.forEach((entry) => {
-      if (!entry.stepNode.classList.contains('is-expanded')) return;
-      entry.body.style.maxHeight = getExpandedWorkflowBodyMaxHeight(entry.body);
-    });
+    refreshWorkflowHeights();
   });
 
   const openEventEditorOverlay = () => {
@@ -6075,9 +6081,15 @@ const hydrateSchoolCalendar = (calendarShell) => {
     },
     datesSet: () => {
       renderDayEventCountBadges();
+      window.requestAnimationFrame(() => {
+        refreshWorkflowHeights();
+      });
     },
     eventsSet: () => {
       renderDayEventCountBadges();
+      window.requestAnimationFrame(() => {
+        refreshWorkflowHeights();
+      });
     },
     eventDrop: (info) => {
       if (!isAdminMode) {
@@ -6165,6 +6177,13 @@ const hydrateSchoolCalendar = (calendarShell) => {
   };
 
   calendar.render();
+  refreshWorkflowHeights();
+  window.setTimeout(() => {
+    refreshWorkflowHeights();
+  }, 0);
+  window.setTimeout(() => {
+    refreshWorkflowHeights();
+  }, 180);
   renderTermBackgroundEvents(calendar);
   reconcileFixtureEvents();
   renderDayEventCountBadges();
