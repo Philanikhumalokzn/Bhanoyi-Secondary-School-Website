@@ -147,13 +147,26 @@ const initCollapsiblePageSections = (pageKey) => {
     openOnly(entry.section);
   };
 
+  const isInteractiveTarget = (target) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(
+      target.closest(
+        'a, button, input, select, textarea, label, summary, [role="button"], [contenteditable="true"], [data-no-section-toggle]'
+      )
+    );
+  };
+
   preparedSections.forEach((entry) => {
     entry.section.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
 
-      const clickedInBody = entry.body.contains(target);
-      if (clickedInBody) {
+      if (target instanceof Element && isInteractiveTarget(target)) {
+        return;
+      }
+
+      const clickedHeading = entry.heading.contains(target);
+      if (!clickedHeading) {
         return;
       }
 
@@ -163,6 +176,15 @@ const initCollapsiblePageSections = (pageKey) => {
     entry.section.addEventListener('keydown', (event) => {
       if (!(event instanceof KeyboardEvent)) return;
       if (event.key !== 'Enter' && event.key !== ' ') return;
+
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (isInteractiveTarget(target)) return;
+
+      const originatedOnSection = target === entry.section;
+      const originatedOnHeading = entry.heading.contains(target);
+      if (!originatedOnSection && !originatedOnHeading) return;
+
       event.preventDefault();
       toggleSection(entry);
     });

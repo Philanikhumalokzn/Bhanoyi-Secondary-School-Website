@@ -4539,6 +4539,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const pinToggle = target.closest('[data-fixture-pin-toggle]');
     if (pinToggle instanceof HTMLElement) {
       event.preventDefault();
+      event.stopPropagation();
       const row = pinToggle.closest('[data-fixture-row]');
       if (!(row instanceof HTMLElement)) return;
       const rowIndex = Number.parseInt(row.dataset.fixtureRow || '', 10);
