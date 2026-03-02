@@ -2117,6 +2117,221 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
   `;
 };
 
+const renderEnrollmentManagerSection = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const config = {
+    sectionKey: fallbackSectionKey,
+    title: (section.title || 'Enrollment Management').trim() || 'Enrollment Management',
+    body: (section.body || '').trim()
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="enrollment-manager" data-section-key="${fallbackSectionKey}">
+      <div class="container">
+        <h2>${config.title}</h2>
+        ${config.body ? `<p class="lead">${config.body}</p>` : ''}
+        <article class="panel enrollment-manager-shell" data-enrollment-manager="true" data-enrollment-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <div class="enrollment-grade-list" data-enrollment-grade-list></div>
+          <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
+          <div class="enrollment-class-modal is-hidden" data-enrollment-class-modal>
+            <div class="enrollment-class-modal-backdrop" data-enrollment-close-modal></div>
+            <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Add class">
+              <h3>Add Class</h3>
+              <p class="enrollment-class-modal-subtitle" data-enrollment-modal-grade></p>
+              <label class="enrollment-class-modal-field">
+                Class Letter
+                <select data-enrollment-class-select></select>
+              </label>
+              <div class="enrollment-class-modal-actions">
+                <button type="button" class="btn btn-secondary" data-enrollment-close-modal>Cancel</button>
+                <button type="button" class="btn btn-primary" data-enrollment-add-class>Add class</button>
+              </div>
+            </article>
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const hydrateEnrollmentManager = (managerNode) => {
+  const rawConfig = String(managerNode?.dataset?.enrollmentConfig || '').trim();
+  if (!rawConfig) return;
+
+  let config;
+  try {
+    config = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  const gradeListNode = managerNode.querySelector('[data-enrollment-grade-list]');
+  const statusNode = managerNode.querySelector('[data-enrollment-status]');
+  const classModal = managerNode.querySelector('[data-enrollment-class-modal]');
+  const modalGradeNode = managerNode.querySelector('[data-enrollment-modal-grade]');
+  const classSelect = managerNode.querySelector('[data-enrollment-class-select]');
+  const addClassButton = managerNode.querySelector('[data-enrollment-add-class]');
+  const closeButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-modal]'));
+
+  if (
+    !(gradeListNode instanceof HTMLElement) ||
+    !(classModal instanceof HTMLElement) ||
+    !(classSelect instanceof HTMLSelectElement) ||
+    !(addClassButton instanceof HTMLButtonElement)
+  ) {
+    return;
+  }
+
+  portalOverlayToBody(classModal, `enrollment-class-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
+
+  const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  const sectionKey = String(config.sectionKey || 'enrollment_manager').trim() || 'enrollment_manager';
+  const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
+  const gradeNumbers = Array.from({ length: 7 }, (_, index) => String(index + 6));
+  const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
+
+  let selectedGrade = '';
+  let classesByGrade = {};
+
+  const normalizeLetter = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+
+  const dedupeLetters = (values) => {
+    const seen = new Set();
+    const normalized = [];
+    (Array.isArray(values) ? values : []).forEach((entry) => {
+      const letter = normalizeLetter(entry);
+      if (!letter || seen.has(letter)) return;
+      seen.add(letter);
+      normalized.push(letter);
+    });
+    return normalized.sort((left, right) => left.localeCompare(right));
+  };
+
+  const normalizeClassesStore = (store) => {
+    const base = {};
+    gradeNumbers.forEach((grade) => {
+      const values = store && typeof store === 'object' ? store[grade] : [];
+      base[grade] = dedupeLetters(values);
+    });
+    return base;
+  };
+
+  const loadStore = () => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return normalizeClassesStore({});
+      const parsed = JSON.parse(raw);
+      return normalizeClassesStore(parsed);
+    } catch {
+      return normalizeClassesStore({});
+    }
+  };
+
+  const saveStore = () => {
+    localStorage.setItem(storageKey, JSON.stringify(normalizeClassesStore(classesByGrade)));
+  };
+
+  const getAvailableLetters = (grade) => {
+    const existing = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+    const existingSet = new Set(existing.map((entry) => normalizeLetter(entry)).filter(Boolean));
+    return allLetters.filter((letter) => !existingSet.has(letter));
+  };
+
+  const closeModal = () => {
+    classModal.classList.add('is-hidden');
+    selectedGrade = '';
+    classSelect.innerHTML = '';
+  };
+
+  const openModalForGrade = (grade) => {
+    if (!isAdminMode) return;
+    const availableLetters = getAvailableLetters(grade);
+    if (!availableLetters.length) {
+      if (statusNode) {
+        statusNode.textContent = `All class letters are already in use for Grade ${grade}.`;
+      }
+      return;
+    }
+
+    selectedGrade = grade;
+    classSelect.innerHTML = availableLetters
+      .map((letter) => `<option value="${letter}">${letter}</option>`)
+      .join('');
+    if (modalGradeNode) {
+      modalGradeNode.textContent = `Grade ${grade}`;
+    }
+    classModal.classList.remove('is-hidden');
+  };
+
+  const render = () => {
+    gradeListNode.innerHTML = gradeNumbers
+      .map((grade) => {
+        const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+        const chips = classes.length
+          ? classes
+              .map((letter) => `<span class="enrollment-class-chip">${escapeHtmlText(`${grade}${letter}`)}</span>`)
+              .join('')
+          : '<span class="enrollment-class-empty">No classes added yet.</span>';
+
+        const addDisabled = !isAdminMode || getAvailableLetters(grade).length === 0;
+
+        return `
+          <article class="enrollment-grade-card" data-enrollment-grade="${grade}">
+            <div class="enrollment-grade-head">
+              <h3>Grade ${grade}</h3>
+              <button type="button" class="btn btn-secondary" data-enrollment-open-add="${grade}"${addDisabled ? ' disabled' : ''}>Add class</button>
+            </div>
+            <div class="enrollment-class-list">${chips}</div>
+          </article>
+        `;
+      })
+      .join('');
+
+    if (statusNode) {
+      statusNode.textContent = isAdminMode
+        ? 'Use Add class to create grade classes (A, B, C, ...).'
+        : 'Enrollment classes are visible in read-only mode.';
+    }
+  };
+
+  classesByGrade = loadStore();
+  render();
+
+  gradeListNode.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const button = target.closest('[data-enrollment-open-add]');
+    if (!(button instanceof HTMLButtonElement)) return;
+    const grade = String(button.dataset.enrollmentOpenAdd || '').trim();
+    if (!grade) return;
+    openModalForGrade(grade);
+  });
+
+  closeButtons.forEach((button) => {
+    button.addEventListener('click', closeModal);
+  });
+
+  classModal.addEventListener('click', (event) => {
+    if (event.target === classModal) {
+      closeModal();
+    }
+  });
+
+  addClassButton.addEventListener('click', () => {
+    if (!isAdminMode || !selectedGrade) return;
+    const letter = normalizeLetter(classSelect.value);
+    if (!letter) return;
+
+    classesByGrade[selectedGrade] = dedupeLetters([...(classesByGrade[selectedGrade] || []), letter]);
+    saveStore();
+    render();
+    if (statusNode) {
+      statusNode.textContent = `Class ${selectedGrade}${letter} added.`;
+    }
+    closeModal();
+  });
+};
+
 const buildSingleRoundRobin = (teamIds = []) => {
   const normalized = teamIds.filter(Boolean);
   if (normalized.length < 2) return [];
@@ -6752,6 +6967,10 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
     return renderMatchLogSection(effectiveSection, sectionIndex);
   }
 
+  if (effectiveSection.type === 'enrollment-manager') {
+    return renderEnrollmentManagerSection(effectiveSection, sectionIndex);
+  }
+
   if (effectiveSection.type === 'cards' && effectiveSection.sectionKey === 'latest_news') {
     return renderLatestNewsSection(effectiveSection, sectionIndex);
   }
@@ -7580,6 +7799,11 @@ export const initFixtureCreators = () => {
 export const initSchoolCalendars = () => {
   const calendars = Array.from(document.querySelectorAll('[data-school-calendar-shell="true"]'));
   calendars.forEach((calendar) => hydrateSchoolCalendar(calendar));
+};
+
+export const initEnrollmentManagers = () => {
+  const managers = Array.from(document.querySelectorAll('[data-enrollment-manager="true"]'));
+  managers.forEach((manager) => hydrateEnrollmentManager(manager));
 };
 
 export const renderFooter = (siteContent) => `

@@ -429,20 +429,10 @@
       },
       "sections": [
         {
-          "type": "split",
+          "type": "enrollment-manager",
+          "sectionKey": "enrollment_manager",
           "title": "Manage Enrollment",
-          "body": "This admin workspace can be used to coordinate learner intake, verify required documents, and track status updates.",
-          "list": [
-            "Capture learner and guardian details",
-            "Track submitted documents",
-            "Monitor application status",
-            "Coordinate communication follow-ups"
-          ],
-          "panel": {
-            "title": "Admin Note",
-            "body": "Use this page in admin mode to manage enrollment operations. Public users should not access this workflow.",
-            "link": { "href": "admissions.html", "label": "Back to Admissions" }
-          }
+          "body": "Manage classes per grade (6 to 12)."
         }
       ]
     },

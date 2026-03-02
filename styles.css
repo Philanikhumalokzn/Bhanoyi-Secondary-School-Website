@@ -2397,6 +2397,119 @@ body.match-log-workspace-open {
   margin-top: 6px;
 }
 
+.enrollment-manager-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.enrollment-grade-list {
+  display: grid;
+  gap: 10px;
+}
+
+.enrollment-grade-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.enrollment-grade-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.enrollment-grade-head h3 {
+  margin: 0;
+}
+
+.enrollment-class-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.enrollment-class-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.84rem;
+  padding: 5px 10px;
+}
+
+.enrollment-class-empty {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.enrollment-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.enrollment-class-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1530;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.enrollment-class-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--text) 44%, transparent);
+}
+
+.enrollment-class-modal-panel {
+  width: min(460px, 100%);
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 12px;
+}
+
+.enrollment-class-modal-panel h3,
+.enrollment-class-modal-subtitle {
+  margin: 0;
+}
+
+.enrollment-class-modal-subtitle {
+  color: var(--muted);
+}
+
+.enrollment-class-modal-field {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.enrollment-class-modal-field select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  background: var(--surface);
+}
+
+.enrollment-class-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .fixture-creator-shell {
   display: grid;
   gap: 10px;

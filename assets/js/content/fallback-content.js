@@ -16,6 +16,7 @@ export const fallbackSiteContent = {
     { key: 'sports', label: 'Sports', href: 'sports.html' },
     { key: 'calendar', label: 'Calendar', href: 'calendar.html' },
     { key: 'admissions', label: 'Admissions', href: 'admissions.html' },
+    { key: 'enrollment', label: 'Enrollment', href: 'enrollment.html', adminOnly: true },
     { key: 'policies', label: 'Policies', href: 'policies.html' },
     { key: 'contact', label: 'Contact', href: 'contact.html' }
   ],
@@ -111,6 +112,24 @@ export const fallbackSiteContent = {
           sectionKey: 'school_calendar',
           body: 'Browse school events, match dates, and key activities in one place.',
           fixtureSectionKey: 'sports_fixture_creator'
+        }
+      ]
+    },
+    enrollment: {
+      key: 'enrollment',
+      metaTitle: 'Enrollment | Bhanoyi Secondary School',
+      metaDescription: 'Admin enrollment workspace for managing intake, records, and enrolment workflow.',
+      hero: {
+        eyebrow: 'Admissions management',
+        title: 'Enrollment',
+        lead: 'Manage learner enrollment workflow, records, and checklist progress.'
+      },
+      sections: [
+        {
+          type: 'enrollment-manager',
+          sectionKey: 'enrollment_manager',
+          title: 'Manage Enrollment',
+          body: 'Manage classes per grade (6 to 12).'
         }
       ]
     }
