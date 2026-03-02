@@ -2141,6 +2141,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   let pendingFixtureApproval = false;
   let approvedWithUnfairness = false;
   let lastRenderedFixtureOrder = [];
+  let pinnedFixtureSlotKeys = new Set();
   let currentUnfairnessReport = {
     hasUnfairness: false,
     fixtureReasons: {},
@@ -2228,6 +2229,41 @@ const hydrateFixtureCreator = (fixtureNode) => {
     `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
 
   const fixtureSignature = (fixtures) => fixtures.map((fixture) => getFixtureId(fixture)).join('|');
+
+  const fixtureSlotKey = (fixture) => String(fixture?.slotKey || `R${fixture?.round}M${fixture?.match}`).trim();
+
+  const normalizePinnedSlotKeys = (input) =>
+    Array.from(
+      new Set(
+        (Array.isArray(input) ? input : [])
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+  const buildPinnedFixturesBySlot = (fixtures, pinnedSlots, teamIds) => {
+    const validTeams = new Set((teamIds || []).filter(Boolean));
+    const pinnedSet = new Set(normalizePinnedSlotKeys(Array.from(pinnedSlots || [])));
+    const map = {};
+
+    (fixtures || []).forEach((fixture) => {
+      const slotKey = fixtureSlotKey(fixture);
+      if (!slotKey || !pinnedSet.has(slotKey)) return;
+      const homeId = String(fixture.homeId || '').trim();
+      const awayId = String(fixture.awayId || '').trim();
+      if (!homeId || !awayId || homeId === awayId) return;
+      if (!validTeams.has(homeId) || !validTeams.has(awayId)) return;
+      map[slotKey] = { homeId, awayId };
+    });
+
+    return map;
+  };
+
+  const getPinnedFixtureIndexes = (fixtures) =>
+    (fixtures || [])
+      .map((fixture, index) => ({ slotKey: fixtureSlotKey(fixture), index }))
+      .filter(({ slotKey }) => slotKey && pinnedFixtureSlotKeys.has(slotKey))
+      .map(({ index }) => index);
 
   const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(String(value || '').trim(), 10);
@@ -3390,42 +3426,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
     fixtureCreatorState.sports[activeSport] = {
       selectedTeamIds: selectedTeamIds(),
       fixtures: lastFixtures.map((entry) => ({ ...entry })),
+      pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
       setup: readSportSetupValues(activeSport),
       formatLabel: String(lastFormatLabel || '').trim()
     };
     saveFixtureCreatorState();
   };
 
-  const reconcileRoundRobinAfterManualEdit = ({ fixtures, teamIds, editedIndex, nextHomeId, nextAwayId }) => {
+  const repairRoundRobinFixtureSet = ({ fixtures, teamIds, lockedIndexes = [] }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
       return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
-    }
-
-    let resolvedHomeId = String(nextHomeId || '').trim();
-    let resolvedAwayId = String(nextAwayId || '').trim();
-
-    if (!normalizedTeams.includes(resolvedHomeId) || !normalizedTeams.includes(resolvedAwayId)) {
-      return { ok: false, message: 'Selected teams must be from the active fixture team list.' };
-    }
-
-    if (resolvedHomeId === resolvedAwayId) {
-      const currentFixture = fixtures[editedIndex] || null;
-      const currentHomeId = String(currentFixture?.homeId || '').trim();
-      const currentAwayId = String(currentFixture?.awayId || '').trim();
-
-      const canInvertCurrentFixture =
-        currentHomeId &&
-        currentAwayId &&
-        currentHomeId !== currentAwayId &&
-        (resolvedHomeId === currentHomeId || resolvedHomeId === currentAwayId);
-
-      if (!canInvertCurrentFixture) {
-        return { ok: false, message: 'Home and away teams must be different.' };
-      }
-
-      resolvedHomeId = currentAwayId;
-      resolvedAwayId = currentHomeId;
     }
 
     const allUnorderedPairs = [];
@@ -3436,30 +3447,32 @@ const hydrateFixtureCreator = (fixtureNode) => {
       });
     });
 
-    const legs = Array.from(new Set(fixtures.map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    const legs = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
     if (!legs.length) {
       return { ok: false, message: 'Fixture legs are missing; cannot preserve leg rules.' };
     }
 
     const expectedMatchesPerLeg = allUnorderedPairs.length;
-    if (fixtures.length !== expectedMatchesPerLeg * legs.length) {
+    if ((fixtures || []).length !== expectedMatchesPerLeg * legs.length) {
       return {
         ok: false,
         message: 'Fixture count does not match a full home-and-away round-robin for selected teams.'
       };
     }
 
-    const editedPairKey = unorderedPairKey(resolvedHomeId, resolvedAwayId);
-    if (!editedPairKey || !allUnorderedPairs.includes(editedPairKey)) {
-      return { ok: false, message: 'Unable to apply this edit while preserving round-robin rules.' };
-    }
+    const repairedFixtures = (fixtures || []).map((entry) => ({ ...entry }));
+    const lockedIndexSet = new Set(
+      (lockedIndexes || []).filter((index) => Number.isInteger(index) && index >= 0 && index < repairedFixtures.length)
+    );
 
-    const repairedFixtures = fixtures.map((entry) => ({ ...entry }));
-    repairedFixtures[editedIndex] = {
-      ...repairedFixtures[editedIndex],
-      homeId: resolvedHomeId,
-      awayId: resolvedAwayId
-    };
+    for (const lockedIndex of lockedIndexSet) {
+      const fixture = repairedFixtures[lockedIndex];
+      const homeId = String(fixture?.homeId || '').trim();
+      const awayId = String(fixture?.awayId || '').trim();
+      if (!normalizedTeams.includes(homeId) || !normalizedTeams.includes(awayId) || homeId === awayId) {
+        return { ok: false, message: 'A pinned or locked fixture has an invalid team selection for this team set.' };
+      }
+    }
 
     for (const legLabel of legs) {
       const legIndexes = repairedFixtures
@@ -3475,21 +3488,30 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
 
       const availablePairs = new Set(allUnorderedPairs);
-      const orderedIndexes = [
-        ...legIndexes.filter((index) => index === editedIndex),
-        ...legIndexes.filter((index) => index !== editedIndex)
-      ];
       const unresolvedIndexes = [];
+      const lockedPairKeys = new Set();
 
-      orderedIndexes.forEach((index) => {
+      for (const index of legIndexes) {
+        if (!lockedIndexSet.has(index)) continue;
+        const fixture = repairedFixtures[index];
+        const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
+        if (!pairKey || !availablePairs.has(pairKey) || lockedPairKeys.has(pairKey)) {
+          return { ok: false, message: 'Pinned fixtures conflict with each other in the same leg. Unpin or adjust one of them.' };
+        }
+        availablePairs.delete(pairKey);
+        lockedPairKeys.add(pairKey);
+      }
+
+      for (const index of legIndexes) {
+        if (lockedIndexSet.has(index)) continue;
         const fixture = repairedFixtures[index];
         const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
         if (pairKey && availablePairs.has(pairKey)) {
           availablePairs.delete(pairKey);
-          return;
+          continue;
         }
         unresolvedIndexes.push(index);
-      });
+      }
 
       for (const index of unresolvedIndexes) {
         const nextPairKey = availablePairs.values().next().value || '';
@@ -3533,11 +3555,81 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .filter((entry) => entry.changed)
       .map((entry) => entry.index);
 
+    return {
+      ok: true,
+      fixtures: repairedFixtures,
+      changedIndexes,
+      changedCount: changedIndexes.length
+    };
+  };
+
+  const reconcileRoundRobinAfterManualEdit = ({
+    fixtures,
+    teamIds,
+    editedIndex,
+    nextHomeId,
+    nextAwayId,
+    lockedIndexes = []
+  }) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (normalizedTeams.length < 2) {
+      return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
+    }
+
+    let resolvedHomeId = String(nextHomeId || '').trim();
+    let resolvedAwayId = String(nextAwayId || '').trim();
+
+    if (!normalizedTeams.includes(resolvedHomeId) || !normalizedTeams.includes(resolvedAwayId)) {
+      return { ok: false, message: 'Selected teams must be from the active fixture team list.' };
+    }
+
+    if (resolvedHomeId === resolvedAwayId) {
+      const currentFixture = fixtures[editedIndex] || null;
+      const currentHomeId = String(currentFixture?.homeId || '').trim();
+      const currentAwayId = String(currentFixture?.awayId || '').trim();
+
+      const canInvertCurrentFixture =
+        currentHomeId &&
+        currentAwayId &&
+        currentHomeId !== currentAwayId &&
+        (resolvedHomeId === currentHomeId || resolvedHomeId === currentAwayId);
+
+      if (!canInvertCurrentFixture) {
+        return { ok: false, message: 'Home and away teams must be different.' };
+      }
+
+      resolvedHomeId = currentAwayId;
+      resolvedAwayId = currentHomeId;
+    }
+
+    const editedPairKey = unorderedPairKey(resolvedHomeId, resolvedAwayId);
+    if (!editedPairKey) {
+      return { ok: false, message: 'Unable to apply this edit while preserving round-robin rules.' };
+    }
+
+    const repairedFixtures = fixtures.map((entry) => ({ ...entry }));
+    repairedFixtures[editedIndex] = {
+      ...repairedFixtures[editedIndex],
+      homeId: resolvedHomeId,
+      awayId: resolvedAwayId
+    };
+    const effectiveLockedIndexes = Array.from(new Set([editedIndex, ...(lockedIndexes || [])]));
+    const repairResult = repairRoundRobinFixtureSet({
+      fixtures: repairedFixtures,
+      teamIds: normalizedTeams,
+      lockedIndexes: effectiveLockedIndexes
+    });
+    if (!repairResult.ok) {
+      return repairResult;
+    }
+
+    const changedIndexes = repairResult.changedIndexes || [];
+
     const affectedOtherCount = changedIndexes.filter((index) => index !== editedIndex).length;
 
     return {
       ok: true,
-      fixtures: repairedFixtures,
+      fixtures: repairResult.fixtures,
       affectedOtherCount,
       changedCount: changedIndexes.length
     };
@@ -3626,6 +3718,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
             <td>${fixture.leg}</td>
             <td>
               <div class="fixture-match-cell">
+                ${(() => {
+                  if (!isAdminMode) return '';
+                  const slotKey = fixtureSlotKey(fixture);
+                  const isPinned = pinnedFixtureSlotKeys.has(slotKey);
+                  return `
+                    <button
+                      type="button"
+                      class="fixture-pin-toggle ${isPinned ? 'is-pinned' : ''}"
+                      data-fixture-pin-toggle
+                      data-fixture-slot-key="${escapeHtmlAttribute(slotKey)}"
+                      aria-pressed="${isPinned ? 'true' : 'false'}"
+                      title="${isPinned ? 'Unpin this fixed fixture constraint' : 'Pin this fixture as a fixed constraint'}"
+                    >📌</button>
+                  `;
+                })()}
                 <span class="fixture-match-code">R${fixture.round}M${fixture.match}</span>
                 ${
                   unfairnessByFixtureId[fixtureId]
@@ -3717,6 +3824,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const profile = selectedSportProfile();
     if (!profile) {
       lastFixtures = [];
+      pinnedFixtureSlotKeys = new Set();
       lastSportKey = '';
       lastSportLabel = '';
       lastFormatLabel = '';
@@ -3730,12 +3838,48 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSportLabel = profile.label;
     lastFormatLabel = String(setup.formatLabel || '').trim();
 
-    lastFixtures = buildSingleRoundRobin(teams).map((fixture) => ({
+    const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teams);
+    const nextFixtures = buildSingleRoundRobin(teams).map((fixture) => ({
       ...fixture,
       sportKey: profile.key,
       sportLabel: profile.label,
       formatLabel: lastFormatLabel
     }));
+
+    const pinnedIndexes = [];
+    const constrainedFixtures = nextFixtures.map((fixture, index) => {
+      const slotKey = fixtureSlotKey(fixture);
+      const pinned = pinnedBySlot[slotKey];
+      if (!pinned) return fixture;
+      pinnedIndexes.push(index);
+      return {
+        ...fixture,
+        homeId: pinned.homeId,
+        awayId: pinned.awayId
+      };
+    });
+
+    const pinRepairResult = repairRoundRobinFixtureSet({
+      fixtures: constrainedFixtures,
+      teamIds: teams,
+      lockedIndexes: pinnedIndexes
+    });
+
+    if (!pinRepairResult.ok) {
+      lastFixtures = [];
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        statusNode.textContent = `Pinned fixture constraints conflict with round-robin fairness. ${pinRepairResult.message}`;
+      }
+      return;
+    }
+
+    lastFixtures = pinRepairResult.fixtures;
+    pinnedFixtureSlotKeys = new Set(
+      pinnedIndexes
+        .map((index) => fixtureSlotKey(lastFixtures[index]))
+        .filter(Boolean)
+    );
 
     const generationValidation = validateNoDuplicatePairingsPerLeg(lastFixtures, teams);
     if (!generationValidation.ok) {
@@ -3808,6 +3952,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSportKey = key;
     lastSportLabel = profile.label;
     lastFormatLabel = String(setup.formatLabel || saved.formatLabel || '').trim();
+    pinnedFixtureSlotKeys = new Set(normalizePinnedSlotKeys(saved.pinnedSlotKeys));
     pendingFixtureApproval = false;
     lastFixtures = sanitizedFixtures.map((entry) => ({
       ...entry,
@@ -3815,6 +3960,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       sportLabel: profile.label,
       formatLabel: String(entry.formatLabel || lastFormatLabel || '').trim()
     }));
+    pinnedFixtureSlotKeys = new Set(
+      Array.from(pinnedFixtureSlotKeys).filter((slotKey) =>
+        lastFixtures.some((fixture) => fixtureSlotKey(fixture) === slotKey)
+      )
+    );
 
     refreshCurrentUnfairnessReport(lastFixtures);
     approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
@@ -4277,7 +4427,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
         teamIds: selectedTeamIds(),
         editedIndex: rowIndex,
         nextHomeId: nextHome,
-        nextAwayId: nextAway
+        nextAwayId: nextAway,
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
       });
 
       if (!repairResult.ok) {
@@ -4334,7 +4485,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
         teamIds: selectedTeamIds(),
         editedIndex: rowIndex,
         nextHomeId: nextHome,
-        nextAwayId: nextAway
+        nextAwayId: nextAway,
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
       });
 
       if (!repairResult.ok) {
@@ -4383,6 +4535,39 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!isAdminMode) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const pinToggle = target.closest('[data-fixture-pin-toggle]');
+    if (pinToggle instanceof HTMLElement) {
+      event.preventDefault();
+      const row = pinToggle.closest('[data-fixture-row]');
+      if (!(row instanceof HTMLElement)) return;
+      const rowIndex = Number.parseInt(row.dataset.fixtureRow || '', 10);
+      if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= lastFixtures.length) return;
+
+      const fixture = lastFixtures[rowIndex];
+      const slotKey = fixtureSlotKey(fixture);
+      if (!slotKey) return;
+
+      if (pinnedFixtureSlotKeys.has(slotKey)) {
+        pinnedFixtureSlotKeys.delete(slotKey);
+      } else {
+        pinnedFixtureSlotKeys.add(slotKey);
+      }
+
+      if (isAdminMode) {
+        pendingFixtureApproval = true;
+        approvedWithUnfairness = false;
+      }
+      persistActiveSportState();
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        statusNode.textContent = pinnedFixtureSlotKeys.has(slotKey)
+          ? 'Fixture pinned. Auto-generate will keep this match fixed and rebalance the rest to preserve round-robin fairness.'
+          : 'Fixture unpinned. Auto-generate can now rebalance this slot normally.';
+      }
+      return;
+    }
+
     const trigger = target.closest('[data-fixture-open-log]');
     if (!(trigger instanceof HTMLElement)) return;
 
@@ -4459,6 +4644,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
     refreshSportPanelState();
     if (!restoreSavedStateForSport(activeSport)) {
+      pinnedFixtureSlotKeys = new Set();
       generateFixtures();
     }
   });

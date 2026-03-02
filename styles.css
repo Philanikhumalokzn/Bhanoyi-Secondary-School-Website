@@ -2776,13 +2776,46 @@ body.news-read-open {
 }
 
 .fixture-match-cell {
+  position: relative;
   display: grid;
   gap: 4px;
   align-content: start;
+  justify-items: center;
+  padding-top: 14px;
 }
 
 .fixture-match-code {
   display: inline-block;
+}
+
+.fixture-pin-toggle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface) 90%, var(--surface-alt));
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fixture-pin-toggle.is-pinned {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  background: color-mix(in srgb, var(--surface-alt) 65%, var(--surface));
+}
+
+.fixture-pin-toggle:hover,
+.fixture-pin-toggle:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  color: var(--primary);
 }
 
 .fixture-unfair-flag {
