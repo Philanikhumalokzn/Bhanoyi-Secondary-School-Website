@@ -1305,6 +1305,30 @@ const hydrateMatchLog = (matchLogNode) => {
       return left.fixtureId.localeCompare(right.fixtureId);
     });
 
+  const fixturesForDate = (dateValue) =>
+    fixtureOptions.filter((entry) => entry.date === dateValue).sort((left, right) => {
+      const leftStamp = parseDateTimeStamp(left.stamp);
+      const rightStamp = parseDateTimeStamp(right.stamp);
+      if (leftStamp !== rightStamp) return leftStamp - rightStamp;
+      if (left.round !== right.round) return left.round - right.round;
+      if (left.match !== right.match) return left.match - right.match;
+      return left.fixtureId.localeCompare(right.fixtureId);
+    });
+
+  const confirmFixtureSwitch = (nextFixtureId) => {
+    const previousFixture = getCurrentFixture();
+    if (!previousFixture || !nextFixtureId || nextFixtureId === previousFixture.fixtureId) {
+      return true;
+    }
+
+    const nextFixture = fixtureOptions.find((entry) => entry.fixtureId === nextFixtureId);
+    if (!nextFixture) return true;
+
+    const nextLabel = `${nextFixture.homeName} vs ${nextFixture.awayName}`;
+    const message = `You are switching from ${previousFixture.homeName} vs ${previousFixture.awayName} to ${nextLabel}. If you continue, you will be logging a different fixture. Continue?`;
+    return window.confirm(message);
+  };
+
   const renderFixturePickers = () => {
     const availableDates = fixtureDates();
     if (!selectedDate || !availableDates.includes(selectedDate)) {
@@ -1693,14 +1717,29 @@ const hydrateMatchLog = (matchLogNode) => {
   });
 
   matchDaySelect.addEventListener('change', () => {
-    selectedDate = String(matchDaySelect.value || '').trim();
+    const nextDate = String(matchDaySelect.value || '').trim();
+    const nextFixtures = fixturesForDate(nextDate);
+    const nextFixtureId = nextFixtures[0]?.fixtureId || '';
+
+    if (!confirmFixtureSwitch(nextFixtureId)) {
+      matchDaySelect.value = selectedDate;
+      return;
+    }
+
+    selectedDate = nextDate;
     selectedFixtureId = '';
     renderFixturePickers();
     applyFixtureSelection();
   });
 
   fixtureSelect.addEventListener('change', () => {
-    selectedFixtureId = String(fixtureSelect.value || '').trim();
+    const nextFixtureId = String(fixtureSelect.value || '').trim();
+    if (!confirmFixtureSwitch(nextFixtureId)) {
+      fixtureSelect.value = selectedFixtureId;
+      return;
+    }
+
+    selectedFixtureId = nextFixtureId;
     applyFixtureSelection();
   });
 
@@ -1794,7 +1833,8 @@ const hydrateMatchLog = (matchLogNode) => {
     openWorkspaceModal();
 
     const teamId = preferredSide === 'right' ? matchedFixture.awayId : matchedFixture.homeId;
-    openModalForTeam(teamId);
+    activeTeamId = teamId;
+    syncModalTeamState();
   });
 
   const params = new URLSearchParams(window.location.search);
