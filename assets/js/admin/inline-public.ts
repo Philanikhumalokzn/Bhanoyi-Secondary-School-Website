@@ -3385,7 +3385,7 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
 const wireMatchLogInline = (section: Element) => {
   const container = section.querySelector('.container');
   const shell = section.querySelector('[data-match-log="true"]') as HTMLElement | null;
-  if (!container || !shell) return;
+  if (!shell) return;
 
   let config: {
     houseOptions?: Array<{ id: string; name: string }>;
@@ -3406,7 +3406,7 @@ const wireMatchLogInline = (section: Element) => {
   const sportingCodesSection = document.querySelector('[data-section-key="sporting_codes"]') as HTMLElement | null;
   const existingHouseManagerSection = document.querySelector('[data-inline-house-manager="true"]') as HTMLElement | null;
 
-  let controlsHost: Element | null = container;
+  let controlsHost: Element | null = container || section;
 
   if (isHiddenMatchLogHost && sportingCodesSection) {
     let houseManagerSection = existingHouseManagerSection;
