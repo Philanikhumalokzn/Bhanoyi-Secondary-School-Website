@@ -2500,7 +2500,8 @@ body.match-log-workspace-open {
   font-size: 0.88rem;
 }
 
-.enrollment-class-modal {
+.enrollment-class-modal,
+.enrollment-manage-modal {
   position: fixed;
   inset: 0;
   z-index: 1530;
