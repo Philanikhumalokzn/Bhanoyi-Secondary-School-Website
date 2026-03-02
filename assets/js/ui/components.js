@@ -3625,12 +3625,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
             <td>${fixture.round}</td>
             <td>${fixture.leg}</td>
             <td>
-              R${fixture.round}M${fixture.match}
-              ${
-                unfairnessByFixtureId[fixtureId]
-                  ? '<span class="fixture-unfair-flag">Fairness issue</span>'
-                  : ''
-              }
+              <div class="fixture-match-cell">
+                <span class="fixture-match-code">R${fixture.round}M${fixture.match}</span>
+                ${
+                  unfairnessByFixtureId[fixtureId]
+                    ? '<span class="fixture-unfair-flag" aria-label="Fairness issue">Fairness</span>'
+                    : ''
+                }
+              </div>
             </td>
             <td>
               ${(() => {

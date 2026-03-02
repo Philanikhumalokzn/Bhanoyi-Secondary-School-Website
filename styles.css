@@ -2689,6 +2689,12 @@ body.news-read-open {
   min-width: 78px;
 }
 
+.fixture-table th:nth-child(3),
+.fixture-table td:nth-child(3) {
+  width: 132px;
+  min-width: 132px;
+}
+
 .fixture-table th:nth-child(7),
 .fixture-table td:nth-child(7),
 .fixture-table th:nth-child(8),
@@ -2747,14 +2753,26 @@ body.news-read-open {
   background: color-mix(in srgb, var(--surface-alt) 74%, var(--surface));
 }
 
+.fixture-match-cell {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.fixture-match-code {
+  display: inline-block;
+}
+
 .fixture-unfair-flag {
   display: inline-flex;
   align-items: center;
-  margin-left: 6px;
+  justify-self: start;
   border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
   border-radius: 999px;
-  padding: 1px 7px;
-  font-size: 0.72rem;
+  padding: 1px 5px;
+  font-size: 0.68rem;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
   font-weight: 700;
   color: var(--primary);
   background: color-mix(in srgb, var(--surface) 84%, var(--surface-alt));
