@@ -65,7 +65,7 @@ const bindMobileNav = () => {
 
 const initCollapsiblePageSections = (pageKey) => {
   const key = String(pageKey || '').trim().toLowerCase();
-  if (key !== 'sports' && key !== 'calendar') return;
+  if (key !== 'sports') return;
 
   const sectionNodes = Array.from(document.querySelectorAll('#main-content > section.section'));
   if (!sectionNodes.length) return;

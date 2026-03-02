@@ -4718,7 +4718,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
-          <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step>
+          <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step data-calendar-default-open>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="true">
               <span>View Calendar Month</span>
             </button>
@@ -4960,7 +4960,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
   };
 
   workflowSteps.forEach((entry) => {
-    const startsExpanded = entry.stepNode.classList.contains('is-expanded');
+    const startsExpanded =
+      entry.stepNode.classList.contains('is-expanded') || entry.stepNode.hasAttribute('data-calendar-default-open');
     setWorkflowStepExpanded(entry, startsExpanded);
 
     entry.toggle.addEventListener('click', () => {
