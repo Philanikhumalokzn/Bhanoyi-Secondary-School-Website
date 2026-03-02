@@ -2633,8 +2633,7 @@ body.news-read-open {
 .fixture-table-wrap {
   border: 1px solid var(--border);
   border-radius: 10px;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
   max-width: 100%;
   background: var(--surface);
 }
@@ -2651,7 +2650,8 @@ body.news-read-open {
 .fixture-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 620px;
+  min-width: 0;
+  table-layout: fixed;
 }
 
 .fixture-table thead th {
