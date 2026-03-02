@@ -16,6 +16,7 @@
     { "key": "sports", "label": "Sports", "href": "sports.html" },
     { "key": "calendar", "label": "Calendar", "href": "calendar.html" },
     { "key": "admissions", "label": "Admissions", "href": "admissions.html" },
+    { "key": "enrollment", "label": "Enrollment", "href": "enrollment.html", "adminOnly": true },
     { "key": "policies", "label": "Policies", "href": "policies.html" },
     { "key": "contact", "label": "Contact", "href": "contact.html" }
   ],
@@ -414,6 +415,34 @@
               "linkLabel": "Download Policy"
             }
           ]
+        }
+      ]
+    },
+    "enrollment": {
+      "key": "enrollment",
+      "metaTitle": "Enrollment | Bhanoyi Secondary School",
+      "metaDescription": "Admin enrollment workspace for managing intake, records, and enrolment workflow.",
+      "hero": {
+        "eyebrow": "Admissions management",
+        "title": "Enrollment",
+        "lead": "Manage learner enrollment workflow, records, and checklist progress."
+      },
+      "sections": [
+        {
+          "type": "split",
+          "title": "Manage Enrollment",
+          "body": "This admin workspace can be used to coordinate learner intake, verify required documents, and track status updates.",
+          "list": [
+            "Capture learner and guardian details",
+            "Track submitted documents",
+            "Monitor application status",
+            "Coordinate communication follow-ups"
+          ],
+          "panel": {
+            "title": "Admin Note",
+            "body": "Use this page in admin mode to manage enrollment operations. Public users should not access this workflow.",
+            "link": { "href": "admissions.html", "label": "Back to Admissions" }
+          }
         }
       ]
     },

@@ -348,10 +348,13 @@ const renderLatestNewsSection = (section, sectionIndex) => {
 };
 
 export const renderHeader = (siteContent, pageKey) => {
-  const links = siteContent.navigation.map((item) => {
+  const links = siteContent.navigation
+    .filter((item) => !item?.adminOnly || isAdminModeEnabled())
+    .map((item) => {
     const current = item.key === pageKey ? ' aria-current="page"' : '';
     return `<li><a href="${withAdminQuery(item.href)}"${current}>${item.label}</a></li>`;
-  }).join('');
+  })
+    .join('');
   const headerBackgroundImage = (siteContent.school?.headerBackgroundImage || '').trim();
   const headerBackgroundAttr = headerBackgroundImage.replace(/"/g, '&quot;');
 

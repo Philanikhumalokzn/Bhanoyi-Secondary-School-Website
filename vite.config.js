@@ -11,6 +11,7 @@ export default defineConfig({
         sports: resolve(__dirname, 'sports.html'),
         calendar: resolve(__dirname, 'calendar.html'),
         admissions: resolve(__dirname, 'admissions.html'),
+        enrollment: resolve(__dirname, 'enrollment.html'),
         policies: resolve(__dirname, 'policies.html'),
         contact: resolve(__dirname, 'contact.html'),
         admin: resolve(__dirname, 'admin.html'),
