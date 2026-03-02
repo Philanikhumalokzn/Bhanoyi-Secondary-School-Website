@@ -3658,7 +3658,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
                 return `<input type="time" class="fixture-inline-input" data-fixture-time-input value="${escapeHtmlAttribute(timeValue)}" />`;
               })()}
             </td>
-            <td>${escapeHtmlText(fixture.formatLabel || '')}</td>
+            <td>${escapeHtmlText(fixture.formatLabel || '').replace(/\s\(/g, ' <wbr>(').replace(/\)\s+/g, ')<wbr> ')}</td>
             <td>
               ${isAdminMode
                 ? `<select class="fixture-inline-select" data-fixture-home-select>${teamOptionMarkup(fixture.homeId)}</select>`
