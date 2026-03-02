@@ -2454,6 +2454,38 @@ const hydrateEnrollmentManager = (managerNode) => {
     return extractLearnersFromRows(parseCsvRows(text));
   };
 
+  const parseSimplifiedExcelFullName = (value) => {
+    const raw = normalizeText(value, 180);
+    if (!raw) return '';
+
+    const commaIndex = raw.indexOf(',');
+    if (commaIndex < 0) {
+      return normalizeText(raw, 120);
+    }
+
+    const surname = normalizeText(raw.slice(0, commaIndex), 60);
+    const rightPart = normalizeText(raw.slice(commaIndex + 1), 120);
+    const firstName = normalizeText(rightPart.split(/\s+/)[0], 60);
+
+    if (!surname && !firstName) return '';
+    if (!firstName) return surname;
+    if (!surname) return firstName;
+    return normalizeText(`${firstName} ${surname}`, 120);
+  };
+
+  const extractLearnersFromSimplifiedExcelRows = (rows) => {
+    const learners = [];
+
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      if (!Array.isArray(row) || !row.length) return;
+      const parsedName = parseSimplifiedExcelFullName(row[0]);
+      if (!parsedName) return;
+      learners.push({ name: parsedName, admissionNo: '' });
+    });
+
+    return normalizeLearners(learners);
+  };
+
   const parseLearnersFromExcelFile = async (file) => {
     const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
@@ -2468,6 +2500,17 @@ const hydrateEnrollmentManager = (managerNode) => {
       const values = Array.isArray(row.values) ? row.values.slice(1) : [];
       rows.push(values.map((entry) => normalizeTabularCell(entry)));
     });
+
+    const firstRow = Array.isArray(rows[0]) ? rows[0] : [];
+    const firstRowLower = firstRow.map((entry) => normalizeText(entry, 120).toLowerCase());
+    const hasHeaderKeywords = firstRowLower.some((entry) => /name|learner|student|admission|gender/.test(entry));
+
+    if (!hasHeaderKeywords) {
+      const simplifiedLearners = extractLearnersFromSimplifiedExcelRows(rows);
+      if (simplifiedLearners.length) {
+        return simplifiedLearners;
+      }
+    }
 
     return extractLearnersFromRows(rows);
   };
