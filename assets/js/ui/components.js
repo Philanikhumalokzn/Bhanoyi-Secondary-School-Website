@@ -699,6 +699,11 @@ const initSportsWorkflowSteps = (rootNode) => {
       const matched = steps.find((entry) => entry.id === key);
       if (!matched) return;
       setExpanded(matched, true);
+    },
+    expandAll: () => {
+      steps.forEach((entry) => {
+        setExpanded(entry, true);
+      });
     }
   };
 };
@@ -1535,6 +1540,7 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!(workspaceModal instanceof HTMLElement)) return;
     workspaceModal.classList.remove('is-hidden');
     document.body.classList.add('match-log-workspace-open');
+    workflowSteps?.expandAll();
   };
 
   const closeWorkspaceModal = () => {
