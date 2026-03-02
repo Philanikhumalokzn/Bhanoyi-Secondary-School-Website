@@ -3382,53 +3382,115 @@ const wireLatestNewsSidePanelInline = (section: Element) => {
   renderReadControls();
 };
 
-const wireMatchLogInline = (section: Element) => {
-  const container = section.querySelector('.container');
-  const shell = section.querySelector('[data-match-log="true"]') as HTMLElement | null;
-  if (!shell) return;
+const wireSportsHouseManagerInline = () => {
+  const matchLogSection = document.querySelector(
+    '[data-editable-section="true"][data-section-type="match-log"]'
+  ) as HTMLElement | null;
+  const fixtureSection = document.querySelector(
+    '[data-editable-section="true"][data-section-type="fixture-creator"]'
+  ) as HTMLElement | null;
+  if (!matchLogSection && !fixtureSection) return;
 
-  let config: {
-    houseOptions?: Array<{ id: string; name: string }>;
+  const matchShell = matchLogSection?.querySelector('[data-match-log="true"]') as HTMLElement | null;
+  const fixtureShell = fixtureSection?.querySelector('[data-fixture-creator="true"]') as HTMLElement | null;
+
+  const HOUSE_COLORS = ['#d62828', '#1d4ed8', '#15803d', '#f59e0b', '#7c3aed'];
+  const CLASSIC_HOUSE_COLOR_OPTIONS = [
+    { label: 'Red', value: '#d62828' },
+    { label: 'Blue', value: '#1d4ed8' },
+    { label: 'Green', value: '#15803d' },
+    { label: 'Yellow', value: '#f59e0b' },
+    { label: 'Purple', value: '#7c3aed' },
+    { label: 'Orange', value: '#ea580c' },
+    { label: 'Teal', value: '#0f766e' },
+    { label: 'Brown', value: '#92400e' },
+    { label: 'Black', value: '#111827' },
+    { label: 'Grey', value: '#475569' }
+  ];
+  const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
+
+  const normalizeHouseColor = (value: unknown, fallback = '#64748b') => {
+    const raw = String(value || '').trim();
+    if (/^#[0-9a-f]{3}$/i.test(raw) || /^#[0-9a-f]{6}$/i.test(raw)) {
+      return raw.toLowerCase();
+    }
+    return fallback;
+  };
+
+  const normalizeHouseId = (value: unknown, fallback: string) => {
+    const raw = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '');
+    return raw || fallback;
+  };
+
+  const normalizeText = (value: unknown, maxLength = 160) =>
+    String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, maxLength);
+
+  const parseConfig = (raw: string) => {
+    try {
+      const parsed = JSON.parse((raw || '{}').trim());
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const matchConfig = parseConfig(matchShell?.dataset.matchLogConfig || '{}') as {
+    houseOptions?: Array<{ id: string; name: string; color?: string }>;
     leftTeamId?: string;
     rightTeamId?: string;
-  } = {};
+  };
+  const fixtureConfig = parseConfig(fixtureShell?.dataset.fixtureConfig || '{}') as {
+    houseOptions?: Array<{ id: string; name: string; color?: string }>;
+  };
 
-  try {
-    const parsed = JSON.parse((shell.dataset.matchLogConfig || '{}').trim());
-    if (parsed && typeof parsed === 'object') {
-      config = parsed as typeof config;
-    }
-  } catch {
-    config = {};
-  }
+  const baseOptions =
+    (Array.isArray(matchConfig.houseOptions) && matchConfig.houseOptions.length
+      ? matchConfig.houseOptions
+      : Array.isArray(fixtureConfig.houseOptions)
+        ? fixtureConfig.houseOptions
+        : [])
+      .map((entry, index) => ({
+        id: normalizeHouseId(entry?.id, `house_${index + 1}`),
+        name: normalizeText(entry?.name, 80) || `House ${index + 1}`,
+        color: normalizeHouseColor(entry?.color, HOUSE_COLORS[index % HOUSE_COLORS.length])
+      }))
+      .filter((entry) => Boolean(entry.id));
 
-  const isHiddenMatchLogHost = section.classList.contains('match-log-modal-host');
+  if (!baseOptions.length) return;
+
   const sportingCodesSection = document.querySelector('[data-section-key="sporting_codes"]') as HTMLElement | null;
+  const fixtureInsertAnchor = fixtureSection || matchLogSection;
   const existingHouseManagerSection = document.querySelector('[data-inline-house-manager="true"]') as HTMLElement | null;
 
-  let controlsHost: Element | null = container || section;
+  let houseManagerSection = existingHouseManagerSection;
+  if (!houseManagerSection) {
+    houseManagerSection = document.createElement('section');
+    houseManagerSection.className = 'section';
+    houseManagerSection.dataset.inlineHouseManager = 'true';
+    houseManagerSection.innerHTML = `
+      <div class="container">
+        <article class="panel">
+          <h2>Manage Houses</h2>
+          <p class="lead">Edit house names used across Sports workflows.</p>
+          <div data-inline-house-controls-host="true"></div>
+        </article>
+      </div>
+    `;
 
-  if (isHiddenMatchLogHost && sportingCodesSection) {
-    let houseManagerSection = existingHouseManagerSection;
-    if (!houseManagerSection) {
-      houseManagerSection = document.createElement('section');
-      houseManagerSection.className = 'section';
-      houseManagerSection.dataset.inlineHouseManager = 'true';
-      houseManagerSection.innerHTML = `
-        <div class="container">
-          <article class="panel">
-            <h2>Manage Houses</h2>
-            <p class="lead">Edit house names used across Sports workflows.</p>
-            <div data-inline-house-controls-host="true"></div>
-          </article>
-        </div>
-      `;
+    if (sportingCodesSection) {
       sportingCodesSection.insertAdjacentElement('beforebegin', houseManagerSection);
+    } else if (fixtureInsertAnchor) {
+      fixtureInsertAnchor.insertAdjacentElement('beforebegin', houseManagerSection);
     }
-
-    controlsHost = houseManagerSection.querySelector('[data-inline-house-controls-host="true"]');
   }
 
+  const controlsHost = houseManagerSection?.querySelector('[data-inline-house-controls-host="true"]');
   if (!controlsHost) return;
 
   const controls = document.createElement('div');
@@ -3439,41 +3501,311 @@ const wireMatchLogInline = (section: Element) => {
   if (existingControls) {
     existingControls.remove();
   }
-
-  const hostHeading = controlsHost.querySelector('h2');
-  if (hostHeading && hostHeading.parentElement === controlsHost) {
-    hostHeading.insertAdjacentElement('afterend', controls);
-  } else {
-    controlsHost.appendChild(controls);
-  }
+  controlsHost.appendChild(controls);
 
   const readState = {
-    options: Array.isArray(config.houseOptions)
-      ? config.houseOptions
-          .map((entry, index) => ({
-            id: String(entry?.id || `house_${index + 1}`).trim(),
-            name: String(entry?.name || '').trim() || `House ${index + 1}`
-          }))
-          .filter((entry) => Boolean(entry.id))
-      : [],
-    leftTeamId: String(config.leftTeamId || '').trim(),
-    rightTeamId: String(config.rightTeamId || '').trim()
+    options: baseOptions,
+    leftTeamId: String(matchConfig.leftTeamId || baseOptions[0]?.id || '').trim(),
+    rightTeamId: String(matchConfig.rightTeamId || baseOptions[1]?.id || baseOptions[0]?.id || '').trim()
   };
 
-  if (!readState.options.length) {
+  let editorWrap: HTMLElement | null = null;
+  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement }> = [];
+
+  type EnrollmentStoreRoot = Record<string, unknown>;
+  type EnrollmentLearnerRecord = {
+    key: string;
+    storageKey: string;
+    grade: string;
+    classLetter: string;
+    displayName: string;
+    admissionNo: string;
+    gender: string;
+    houseId: string;
+    learnerRef: Record<string, unknown>;
+    rootStore: EnrollmentStoreRoot;
+  };
+
+  const houseModal = document.createElement('div');
+  houseModal.className = 'inline-house-members-modal is-hidden';
+  houseModal.innerHTML = `
+    <div class="inline-house-members-backdrop" data-house-members-close="true"></div>
+    <article class="panel inline-house-members-panel" role="dialog" aria-modal="true" aria-label="Manage house members">
+      <div class="inline-house-members-head">
+        <h3 data-house-members-title>Manage House</h3>
+        <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
+      </div>
+      <p class="inline-house-members-meta" data-house-members-meta></p>
+      <section class="inline-house-members-section">
+        <h4>Current members</h4>
+        <div class="inline-house-members-list" data-house-members-list></div>
+      </section>
+      <section class="inline-house-members-section">
+        <h4>Pull learners into this house</h4>
+        <p class="inline-house-members-meta">Select from learners in other houses or unassigned learners.</p>
+        <select data-house-members-pull-select multiple size="8"></select>
+        <div class="inline-house-members-actions">
+          <button type="button" class="btn btn-primary" data-house-members-pull>Pull selected learners</button>
+        </div>
+      </section>
+    </article>
+  `;
+  document.body.appendChild(houseModal);
+
+  const houseModalTitle = houseModal.querySelector('[data-house-members-title]');
+  const houseModalMeta = houseModal.querySelector('[data-house-members-meta]');
+  const houseModalList = houseModal.querySelector('[data-house-members-list]');
+  const houseModalPullSelect = houseModal.querySelector('[data-house-members-pull-select]');
+  const houseModalPullButton = houseModal.querySelector('[data-house-members-pull]');
+  const houseModalCloseButtons = Array.from(houseModal.querySelectorAll('[data-house-members-close="true"]'));
+
+  if (
+    !(houseModalTitle instanceof HTMLElement) ||
+    !(houseModalMeta instanceof HTMLElement) ||
+    !(houseModalList instanceof HTMLElement) ||
+    !(houseModalPullSelect instanceof HTMLSelectElement) ||
+    !(houseModalPullButton instanceof HTMLButtonElement)
+  ) {
     return;
   }
 
-  let editorWrap: HTMLElement | null = null;
-  let editors: Array<{ id: string; input: HTMLInputElement }> = [];
+  let activeHouseId = '';
+
+  const normalizeEnrollmentHouseId = (value: unknown) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '');
+
+  const normalizeGender = (value: unknown) => {
+    const raw = normalizeText(value, 20).toLowerCase();
+    if (raw === 'm' || raw === 'male' || raw === 'boy') return 'Male';
+    if (raw === 'f' || raw === 'female' || raw === 'girl') return 'Female';
+    if (raw === 'o' || raw === 'other') return 'Other';
+    return '';
+  };
+
+  const collectEnrollmentLearners = (): EnrollmentLearnerRecord[] => {
+    const records: EnrollmentLearnerRecord[] = [];
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(enrollmentStoragePrefix)) continue;
+
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+
+        const rootStore = parsed as EnrollmentStoreRoot;
+        const classProfilesByGrade = rootStore.classProfilesByGrade;
+        if (!classProfilesByGrade || typeof classProfilesByGrade !== 'object' || Array.isArray(classProfilesByGrade)) {
+          continue;
+        }
+
+        Object.entries(classProfilesByGrade as Record<string, unknown>).forEach(([grade, gradeValue]) => {
+          if (!gradeValue || typeof gradeValue !== 'object' || Array.isArray(gradeValue)) return;
+
+          Object.entries(gradeValue as Record<string, unknown>).forEach(([classLetter, classProfile]) => {
+            if (!classProfile || typeof classProfile !== 'object' || Array.isArray(classProfile)) return;
+            const profileObject = classProfile as Record<string, unknown>;
+            const learners = profileObject.learners;
+            if (!Array.isArray(learners)) return;
+
+            learners.forEach((learnerEntry, learnerIndex) => {
+              if (!learnerEntry || typeof learnerEntry !== 'object' || Array.isArray(learnerEntry)) return;
+              const learnerRef = learnerEntry as Record<string, unknown>;
+              const displayName = normalizeText(learnerRef.name, 120);
+              if (!displayName) return;
+
+              const admissionNo = normalizeText(learnerRef.admissionNo || learnerRef.admission, 40);
+              const gender = normalizeGender(learnerRef.gender || learnerRef.sex);
+              const houseId = normalizeEnrollmentHouseId(learnerRef.houseId || learnerRef.house);
+              records.push({
+                key: `${key}|${grade}|${classLetter}|${learnerIndex}`,
+                storageKey: key,
+                grade: normalizeText(grade, 4),
+                classLetter: normalizeText(classLetter, 2).toUpperCase(),
+                displayName,
+                admissionNo,
+                gender,
+                houseId,
+                learnerRef,
+                rootStore
+              });
+            });
+          });
+        });
+      } catch {
+        // ignore invalid enrollment cache entry
+      }
+    }
+
+    return records;
+  };
+
+  const persistEnrollmentRecords = (records: EnrollmentLearnerRecord[]) => {
+    const touchedKeys = new Set<string>();
+    records.forEach((record) => {
+      touchedKeys.add(record.storageKey);
+    });
+
+    touchedKeys.forEach((storageKey) => {
+      const firstRecord = records.find((record) => record.storageKey === storageKey);
+      if (!firstRecord) return;
+      localStorage.setItem(storageKey, JSON.stringify(firstRecord.rootStore));
+    });
+  };
+
+  const closeHouseModal = () => {
+    houseModal.classList.add('is-hidden');
+    document.body.classList.remove('inline-house-members-open');
+    activeHouseId = '';
+  };
+
+  houseModalCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeHouseModal);
+  });
+
+  const renderHouseMembersModal = () => {
+    if (!activeHouseId) return;
+    const activeHouse = readState.options.find((entry) => entry.id === activeHouseId);
+    if (!activeHouse) {
+      closeHouseModal();
+      return;
+    }
+
+    const enrollmentRecords = collectEnrollmentLearners();
+    const members = enrollmentRecords.filter((record) => record.houseId === activeHouse.id);
+    const available = enrollmentRecords.filter((record) => record.houseId !== activeHouse.id);
+    const houseLabelById = new Map(readState.options.map((entry) => [entry.id, entry.name]));
+
+    houseModalTitle.textContent = `Manage ${activeHouse.name}`;
+    houseModalMeta.textContent = `${members.length} learner${members.length === 1 ? '' : 's'} in this house.`;
+
+    houseModalList.innerHTML = '';
+    if (!members.length) {
+      const empty = document.createElement('p');
+      empty.className = 'inline-house-members-empty';
+      empty.textContent = 'No learners are currently assigned to this house.';
+      houseModalList.appendChild(empty);
+    } else {
+      members
+        .sort((left, right) => left.displayName.localeCompare(right.displayName))
+        .forEach((record) => {
+          const item = document.createElement('div');
+          item.className = 'inline-house-member-item';
+
+          const summary = document.createElement('p');
+          summary.className = 'inline-house-member-summary';
+          const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter ? record.classLetter : ''}` : 'Class not set';
+          const details = [classLabel];
+          if (record.admissionNo) details.push(`Adm: ${record.admissionNo}`);
+          if (record.gender) details.push(record.gender);
+          summary.textContent = `${record.displayName} · ${details.join(' · ')}`;
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'btn btn-secondary';
+          removeButton.textContent = 'Remove';
+          removeButton.dataset.houseRecordKey = record.key;
+          removeButton.addEventListener('click', () => {
+            record.learnerRef.houseId = '';
+            persistEnrollmentRecords([record]);
+            renderHouseMembersModal();
+            showStatus(`${record.displayName} removed from ${activeHouse.name}.`);
+          });
+
+          item.appendChild(summary);
+          item.appendChild(removeButton);
+          houseModalList.appendChild(item);
+        });
+    }
+
+    houseModalPullSelect.innerHTML = '';
+    available
+      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      .forEach((record) => {
+        const option = document.createElement('option');
+        option.value = record.key;
+        const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter ? record.classLetter : ''}` : 'Class not set';
+        const fromLabel = record.houseId ? `from ${houseLabelById.get(record.houseId) || 'another house'}` : 'unassigned';
+        option.textContent = `${record.displayName} · ${classLabel} · ${fromLabel}`;
+        houseModalPullSelect.appendChild(option);
+      });
+
+    houseModalPullButton.disabled = !available.length;
+  };
+
+  houseModalPullButton.addEventListener('click', () => {
+    if (!activeHouseId) return;
+    const selectedKeys = Array.from(houseModalPullSelect.selectedOptions).map((option) => option.value);
+    if (!selectedKeys.length) {
+      showStatus('Select at least one learner to pull into this house.');
+      return;
+    }
+
+    const recordsByKey = new Map(collectEnrollmentLearners().map((record) => [record.key, record]));
+    const selectedRecords = selectedKeys
+      .map((key) => recordsByKey.get(key))
+      .filter((record): record is EnrollmentLearnerRecord => Boolean(record));
+
+    if (!selectedRecords.length) {
+      showStatus('No selected learners were found. Refresh and try again.');
+      return;
+    }
+
+    selectedRecords.forEach((record) => {
+      record.learnerRef.houseId = activeHouseId;
+    });
+    persistEnrollmentRecords(selectedRecords);
+    renderHouseMembersModal();
+
+    const houseName = readState.options.find((entry) => entry.id === activeHouseId)?.name || 'house';
+    showStatus(`Pulled ${selectedRecords.length} learner${selectedRecords.length === 1 ? '' : 's'} into ${houseName}.`);
+  });
+
+  const openHouseModal = (houseId: string) => {
+    activeHouseId = houseId;
+    renderHouseMembersModal();
+    houseModal.classList.remove('is-hidden');
+    document.body.classList.add('inline-house-members-open');
+  };
 
   const renderReadControls = () => {
     controls.innerHTML = '';
+
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.textContent = 'Manage Houses';
     editBtn.addEventListener('click', enterEdit);
     controls.appendChild(editBtn);
+
+    const houseButtonList = document.createElement('div');
+    houseButtonList.className = 'inline-house-link-list';
+
+    readState.options.forEach((house) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'inline-house-link';
+
+      const colorDot = document.createElement('span');
+      colorDot.className = 'enrollment-house-avatar';
+      colorDot.style.setProperty('--house-color', house.color || '#64748b');
+
+      const label = document.createElement('span');
+      label.textContent = house.name;
+
+      button.appendChild(colorDot);
+      button.appendChild(label);
+      button.addEventListener('click', () => {
+        openHouseModal(house.id);
+      });
+      houseButtonList.appendChild(button);
+    });
+
+    controls.appendChild(houseButtonList);
   };
 
   const exitEdit = () => {
@@ -3495,7 +3827,8 @@ const wireMatchLogInline = (section: Element) => {
         const houseOptions = editors
           .map((entry) => ({
             id: entry.id,
-            name: entry.input.value.trim() || entry.id
+            name: normalizeText(entry.nameInput.value, 80) || entry.id,
+            color: normalizeHouseColor(entry.colorInput.value, '#64748b')
           }))
           .filter((entry) => Boolean(entry.id));
 
@@ -3504,12 +3837,24 @@ const wireMatchLogInline = (section: Element) => {
           return;
         }
 
-        await saveSectionOverride(section, {
-          type: 'match-log',
-          houseOptions,
-          leftTeamId: readState.leftTeamId,
-          rightTeamId: readState.rightTeamId
-        });
+        if (matchLogSection) {
+          await saveSectionOverride(matchLogSection, {
+            type: 'match-log',
+            houseOptions,
+            leftTeamId: readState.leftTeamId,
+            rightTeamId: readState.rightTeamId
+          });
+        }
+
+        if (fixtureSection) {
+          await saveSectionOverride(fixtureSection, {
+            type: 'fixture-creator',
+            houseOptions
+          });
+        }
+
+        localStorage.setItem('bhanoyi.sportsHouseOptions', JSON.stringify(houseOptions));
+        readState.options = [...houseOptions];
         showStatus('House names saved. Refreshing...');
         window.location.reload();
       } catch (error) {
@@ -3541,7 +3886,38 @@ const wireMatchLogInline = (section: Element) => {
     readState.options.forEach((house, index) => {
       const { wrapper, input } = createTextEditor(`House ${index + 1} Name`, house.name);
       wrapper.classList.add('inline-match-house-editor');
-      editors.push({ id: house.id, input });
+
+      const openMembersButton = document.createElement('button');
+      openMembersButton.type = 'button';
+      openMembersButton.className = 'btn btn-secondary';
+      openMembersButton.textContent = 'Open House Members';
+      openMembersButton.addEventListener('click', () => {
+        openHouseModal(house.id);
+      });
+      wrapper.appendChild(openMembersButton);
+
+      const colorField = document.createElement('label');
+      colorField.className = 'inline-match-house-color';
+      colorField.textContent = 'House Color';
+
+      const colorInput = document.createElement('select');
+      const normalizedColor = normalizeHouseColor(house.color, HOUSE_COLORS[index % HOUSE_COLORS.length]);
+      const selectedColor = CLASSIC_HOUSE_COLOR_OPTIONS.some((entry) => entry.value === normalizedColor)
+        ? normalizedColor
+        : HOUSE_COLORS[index % HOUSE_COLORS.length];
+
+      CLASSIC_HOUSE_COLOR_OPTIONS.forEach((entry) => {
+        const option = document.createElement('option');
+        option.value = entry.value;
+        option.textContent = entry.label;
+        colorInput.appendChild(option);
+      });
+      colorInput.value = selectedColor;
+
+      colorField.appendChild(colorInput);
+      wrapper.appendChild(colorField);
+
+      editors.push({ id: house.id, nameInput: input, colorInput });
       editorWrap?.appendChild(wrapper);
     });
 
@@ -4476,10 +4852,7 @@ const bindInlineActions = () => {
   );
   editableContactSections.forEach(wireContactCardsInline);
 
-  const editableMatchLogSections = Array.from(
-    document.querySelectorAll('[data-editable-section="true"][data-section-type="match-log"]')
-  );
-  editableMatchLogSections.forEach(wireMatchLogInline);
+  wireSportsHouseManagerInline();
 
   const editableFixtureCreatorSections = Array.from(
     document.querySelectorAll('[data-editable-section="true"][data-section-type="fixture-creator"]')

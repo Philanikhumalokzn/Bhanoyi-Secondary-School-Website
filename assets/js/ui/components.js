@@ -581,6 +581,13 @@ const DEFAULT_MATCH_EVENT_TYPES = [
   { key: 'substitution', label: 'Substitution', icon: '🔁', scoreFor: 'none', allowAssist: false, playerLabel: 'Player' }
 ];
 
+const DEFAULT_HOUSE_COLORS = ['#d62828', '#1d4ed8', '#15803d', '#f59e0b', '#7c3aed'];
+
+const normalizeHouseColor = (value, fallback = '#64748b') => {
+  const raw = String(value || '').trim();
+  return /^#([0-9a-fA-F]{6})$/.test(raw) ? raw.toLowerCase() : fallback;
+};
+
 const normalizeMatchTeams = (sectionTeams = []) => {
   const candidates = Array.isArray(sectionTeams) ? sectionTeams : [];
   const normalized = candidates
@@ -589,7 +596,8 @@ const normalizeMatchTeams = (sectionTeams = []) => {
       const name = (source.name || `Team ${index + 1}`).trim() || `Team ${index + 1}`;
       const id = (source.id || name.toLowerCase().replace(/[^a-z0-9]+/g, '_') || `team_${index + 1}`).trim();
       const shortName = (source.shortName || name).trim() || name;
-      return { id, name, shortName };
+      const color = normalizeHouseColor(source.color, DEFAULT_HOUSE_COLORS[index % DEFAULT_HOUSE_COLORS.length]);
+      return { id, name, shortName, color };
     })
     .filter((entry, index, list) =>
       entry.id &&
@@ -599,8 +607,8 @@ const normalizeMatchTeams = (sectionTeams = []) => {
 
   if (normalized.length >= 2) return normalized;
   return [
-    { id: 'home', name: 'Home', shortName: 'Home' },
-    { id: 'away', name: 'Away', shortName: 'Away' }
+    { id: 'home', name: 'Home', shortName: 'Home', color: DEFAULT_HOUSE_COLORS[0] },
+    { id: 'away', name: 'Away', shortName: 'Away', color: DEFAULT_HOUSE_COLORS[1] }
   ];
 };
 
@@ -1045,7 +1053,8 @@ const hydrateMatchLog = (matchLogNode) => {
     const persistedHouseOptions = (Array.isArray(config.houseOptions) ? config.houseOptions : [])
       .map((entry, index) => ({
         id: String(entry?.id || `house_${index + 1}`).trim().toLowerCase(),
-        name: String(entry?.name || `House ${index + 1}`).trim() || `House ${index + 1}`
+        name: String(entry?.name || `House ${index + 1}`).trim() || `House ${index + 1}`,
+        color: normalizeHouseColor(entry?.color, DEFAULT_HOUSE_COLORS[index % DEFAULT_HOUSE_COLORS.length])
       }))
       .filter((entry) => Boolean(entry.id));
     if (persistedHouseOptions.length) {
@@ -2328,7 +2337,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
   const defaultSchoolHouseOptions = Array.from({ length: 5 }, (_, index) => ({
     id: `house_${index + 1}`,
-    name: `House ${index + 1}`
+    name: `House ${index + 1}`,
+    color: DEFAULT_HOUSE_COLORS[index % DEFAULT_HOUSE_COLORS.length]
   }));
   const sportsHouseStorageKey = 'bhanoyi.sportsHouseOptions';
 
@@ -2341,7 +2351,8 @@ const hydrateEnrollmentManager = (managerNode) => {
           const fromStored = parsed
             .map((entry, index) => ({
               id: String(entry?.id || `house_${index + 1}`).trim().toLowerCase(),
-              name: String(entry?.name || `House ${index + 1}`).trim() || `House ${index + 1}`
+              name: String(entry?.name || `House ${index + 1}`).trim() || `House ${index + 1}`,
+              color: normalizeHouseColor(entry?.color, DEFAULT_HOUSE_COLORS[index % DEFAULT_HOUSE_COLORS.length])
             }))
             .filter((entry) => Boolean(entry.id));
           if (fromStored.length) {
@@ -2366,7 +2377,11 @@ const hydrateEnrollmentManager = (managerNode) => {
           });
 
           const fromCatalog = Array.from(byId.entries())
-            .map(([id, name]) => ({ id, name }))
+            .map(([id, name], index) => ({
+              id,
+              name,
+              color: DEFAULT_HOUSE_COLORS[index % DEFAULT_HOUSE_COLORS.length]
+            }))
             .slice(0, 5);
           if (fromCatalog.length >= 2) {
             return fromCatalog;
@@ -2846,6 +2861,7 @@ const hydrateEnrollmentManager = (managerNode) => {
                   ${learner.houseId === house.id ? 'checked' : ''}
                   ${isAdminMode ? '' : 'disabled'}
                 />
+                <span class="enrollment-house-avatar" style="--house-color:${escapeHtmlAttribute(house.color || '#64748b')};"></span>
                 <span>${escapeHtmlText(house.name)}</span>
               </label>
             `
