@@ -4015,6 +4015,23 @@ const hydrateFixtureCreator = (fixtureNode) => {
       sheet.getRow(4).height = 18;
       sheet.getRow(5).height = 18;
 
+      try {
+        const logoResponse = await fetch('/branding/bhanoyi-logo.png');
+        if (logoResponse.ok) {
+          const logoBuffer = await logoResponse.arrayBuffer();
+          const imageId = workbook.addImage({
+            buffer: logoBuffer,
+            extension: 'png'
+          });
+          sheet.addImage(imageId, {
+            tl: { col: 0.1, row: 0.15 },
+            ext: { width: 86, height: 86 }
+          });
+        }
+      } catch {
+        // Logo is optional in export; continue without it.
+      }
+
       const headerRowNumber = 7;
       const headerLabels = ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'];
       const headerRow = sheet.getRow(headerRowNumber);
@@ -4121,15 +4138,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       showSmartToast('Professional fixture file exported (.xlsx).', { tone: 'success' });
       return;
     } catch {
-      try {
-        downloadBlob(
-          new Blob([buildFixtureCsvContent()], { type: 'text/csv;charset=utf-8' }),
-          `${baseName}.csv`
-        );
-        showSmartToast('Exported CSV fallback.', { tone: 'info' });
-      } catch {
-        showSmartToast('Export failed. Please try Export CSV.', { tone: 'error' });
-      }
+      downloadBlob(
+        new Blob([buildFixtureCsvContent()], { type: 'text/csv;charset=utf-8' }),
+        `${baseName}.csv`
+      );
+      showSmartToast('Exported CSV fallback.', { tone: 'info' });
     }
   });
 
