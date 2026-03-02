@@ -1754,7 +1754,9 @@ const hydrateMatchLog = (matchLogNode) => {
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
     const fixture = getCurrentFixture();
     if (!fixture) return;
-    const confirmed = window.confirm(`Reset all logged events for ${fixture.homeName} vs ${fixture.awayName}?`);
+    const confirmed = window.confirm(
+      `Reset ${fixture.homeName} vs ${fixture.awayName}? This will remove all logged events.`
+    );
     if (!confirmed) return;
     currentEvents = [];
     persistCurrentFixtureLog();
@@ -4529,7 +4531,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       if (repairResult.affectedOtherCount > 0) {
         const proceed = window.confirm(
-          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+          `Apply and rebalance fixtures? ${repairResult.affectedOtherCount} other fixture(s) will auto-update.`
         );
         if (!proceed) {
           renderFixtures(lastFixtures);
@@ -4587,7 +4589,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       if (repairResult.affectedOtherCount > 0) {
         const proceed = window.confirm(
-          `This change affects round-robin balance. ${repairResult.affectedOtherCount} additional fixture(s) will be auto-adjusted so each team plays every other team twice. Continue?`
+          `Apply and rebalance fixtures? ${repairResult.affectedOtherCount} other fixture(s) will auto-update.`
         );
         if (!proceed) {
           renderFixtures(lastFixtures);
@@ -6628,7 +6630,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
       const confirmDelete = window.confirm(
         usageCount > 0
-          ? `Delete event type "${removedType}"? ${usageCount} event(s) currently use it.`
+          ? `Delete event type "${removedType}"? ${usageCount} event(s) will be reassigned.`
           : `Delete event type "${removedType}"?`
       );
       if (!confirmDelete) return;
