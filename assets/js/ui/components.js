@@ -2131,8 +2131,26 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
         <h2>${config.title}</h2>
         ${config.body ? `<p class="lead">${config.body}</p>` : ''}
         <article class="panel enrollment-manager-shell" data-enrollment-manager="true" data-enrollment-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <div class="enrollment-manager-actions">
+            <button type="button" class="btn btn-secondary" data-enrollment-open-add-grade>Add grade</button>
+          </div>
           <div class="enrollment-grade-list" data-enrollment-grade-list></div>
           <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
+          <div class="enrollment-grade-modal is-hidden" data-enrollment-grade-modal>
+            <div class="enrollment-class-modal-backdrop" data-enrollment-close-grade-modal></div>
+            <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Add grade">
+              <h3>Add Grade</h3>
+              <p class="enrollment-class-modal-subtitle">Select a grade to add back.</p>
+              <label class="enrollment-class-modal-field">
+                Grade
+                <select data-enrollment-grade-select></select>
+              </label>
+              <div class="enrollment-class-modal-actions">
+                <button type="button" class="btn btn-secondary" data-enrollment-close-grade-modal>Cancel</button>
+                <button type="button" class="btn btn-primary" data-enrollment-add-grade>Add grade</button>
+              </div>
+            </article>
+          </div>
           <div class="enrollment-class-modal is-hidden" data-enrollment-class-modal>
             <div class="enrollment-class-modal-backdrop" data-enrollment-close-modal></div>
             <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Add class">
@@ -2167,6 +2185,11 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const gradeListNode = managerNode.querySelector('[data-enrollment-grade-list]');
   const statusNode = managerNode.querySelector('[data-enrollment-status]');
+  const addGradeTrigger = managerNode.querySelector('[data-enrollment-open-add-grade]');
+  const gradeModal = managerNode.querySelector('[data-enrollment-grade-modal]');
+  const gradeSelect = managerNode.querySelector('[data-enrollment-grade-select]');
+  const addGradeButton = managerNode.querySelector('[data-enrollment-add-grade]');
+  const closeGradeButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-grade-modal]'));
   const classModal = managerNode.querySelector('[data-enrollment-class-modal]');
   const modalGradeNode = managerNode.querySelector('[data-enrollment-modal-grade]');
   const classSelect = managerNode.querySelector('[data-enrollment-class-select]');
@@ -2175,6 +2198,10 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   if (
     !(gradeListNode instanceof HTMLElement) ||
+    !(addGradeTrigger instanceof HTMLButtonElement) ||
+    !(gradeModal instanceof HTMLElement) ||
+    !(gradeSelect instanceof HTMLSelectElement) ||
+    !(addGradeButton instanceof HTMLButtonElement) ||
     !(classModal instanceof HTMLElement) ||
     !(classSelect instanceof HTMLSelectElement) ||
     !(addClassButton instanceof HTMLButtonElement)
@@ -2182,6 +2209,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     return;
   }
 
+  portalOverlayToBody(gradeModal, `enrollment-grade-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
   portalOverlayToBody(classModal, `enrollment-class-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
@@ -2191,6 +2219,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
 
   let selectedGrade = '';
+  let selectedAddGrade = '';
+  let activeGrades = [];
   let classesByGrade = {};
 
   const normalizeLetter = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
@@ -2219,16 +2249,81 @@ const hydrateEnrollmentManager = (managerNode) => {
   const loadStore = () => {
     try {
       const raw = localStorage.getItem(storageKey);
-      if (!raw) return normalizeClassesStore({});
+      if (!raw) {
+        return {
+          activeGrades: [...gradeNumbers],
+          classesByGrade: normalizeClassesStore({})
+        };
+      }
       const parsed = JSON.parse(raw);
-      return normalizeClassesStore(parsed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const parsedActive = Array.isArray(parsed.activeGrades)
+          ? parsed.activeGrades
+              .map((entry) => String(entry || '').trim())
+              .filter((entry) => gradeNumbers.includes(entry))
+          : [];
+
+        const normalizedActive = parsedActive.length
+          ? Array.from(new Set(parsedActive)).sort((left, right) => Number(left) - Number(right))
+          : [...gradeNumbers];
+
+        const rawClasses =
+          parsed.classesByGrade && typeof parsed.classesByGrade === 'object' && !Array.isArray(parsed.classesByGrade)
+            ? parsed.classesByGrade
+            : parsed;
+
+        return {
+          activeGrades: normalizedActive,
+          classesByGrade: normalizeClassesStore(rawClasses)
+        };
+      }
+
+      return {
+        activeGrades: [...gradeNumbers],
+        classesByGrade: normalizeClassesStore({})
+      };
     } catch {
-      return normalizeClassesStore({});
+      return {
+        activeGrades: [...gradeNumbers],
+        classesByGrade: normalizeClassesStore({})
+      };
     }
   };
 
   const saveStore = () => {
-    localStorage.setItem(storageKey, JSON.stringify(normalizeClassesStore(classesByGrade)));
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        activeGrades: [...activeGrades],
+        classesByGrade: normalizeClassesStore(classesByGrade)
+      })
+    );
+  };
+
+  const getMissingGrades = () => gradeNumbers.filter((grade) => !activeGrades.includes(grade));
+
+  const closeGradeModal = () => {
+    gradeModal.classList.add('is-hidden');
+    selectedAddGrade = '';
+    gradeSelect.innerHTML = '';
+  };
+
+  const openGradeModal = () => {
+    if (!isAdminMode) return;
+    const missing = getMissingGrades();
+    if (!missing.length) {
+      if (statusNode) {
+        statusNode.textContent = 'All grades (6 to 12) are already added.';
+      }
+      return;
+    }
+
+    selectedAddGrade = missing[0];
+    gradeSelect.innerHTML = missing
+      .map((grade) => `<option value="${escapeHtmlAttribute(grade)}">Grade ${escapeHtmlText(grade)}</option>`)
+      .join('');
+    gradeSelect.value = selectedAddGrade;
+    gradeModal.classList.remove('is-hidden');
   };
 
   const getAvailableLetters = (grade) => {
@@ -2264,7 +2359,9 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const render = () => {
-    gradeListNode.innerHTML = gradeNumbers
+    addGradeTrigger.disabled = !isAdminMode || getMissingGrades().length === 0;
+
+    gradeListNode.innerHTML = activeGrades
       .map((grade) => {
         const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
         const chips = classes.length
@@ -2298,7 +2395,10 @@ const hydrateEnrollmentManager = (managerNode) => {
           <article class="enrollment-grade-card" data-enrollment-grade="${grade}">
             <div class="enrollment-grade-head">
               <h3>Grade ${grade}</h3>
-              <button type="button" class="btn btn-secondary" data-enrollment-open-add="${grade}"${addDisabled ? ' disabled' : ''}>Add class</button>
+              <div class="enrollment-grade-actions">
+                <button type="button" class="btn btn-secondary" data-enrollment-open-add="${grade}"${addDisabled ? ' disabled' : ''}>Add class</button>
+                ${isAdminMode ? `<button type="button" class="btn btn-secondary" data-enrollment-remove-grade="${grade}">Remove grade</button>` : ''}
+              </div>
             </div>
             <div class="enrollment-class-list">${chips}</div>
           </article>
@@ -2307,18 +2407,45 @@ const hydrateEnrollmentManager = (managerNode) => {
       .join('');
 
     if (statusNode) {
-      statusNode.textContent = isAdminMode
-        ? 'Use Add class to create grade classes (A, B, C, ...).'
-        : 'Enrollment classes are visible in read-only mode.';
+      if (!activeGrades.length) {
+        statusNode.textContent = isAdminMode
+          ? 'No grades currently active. Use Add grade to create one.'
+          : 'No grades currently active.';
+      } else {
+        statusNode.textContent = isAdminMode
+          ? 'Use Add class to create grade classes (A, B, C, ...).'
+          : 'Enrollment classes are visible in read-only mode.';
+      }
     }
   };
 
-  classesByGrade = loadStore();
+  const loaded = loadStore();
+  activeGrades = loaded.activeGrades;
+  classesByGrade = loaded.classesByGrade;
   render();
 
   gradeListNode.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const removeGradeButton = target.closest('[data-enrollment-remove-grade]');
+    if (removeGradeButton instanceof HTMLButtonElement) {
+      if (!isAdminMode) return;
+      const grade = String(removeGradeButton.dataset.enrollmentRemoveGrade || '').trim();
+      if (!grade) return;
+
+      const confirmRemove = window.confirm(`Remove Grade ${grade} and all its classes?`);
+      if (!confirmRemove) return;
+
+      activeGrades = activeGrades.filter((entry) => entry !== grade);
+      classesByGrade[grade] = [];
+      saveStore();
+      render();
+      if (statusNode) {
+        statusNode.textContent = `Grade ${grade} removed.`;
+      }
+      return;
+    }
 
     const removeButton = target.closest('[data-enrollment-remove-letter]');
     if (removeButton instanceof HTMLButtonElement) {
@@ -2345,6 +2472,39 @@ const hydrateEnrollmentManager = (managerNode) => {
     const grade = String(button.dataset.enrollmentOpenAdd || '').trim();
     if (!grade) return;
     openModalForGrade(grade);
+  });
+
+  addGradeTrigger.addEventListener('click', () => {
+    openGradeModal();
+  });
+
+  gradeSelect.addEventListener('change', () => {
+    selectedAddGrade = String(gradeSelect.value || '').trim();
+  });
+
+  closeGradeButtons.forEach((button) => {
+    button.addEventListener('click', closeGradeModal);
+  });
+
+  gradeModal.addEventListener('click', (event) => {
+    if (event.target === gradeModal) {
+      closeGradeModal();
+    }
+  });
+
+  addGradeButton.addEventListener('click', () => {
+    if (!isAdminMode) return;
+    const grade = String(selectedAddGrade || gradeSelect.value || '').trim();
+    if (!grade || !gradeNumbers.includes(grade) || activeGrades.includes(grade)) return;
+
+    activeGrades = [...activeGrades, grade].sort((left, right) => Number(left) - Number(right));
+    classesByGrade[grade] = dedupeLetters(classesByGrade[grade] || []);
+    saveStore();
+    render();
+    if (statusNode) {
+      statusNode.textContent = `Grade ${grade} added.`;
+    }
+    closeGradeModal();
   });
 
   closeButtons.forEach((button) => {

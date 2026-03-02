@@ -2402,6 +2402,11 @@ body.match-log-workspace-open {
   gap: 12px;
 }
 
+.enrollment-manager-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .enrollment-grade-list {
   display: grid;
   gap: 10px;
@@ -2426,6 +2431,13 @@ body.match-log-workspace-open {
 
 .enrollment-grade-head h3 {
   margin: 0;
+}
+
+.enrollment-grade-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .enrollment-class-list {
