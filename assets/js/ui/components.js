@@ -5236,6 +5236,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const fairnessRulesSelect = fixtureNode.querySelector('[data-fixture-fairness-rules]');
   const fairnessModal = fixtureNode.querySelector('[data-fixture-fairness-modal]');
   const fairnessOptionsNode = fixtureNode.querySelector('[data-fixture-fairness-options]');
+  const fairnessRuleCheckboxes = Array.from(fixtureNode.querySelectorAll('[data-fixture-fairness-check]'));
   const fairnessCloseButtons = Array.from(fixtureNode.querySelectorAll('[data-fixture-close-fairness-modal]'));
   const fairnessApplyButton = fixtureNode.querySelector('[data-fixture-apply-fairness-rules]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
@@ -6184,6 +6185,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
     fairnessSummaryNode.textContent = 'Reference list only (not applied to auto-generate).';
   };
 
+  const syncFairnessCheckboxesFromState = () => {
+    if (!fairnessRuleCheckboxes.length) return;
+    const selected = new Set(selectedFairnessRuleIds());
+    fairnessRuleCheckboxes.forEach((checkbox) => {
+      if (!(checkbox instanceof HTMLInputElement)) return;
+      const ruleId = String(checkbox.value || '').trim();
+      checkbox.checked = ruleId ? selected.has(ruleId) : false;
+    });
+  };
+
   const renderFairnessDropdownOptions = () => {
     if (!(fairnessOptionsNode instanceof HTMLElement) || !(fairnessRulesSelect instanceof HTMLSelectElement)) return;
     const ruleItems = Array.from(fairnessRulesSelect.options)
@@ -6210,7 +6221,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     });
 
     refreshFairnessSummary();
-    renderFairnessDropdownOptions();
+    syncFairnessCheckboxesFromState();
   };
 
   const setSelectedTeamIds = (teamIds) => {
@@ -7809,7 +7820,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-    renderFairnessDropdownOptions();
+    syncFairnessCheckboxesFromState();
     modalNode.classList.remove('is-hidden');
     modalNode.style.display = 'grid';
     modalNode.style.visibility = 'visible';
@@ -7836,7 +7847,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
   fairnessRulesSelect?.addEventListener('change', () => {
     refreshFairnessSummary();
     renderFairnessDropdownOptions();
-    applyFairnessRulesSelection();
   });
 
   fairnessCloseButtons.forEach((button) => {
@@ -7847,6 +7857,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   fairnessApplyButton?.addEventListener('click', () => {
+    const selectedRuleIds = fairnessRuleCheckboxes
+      .filter((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+    setSelectedFairnessRuleIds(selectedRuleIds);
     closeFairnessModal();
   });
 
