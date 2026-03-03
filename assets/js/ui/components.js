@@ -7923,6 +7923,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .filter(Boolean);
     setSelectedFairnessRuleIds(selectedRuleIds);
     closeFairnessModal();
+    showSmartToast(
+      selectedRuleIds.length === 0
+        ? 'No fairness rules selected.'
+        : `Applied ${selectedRuleIds.length} fairness rule${selectedRuleIds.length === 1 ? '' : 's'}.`,
+      { tone: selectedRuleIds.length === 0 ? 'info' : 'success' }
+    );
   });
 
   resolveFairnessModalNode()?.addEventListener('click', (event) => {
