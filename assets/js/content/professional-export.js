@@ -158,14 +158,31 @@ export const exportProfessionalWorkbook = async ({
   try {
     const logoResponse = await fetch(logoUrl);
     if (logoResponse.ok) {
-      const logoBuffer = await logoResponse.arrayBuffer();
+      const logoBlob = await logoResponse.blob();
+      const logoBuffer = await logoBlob.arrayBuffer();
       const imageId = workbook.addImage({
         buffer: logoBuffer,
         extension: 'png'
       });
+
+      let logoWidth = 86;
+      let logoHeight = 86;
+      try {
+        const bitmap = await createImageBitmap(logoBlob);
+        const intrinsicWidth = Number(bitmap.width) || 1;
+        const intrinsicHeight = Number(bitmap.height) || 1;
+        const aspectRatio = intrinsicWidth / intrinsicHeight;
+        const targetHeight = 86;
+        logoHeight = targetHeight;
+        logoWidth = Math.max(42, Math.min(120, Math.round(targetHeight * aspectRatio)));
+        bitmap.close();
+      } catch {
+        // Fall back to square logo frame if intrinsic dimensions are unavailable.
+      }
+
       sheet.addImage(imageId, {
         tl: { col: 0.1, row: 0.15 },
-        ext: { width: 86, height: 86 }
+        ext: { width: logoWidth, height: logoHeight }
       });
     }
   } catch {

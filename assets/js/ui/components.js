@@ -2009,6 +2009,18 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="netball">Netball</option>
                   </select>
                 </label>
+                <label>
+                  Fixture fairness rules (select to enforce)
+                  <select data-fixture-fairness-rules multiple size="7">
+                    <option value="equal_matches_season" selected>Every team plays the same number of matches each season</option>
+                    <option value="equal_matches_leg" selected>Every team plays the same number of matches in each leg</option>
+                    <option value="balanced_home_away" selected>Each team keeps balanced home/away matches per leg and season</option>
+                    <option value="equal_round_participation" selected>Each team has balanced round participation within each leg</option>
+                    <option value="unique_opponent_per_leg" selected>No duplicate opponent pairing in the same leg</option>
+                    <option value="no_double_round_booking" selected>No team plays more than once in a single round</option>
+                    <option value="fifa_no_self_match" selected>No self-fixtures (team cannot play itself)</option>
+                  </select>
+                </label>
               </div>
               <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
                 <h3>Soccer Format</h3>
@@ -4964,6 +4976,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const rulesSaveButton = fixtureNode.querySelector('[data-fixture-rules-save]');
   const rulesPreviewNode = fixtureNode.querySelector('[data-fixture-rules-preview-output]');
   const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
+  const fairnessRulesSelect = fixtureNode.querySelector('[data-fixture-fairness-rules]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
   const netballPanel = fixtureNode.querySelector('[data-fixture-sport-panel="netball"]');
@@ -5013,6 +5026,15 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const fixtureRulesStorageKey = `bhanoyi.fixtureDateRules.${fixtureSectionKey}`;
   const fixtureCreatorStateStorageKey = `bhanoyi.fixtureCreatorState.${fixtureSectionKey}`;
   const defaultRulesBucket = 'default';
+  const defaultFairnessRuleIds = [
+    'equal_matches_season',
+    'equal_matches_leg',
+    'balanced_home_away',
+    'equal_round_participation',
+    'unique_opponent_per_leg',
+    'no_double_round_booking',
+    'fifa_no_self_match'
+  ];
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   let fixtureDates = {};
   let fixtureCreatorState = {
@@ -5022,6 +5044,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   if (rulesPanel instanceof HTMLElement) {
     rulesPanel.classList.toggle('is-hidden', !isAdminMode);
+  }
+  if (fairnessRulesSelect instanceof HTMLSelectElement) {
+    fairnessRulesSelect.disabled = !isAdminMode;
   }
   if (autoFillToggle instanceof HTMLInputElement) {
     autoFillToggle.disabled = !isAdminMode;
@@ -5867,6 +5892,32 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return value === 'soccer' || value === 'netball' ? value : '';
   };
 
+  const selectedFairnessRuleIds = () => {
+    if (!(fairnessRulesSelect instanceof HTMLSelectElement)) {
+      return [...defaultFairnessRuleIds];
+    }
+
+    const selected = Array.from(fairnessRulesSelect.selectedOptions)
+      .map((option) => String(option.value || '').trim())
+      .filter(Boolean);
+
+    return selected.length ? Array.from(new Set(selected)) : [...defaultFairnessRuleIds];
+  };
+
+  const setSelectedFairnessRuleIds = (ruleIds = []) => {
+    if (!(fairnessRulesSelect instanceof HTMLSelectElement)) return;
+    const requested = new Set(
+      (Array.isArray(ruleIds) ? ruleIds : [])
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+    );
+    const fallback = requested.size ? requested : new Set(defaultFairnessRuleIds);
+
+    Array.from(fairnessRulesSelect.options).forEach((option) => {
+      option.selected = fallback.has(String(option.value || '').trim());
+    });
+  };
+
   const setSelectedTeamIds = (teamIds) => {
     const allowed = new Set((teamIds || []).filter((teamId) => houseOptions.some((team) => team.id === teamId)));
     teamPickInputs.forEach((input) => {
@@ -6080,6 +6131,314 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return { homeId: String(homeId || '').trim(), awayId: String(awayId || '').trim() };
   };
 
+  const selectedFairnessRuleSet = () => new Set(selectedFairnessRuleIds());
+
+  const buildFairnessReport = (fixtures, teamIds, selectedRuleIds = []) => {
+    const normalizedFixtures = Array.isArray(fixtures) ? fixtures : [];
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    const selectedRules = new Set((Array.isArray(selectedRuleIds) ? selectedRuleIds : []).filter(Boolean));
+    const fixtureReasons = {};
+    const teamIssues = [];
+
+    const appendFixtureReason = (fixtureId, reason) => {
+      const normalizedFixtureId = String(fixtureId || '').trim();
+      const normalizedReason = String(reason || '').trim();
+      if (!normalizedFixtureId || !normalizedReason) return;
+      const existing = Array.isArray(fixtureReasons[normalizedFixtureId]) ? fixtureReasons[normalizedFixtureId] : [];
+      if (!existing.includes(normalizedReason)) {
+        existing.push(normalizedReason);
+      }
+      fixtureReasons[normalizedFixtureId] = existing;
+    };
+
+    const appendTeamIssue = (reason) => {
+      const normalizedReason = String(reason || '').trim();
+      if (!normalizedReason) return;
+      if (!teamIssues.includes(normalizedReason)) {
+        teamIssues.push(normalizedReason);
+      }
+    };
+
+    const appendReasonForTeamInFixtures = (scopeFixtures, teamId, reason) => {
+      (scopeFixtures || []).forEach((fixture) => {
+        if (fixture.homeId !== teamId && fixture.awayId !== teamId) return;
+        appendFixtureReason(getFixtureId(fixture), reason);
+      });
+    };
+
+    const legLabels = Array.from(new Set(normalizedFixtures.map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+
+    if (selectedRules.has('fifa_no_self_match')) {
+      normalizedFixtures.forEach((fixture) => {
+        if (String(fixture.homeId || '').trim() !== String(fixture.awayId || '').trim()) return;
+        const reason = `Invalid fixture: ${teamNameById(fixture.homeId)} is scheduled to play itself.`;
+        appendTeamIssue(reason);
+        appendFixtureReason(getFixtureId(fixture), reason);
+      });
+    }
+
+    if (selectedRules.has('unique_opponent_per_leg')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const pairMap = {};
+        legFixtures.forEach((fixture) => {
+          const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
+          if (!pairKey) return;
+          pairMap[pairKey] = Array.isArray(pairMap[pairKey]) ? pairMap[pairKey] : [];
+          pairMap[pairKey].push(fixture);
+        });
+
+        Object.entries(pairMap).forEach(([pairKey, list]) => {
+          if (!Array.isArray(list) || list.length <= 1) return;
+          const { teamA, teamB } = splitUnorderedPairKey(pairKey);
+          const reason = `Duplicate pairing in ${legLabel} leg: ${teamNameById(teamA)} vs ${teamNameById(teamB)} appears ${list.length} times.`;
+          appendTeamIssue(reason);
+          list.forEach((fixture) => appendFixtureReason(getFixtureId(fixture), reason));
+        });
+      });
+    }
+
+    if (selectedRules.has('equal_matches_leg')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const countByTeam = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+        legFixtures.forEach((fixture) => {
+          if (fixture.homeId in countByTeam) countByTeam[fixture.homeId] += 1;
+          if (fixture.awayId in countByTeam) countByTeam[fixture.awayId] += 1;
+        });
+
+        const values = Object.values(countByTeam);
+        if (!values.length) return;
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        if (min === max) return;
+
+        normalizedTeams.forEach((teamId) => {
+          if ((countByTeam[teamId] || 0) === min && (countByTeam[teamId] || 0) === max) return;
+          const reason = `${teamNameById(teamId)} has ${countByTeam[teamId]} match(es) in ${legLabel} leg, expected ${min}-${max} equality.`;
+          appendTeamIssue(reason);
+          appendReasonForTeamInFixtures(legFixtures, teamId, reason);
+        });
+      });
+    }
+
+    if (selectedRules.has('equal_matches_season')) {
+      const countByTeam = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      normalizedFixtures.forEach((fixture) => {
+        if (fixture.homeId in countByTeam) countByTeam[fixture.homeId] += 1;
+        if (fixture.awayId in countByTeam) countByTeam[fixture.awayId] += 1;
+      });
+
+      const values = Object.values(countByTeam);
+      if (values.length) {
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        if (min !== max) {
+          normalizedTeams.forEach((teamId) => {
+            const reason = `${teamNameById(teamId)} has ${countByTeam[teamId]} match(es) this season, expected equal totals.`;
+            appendTeamIssue(reason);
+            appendReasonForTeamInFixtures(normalizedFixtures, teamId, reason);
+          });
+        }
+      }
+    }
+
+    if (selectedRules.has('no_double_round_booking') || selectedRules.has('equal_round_participation')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const roundLabels = Array.from(new Set(legFixtures.map((entry) => Number(entry.round)).filter(Number.isFinite)));
+        const participationByTeam = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+
+        roundLabels.forEach((roundValue) => {
+          const roundFixtures = legFixtures.filter((entry) => Number(entry.round) === Number(roundValue));
+          const appearances = {};
+          roundFixtures.forEach((fixture) => {
+            appearances[fixture.homeId] = (appearances[fixture.homeId] || 0) + 1;
+            appearances[fixture.awayId] = (appearances[fixture.awayId] || 0) + 1;
+          });
+
+          Object.entries(appearances).forEach(([teamId, count]) => {
+            if (teamId in participationByTeam) {
+              participationByTeam[teamId] = (participationByTeam[teamId] || 0) + (count > 0 ? 1 : 0);
+            }
+
+            if (selectedRules.has('no_double_round_booking') && count > 1) {
+              const reason = `${teamNameById(teamId)} is scheduled ${count} times in round ${roundValue} (${legLabel} leg).`;
+              appendTeamIssue(reason);
+              roundFixtures
+                .filter((fixture) => fixture.homeId === teamId || fixture.awayId === teamId)
+                .forEach((fixture) => appendFixtureReason(getFixtureId(fixture), reason));
+            }
+          });
+        });
+
+        if (selectedRules.has('equal_round_participation')) {
+          const values = Object.values(participationByTeam);
+          if (values.length) {
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            if (max - min > 1) {
+              normalizedTeams.forEach((teamId) => {
+                const reason = `${teamNameById(teamId)} has uneven round participation in ${legLabel} leg (${participationByTeam[teamId]} rounds).`;
+                appendTeamIssue(reason);
+                appendReasonForTeamInFixtures(legFixtures, teamId, reason);
+              });
+            }
+          }
+        }
+      });
+    }
+
+    if (selectedRules.has('balanced_home_away')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const homeCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+        const awayCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+        legFixtures.forEach((fixture) => {
+          if (fixture.homeId in homeCount) homeCount[fixture.homeId] += 1;
+          if (fixture.awayId in awayCount) awayCount[fixture.awayId] += 1;
+        });
+
+        normalizedTeams.forEach((teamId) => {
+          const delta = Math.abs((homeCount[teamId] || 0) - (awayCount[teamId] || 0));
+          if (delta <= 1) return;
+          const reason = `${teamNameById(teamId)} has unbalanced home/away in ${legLabel} leg (${homeCount[teamId]} home vs ${awayCount[teamId]} away).`;
+          appendTeamIssue(reason);
+          appendReasonForTeamInFixtures(legFixtures, teamId, reason);
+        });
+      });
+
+      const seasonHome = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      const seasonAway = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      normalizedFixtures.forEach((fixture) => {
+        if (fixture.homeId in seasonHome) seasonHome[fixture.homeId] += 1;
+        if (fixture.awayId in seasonAway) seasonAway[fixture.awayId] += 1;
+      });
+      normalizedTeams.forEach((teamId) => {
+        const delta = Math.abs((seasonHome[teamId] || 0) - (seasonAway[teamId] || 0));
+        if (delta === 0) return;
+        const reason = `${teamNameById(teamId)} has unbalanced home/away over the full season (${seasonHome[teamId]} home vs ${seasonAway[teamId]} away).`;
+        appendTeamIssue(reason);
+        appendReasonForTeamInFixtures(normalizedFixtures, teamId, reason);
+      });
+    }
+
+    const flattenedReasons = Object.fromEntries(
+      Object.entries(fixtureReasons).map(([fixtureId, reasons]) => [fixtureId, Array.from(new Set(reasons)).join(' ')])
+    );
+
+    return {
+      hasUnfairness: Object.keys(flattenedReasons).length > 0,
+      fixtureReasons: flattenedReasons,
+      teamIssues,
+      affectedFixtureCount: Object.keys(flattenedReasons).length
+    };
+  };
+
+  const rebalanceHomeAwayForScope = ({ fixtures, teamIds, lockedIndexSet, scopeIndexes, tolerance }) => {
+    const allIndexes = Array.isArray(scopeIndexes) ? [...scopeIndexes] : [];
+    const teamList = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (!teamList.length || !allIndexes.length) return false;
+
+    let changed = false;
+    let guard = 0;
+
+    const countHomeAway = () => {
+      const home = Object.fromEntries(teamList.map((teamId) => [teamId, 0]));
+      const away = Object.fromEntries(teamList.map((teamId) => [teamId, 0]));
+      allIndexes.forEach((index) => {
+        const fixture = fixtures[index];
+        if (!fixture) return;
+        if (fixture.homeId in home) home[fixture.homeId] += 1;
+        if (fixture.awayId in away) away[fixture.awayId] += 1;
+      });
+      return { home, away };
+    };
+
+    while (guard < 2000) {
+      guard += 1;
+      const { home, away } = countHomeAway();
+      const deltas = Object.fromEntries(teamList.map((teamId) => [teamId, (home[teamId] || 0) - (away[teamId] || 0)]));
+      const over = teamList.filter((teamId) => deltas[teamId] > tolerance);
+      const under = teamList.filter((teamId) => deltas[teamId] < -tolerance);
+      if (!over.length || !under.length) break;
+
+      let swapIndex = -1;
+      for (const index of allIndexes) {
+        if (lockedIndexSet.has(index)) continue;
+        const fixture = fixtures[index];
+        if (!fixture) continue;
+        if (deltas[fixture.homeId] > tolerance && deltas[fixture.awayId] < -tolerance) {
+          swapIndex = index;
+          break;
+        }
+      }
+
+      if (swapIndex < 0) break;
+      const target = fixtures[swapIndex];
+      fixtures[swapIndex] = {
+        ...target,
+        homeId: target.awayId,
+        awayId: target.homeId
+      };
+      changed = true;
+    }
+
+    return changed;
+  };
+
+  const enforceSelectedFairnessRules = ({ fixtures, teamIds, selectedRuleIds = [], lockedIndexes = [] }) => {
+    const normalizedFixtures = (fixtures || []).map((entry) => ({ ...entry }));
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    const selectedRules = new Set((Array.isArray(selectedRuleIds) ? selectedRuleIds : []).filter(Boolean));
+    const lockedIndexSet = new Set(
+      (Array.isArray(lockedIndexes) ? lockedIndexes : [])
+        .filter((index) => Number.isInteger(index) && index >= 0 && index < normalizedFixtures.length)
+    );
+
+    if (selectedRules.has('balanced_home_away') && normalizedTeams.length) {
+      const legLabels = Array.from(new Set(normalizedFixtures.map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+      legLabels.forEach((legLabel) => {
+        const scopeIndexes = normalizedFixtures
+          .map((entry, index) => ({ entry, index }))
+          .filter(({ entry }) => String(entry.leg || '').trim() === legLabel)
+          .map(({ index }) => index);
+        rebalanceHomeAwayForScope({
+          fixtures: normalizedFixtures,
+          teamIds: normalizedTeams,
+          lockedIndexSet,
+          scopeIndexes,
+          tolerance: 1
+        });
+      });
+
+      rebalanceHomeAwayForScope({
+        fixtures: normalizedFixtures,
+        teamIds: normalizedTeams,
+        lockedIndexSet,
+        scopeIndexes: normalizedFixtures.map((_, index) => index),
+        tolerance: 0
+      });
+    }
+
+    const report = buildFairnessReport(normalizedFixtures, normalizedTeams, Array.from(selectedRules));
+    if (report.hasUnfairness) {
+      return {
+        ok: false,
+        message:
+          report.teamIssues[0] ||
+          'Selected fairness rules cannot be satisfied with the current pinned/manual constraints.',
+        report
+      };
+    }
+
+    return {
+      ok: true,
+      fixtures: normalizedFixtures,
+      report
+    };
+  };
+
   const validateNoDuplicatePairingsPerLeg = (fixtures, teamIds) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
@@ -6251,7 +6610,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const refreshCurrentUnfairnessReport = (fixtures) => {
-    currentUnfairnessReport = buildHomeAwayUnfairnessReport(fixtures, fairnessTeamIdsForFixtures(fixtures));
+    currentUnfairnessReport = buildFairnessReport(
+      fixtures,
+      fairnessTeamIdsForFixtures(fixtures),
+      selectedFairnessRuleIds()
+    );
   };
 
   const refreshFixtureApprovalUi = () => {
@@ -6262,7 +6625,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!shouldShow) return;
 
     if (currentUnfairnessReport.hasUnfairness) {
-      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) are highlighted with fairness concerns. Hover rows for details, then use a Finalize & sync button to push to calendar.`;
+      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) violate selected fairness rules. Resolve highlighted rows before finalizing sync.`;
     } else {
       approvalStatusNode.textContent = 'Draft is ready. Use Finalize & sync to publish fixtures to the calendar.';
     }
@@ -6271,7 +6634,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       approveResolvedButton.disabled = currentUnfairnessReport.hasUnfairness;
     }
     if (approveAnywayButton instanceof HTMLButtonElement) {
-      approveAnywayButton.disabled = false;
+      approveAnywayButton.disabled = currentUnfairnessReport.hasUnfairness;
     }
   };
 
@@ -6282,6 +6645,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     fixtureCreatorState.lastSport = activeSport;
     fixtureCreatorState.sports[activeSport] = {
       selectedTeamIds: selectedTeamIds(),
+      fairnessRuleIds: selectedFairnessRuleIds(),
       fixtures: lastFixtures.map((entry) => ({ ...entry })),
       pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
       setup: readSportSetupValues(activeSport),
@@ -6426,7 +6790,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     editedIndex,
     nextHomeId,
     nextAwayId,
-    lockedIndexes = []
+    lockedIndexes = [],
+    selectedRuleIds = []
   }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
@@ -6482,11 +6847,24 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     const changedIndexes = repairResult.changedIndexes || [];
 
+    const fairnessResult = enforceSelectedFairnessRules({
+      fixtures: repairResult.fixtures,
+      teamIds: normalizedTeams,
+      selectedRuleIds,
+      lockedIndexes: effectiveLockedIndexes
+    });
+    if (!fairnessResult.ok) {
+      return {
+        ok: false,
+        message: fairnessResult.message
+      };
+    }
+
     const affectedOtherCount = changedIndexes.filter((index) => index !== editedIndex).length;
 
     return {
       ok: true,
-      fixtures: repairResult.fixtures,
+      fixtures: fairnessResult.fixtures,
       affectedOtherCount,
       changedCount: changedIndexes.length
     };
@@ -6738,6 +7116,24 @@ const hydrateFixtureCreator = (fixtureNode) => {
         .filter(Boolean)
     );
 
+    const selectedRules = selectedFairnessRuleIds();
+    const fairnessEnforcement = enforceSelectedFairnessRules({
+      fixtures: lastFixtures,
+      teamIds: teams,
+      selectedRuleIds: selectedRules,
+      lockedIndexes: pinnedIndexes
+    });
+    if (!fairnessEnforcement.ok) {
+      lastFixtures = [];
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        statusNode.textContent = `Selected fairness rules could not be satisfied with current pinned/manual constraints. ${fairnessEnforcement.message}`;
+      }
+      return;
+    }
+
+    lastFixtures = fairnessEnforcement.fixtures;
+
     const generationValidation = validateNoDuplicatePairingsPerLeg(lastFixtures, teams);
     if (!generationValidation.ok) {
       lastFixtures = [];
@@ -6792,6 +7188,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (selectedIds.length) {
       setSelectedTeamIds(selectedIds);
     }
+
+    setSelectedFairnessRuleIds(saved.fairnessRuleIds);
 
     applySportSetupValues(key, saved.setup || {});
     refreshSportPanelState();
@@ -7047,6 +7445,47 @@ const hydrateFixtureCreator = (fixtureNode) => {
     input.addEventListener('change', generateFixtures);
   });
 
+  fairnessRulesSelect?.addEventListener('change', () => {
+    persistActiveSportState();
+    if (!lastFixtures.length) return;
+
+    const enforcement = enforceSelectedFairnessRules({
+      fixtures: lastFixtures,
+      teamIds: fairnessTeamIdsForFixtures(lastFixtures),
+      selectedRuleIds: selectedFairnessRuleIds(),
+      lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+    });
+
+    if (!enforcement.ok) {
+      currentUnfairnessReport =
+        enforcement.report ||
+        buildFairnessReport(lastFixtures, fairnessTeamIdsForFixtures(lastFixtures), selectedFairnessRuleIds());
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        statusNode.textContent = `Selected fairness rules require adjustments: ${enforcement.message}`;
+      }
+      return;
+    }
+
+    lastFixtures = enforcement.fixtures;
+    refreshCurrentUnfairnessReport(lastFixtures);
+    if (isAdminMode) {
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+    } else {
+      pendingFixtureApproval = false;
+      approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+    }
+    persistActiveSportState();
+    renderFixtures(lastFixtures);
+    if (statusNode) {
+      statusNode.textContent = 'Fairness rules updated and applied to current fixtures.';
+    }
+  });
+
   rulesSaveButton?.addEventListener('click', () => {
     const saved = saveDateRules();
     if (saved) {
@@ -7149,23 +7588,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
         editedIndex: rowIndex,
         nextHomeId: nextHome,
         nextAwayId: nextAway,
-        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures),
+        selectedRuleIds: selectedFairnessRuleIds()
       });
 
       if (!repairResult.ok) {
         if (statusNode) statusNode.textContent = repairResult.message;
         renderFixtures(lastFixtures);
         return;
-      }
-
-      if (repairResult.affectedOtherCount > 0) {
-        const proceed = window.confirm(
-          `Apply and rebalance fixtures? ${repairResult.affectedOtherCount} other fixture(s) will auto-update.`
-        );
-        if (!proceed) {
-          renderFixtures(lastFixtures);
-          return;
-        }
       }
 
       lastFixtures = repairResult.fixtures;
@@ -7207,23 +7637,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
         editedIndex: rowIndex,
         nextHomeId: nextHome,
         nextAwayId: nextAway,
-        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures),
+        selectedRuleIds: selectedFairnessRuleIds()
       });
 
       if (!repairResult.ok) {
         if (statusNode) statusNode.textContent = repairResult.message;
         renderFixtures(lastFixtures);
         return;
-      }
-
-      if (repairResult.affectedOtherCount > 0) {
-        const proceed = window.confirm(
-          `Apply and rebalance fixtures? ${repairResult.affectedOtherCount} other fixture(s) will auto-update.`
-        );
-        if (!proceed) {
-          renderFixtures(lastFixtures);
-          return;
-        }
       }
 
       lastFixtures = repairResult.fixtures;
@@ -7276,6 +7697,28 @@ const hydrateFixtureCreator = (fixtureNode) => {
         pinnedFixtureSlotKeys.add(slotKey);
       }
 
+      const enforcement = enforceSelectedFairnessRules({
+        fixtures: lastFixtures,
+        teamIds: fairnessTeamIdsForFixtures(lastFixtures),
+        selectedRuleIds: selectedFairnessRuleIds(),
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+      });
+
+      if (!enforcement.ok) {
+        if (pinnedFixtureSlotKeys.has(slotKey)) {
+          pinnedFixtureSlotKeys.delete(slotKey);
+        } else {
+          pinnedFixtureSlotKeys.add(slotKey);
+        }
+        if (statusNode) {
+          statusNode.textContent = `Pin action rejected: ${enforcement.message}`;
+        }
+        renderFixtures(lastFixtures);
+        return;
+      }
+
+      lastFixtures = enforcement.fixtures;
+
       if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
@@ -7317,14 +7760,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
     refreshCurrentUnfairnessReport(lastFixtures);
     const hasUnfairness = currentUnfairnessReport.hasUnfairness;
 
-    if (hasUnfairness && !allowUnfairness) {
+    if (hasUnfairness) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = 'Resolve highlighted fairness concerns, then click "Finalize & sync (after fixes)".';
+        statusNode.textContent = 'Selected fairness rules are mandatory. Resolve highlighted issues before finalizing.';
       }
-      showSmartToast('Resolve highlighted fairness concerns before approval.', { tone: 'info' });
+      showSmartToast('Selected fairness rules are mandatory and cannot be bypassed.', { tone: 'info' });
       return;
     }
 
@@ -7366,6 +7809,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
     refreshSportPanelState();
     if (!restoreSavedStateForSport(activeSport)) {
+      setSelectedFairnessRuleIds(defaultFairnessRuleIds);
       pinnedFixtureSlotKeys = new Set();
       generateFixtures();
     }
