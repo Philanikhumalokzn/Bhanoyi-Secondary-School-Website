@@ -133,6 +133,22 @@ export const persistEnrollmentStoreRemote = async (sectionKey, payload) => {
 
   if (accessToken) {
     try {
+      const adminResponse = await fetch('/api/enrollment-store-admin', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sectionKey: normalizeSectionKey(sectionKey),
+          payload: normalized
+        })
+      });
+
+      if (adminResponse.ok) {
+        return true;
+      }
+
       const response = await fetch(`${url}/rest/v1/site_settings?on_conflict=setting_key`, {
         method: 'POST',
         headers: {

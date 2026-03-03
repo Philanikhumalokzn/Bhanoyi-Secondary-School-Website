@@ -3387,7 +3387,10 @@ const hydrateEnrollmentManager = (managerNode) => {
     pendingRemoteEnrollmentPayload = null;
 
     try {
-      await persistEnrollmentStore(sectionKey, storageKey, payload);
+      const result = await persistEnrollmentStore(sectionKey, storageKey, payload);
+      if (!result.savedRemote && statusNode) {
+        statusNode.textContent = 'Saved on this device only. Remote sync unavailable right now.';
+      }
     } finally {
       isRemoteEnrollmentSaveInFlight = false;
       if (pendingRemoteEnrollmentPayload) {
