@@ -7771,9 +7771,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   fairnessToggleButton?.addEventListener('click', (event) => {
     event.stopPropagation();
+    event.preventDefault();
     if (!isAdminMode) {
       if (statusNode) {
         statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
+      }
+      return;
+    }
+    if (!(fairnessMenuNode instanceof HTMLElement)) {
+      if (statusNode) {
+        statusNode.textContent = 'Fairness dropdown menu is unavailable. Refresh and try again.';
       }
       return;
     }
@@ -7794,15 +7801,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     setSelectedFairnessRuleIds(selectedRuleIds);
     applyFairnessRulesSelection();
-  });
-
-  document.addEventListener('click', (event) => {
-    if (!(fairnessDropdownNode instanceof HTMLElement)) return;
-    if (fairnessMenuNode instanceof HTMLElement && fairnessMenuNode.classList.contains('is-hidden')) return;
-    const target = event.target;
-    if (!(target instanceof Node)) return;
-    if (fairnessDropdownNode.contains(target)) return;
-    setFairnessDropdownExpanded(false);
   });
 
   document.addEventListener('keydown', (event) => {
