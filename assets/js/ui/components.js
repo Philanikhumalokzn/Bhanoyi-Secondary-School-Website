@@ -7784,6 +7784,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const modalNode = resolveFairnessModalNode();
     if (!(modalNode instanceof HTMLElement)) return;
     modalNode.classList.add('is-hidden');
+    modalNode.style.removeProperty('display');
+    modalNode.style.removeProperty('visibility');
+    modalNode.style.removeProperty('opacity');
+    modalNode.style.removeProperty('pointer-events');
   };
 
   const openFairnessModal = () => {
@@ -7791,6 +7795,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (statusNode) {
         statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
       }
+      showSmartToast('Fairness rules are editable only in admin mode (?admin=1).', { tone: 'info' });
       return;
     }
 
@@ -7799,11 +7804,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (statusNode) {
         statusNode.textContent = 'Could not open fairness rules modal. Please refresh and try again.';
       }
+      showSmartToast('Could not open fairness rules modal.', { tone: 'error' });
       return;
     }
 
     renderFairnessDropdownOptions();
     modalNode.classList.remove('is-hidden');
+    modalNode.style.display = 'grid';
+    modalNode.style.visibility = 'visible';
+    modalNode.style.opacity = '1';
+    modalNode.style.pointerEvents = 'auto';
   };
 
   fairnessRulesSelect?.addEventListener('change', () => {
