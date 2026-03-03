@@ -2193,6 +2193,13 @@ body.news-read-open {
   flex-wrap: wrap;
 }
 
+.inline-house-members-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .inline-house-members-head h3,
 .inline-house-members-section h4 {
   margin: 0;

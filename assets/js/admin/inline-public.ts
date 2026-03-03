@@ -15,6 +15,7 @@ import {
   signOut
 } from './api';
 import { persistEnrollmentStore, syncEnrollmentStoreFromRemote } from '../content/enrollment.persistence.js';
+import { exportProfessionalWorkbook } from '../content/professional-export.js';
 
 type AnnouncementRecord = {
   id: string;
@@ -3661,7 +3662,10 @@ const wireSportsHouseManagerInline = () => {
     <article class="panel inline-house-members-panel" role="dialog" aria-modal="true" aria-label="Manage house members">
       <div class="inline-house-members-head">
         <h3 data-house-members-title>Manage House</h3>
-        <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-members-export="true">Export house list</button>
+          <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
+        </div>
       </div>
       <p class="inline-house-members-meta" data-house-members-meta></p>
       <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
@@ -3747,6 +3751,7 @@ const wireSportsHouseManagerInline = () => {
   const houseModalRemoveSportButton = houseModal.querySelector('[data-house-members-remove-sport]');
   const houseModalPullSelect = houseModal.querySelector('[data-house-members-pull-select]');
   const houseModalPullButton = houseModal.querySelector('[data-house-members-pull]');
+  const houseModalExportButton = houseModal.querySelector('[data-house-members-export="true"]');
   const houseModalCloseButtons = Array.from(houseModal.querySelectorAll('[data-house-members-close="true"]'));
 
   if (
@@ -3761,7 +3766,8 @@ const wireSportsHouseManagerInline = () => {
     !(houseModalAssignSportButton instanceof HTMLButtonElement) ||
     !(houseModalRemoveSportButton instanceof HTMLButtonElement) ||
     !(houseModalPullSelect instanceof HTMLSelectElement) ||
-    !(houseModalPullButton instanceof HTMLButtonElement)
+    !(houseModalPullButton instanceof HTMLButtonElement) ||
+    !(houseModalExportButton instanceof HTMLButtonElement)
   ) {
     return;
   }
@@ -4376,6 +4382,45 @@ const wireSportsHouseManagerInline = () => {
     });
   };
 
+  const buildHouseExportRows = (houseId: string) => {
+    const activeHouse = readState.options.find((entry) => entry.id === houseId);
+    if (!activeHouse) {
+      return { activeHouse: null, rows: [] as Array<Record<string, string>> };
+    }
+
+    const sportCodes = loadSportingCodes();
+    const sportCodeById = new Map(sportCodes.map((entry) => [entry.id, entry]));
+    const assignmentStore = loadHouseSportsAssignments();
+    const houseAssignments = assignmentStore[activeHouse.id] || {};
+
+    const members = collectEnrollmentLearners()
+      .filter((record) => record.houseId === activeHouse.id)
+      .sort((left, right) => {
+        if (left.memberType !== right.memberType) {
+          return left.memberType === 'teacher' ? -1 : 1;
+        }
+        return left.displayName.localeCompare(right.displayName);
+      });
+
+    const rows = members.map((record) => {
+      const assignedCodeIds = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
+      const assignedCodes = assignedCodeIds
+        .map((codeId) => sportCodeById.get(codeId)?.title || '')
+        .filter((entry) => Boolean(entry));
+      const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'N/A';
+      return {
+        role: record.memberType === 'teacher' ? 'Teacher' : 'Learner',
+        fullName: record.displayName,
+        identifier: record.admissionNo || '-',
+        gender: record.gender || 'Unspecified',
+        className: classLabel,
+        sportingCodes: record.memberType === 'teacher' ? 'Teacher member' : assignedCodes.join(', ') || 'Unassigned'
+      };
+    });
+
+    return { activeHouse, rows };
+  };
+
   houseModalSearch.addEventListener('input', () => {
     memberSearchValue = houseModalSearch.value;
     renderHouseMembersModal();
@@ -4501,6 +4546,48 @@ const wireSportsHouseManagerInline = () => {
 
     const houseName = readState.options.find((entry) => entry.id === activeHouseId)?.name || 'house';
     showStatus(`Pulled ${selectedRecords.length} learner${selectedRecords.length === 1 ? '' : 's'} into ${houseName}.`);
+  });
+
+  houseModalExportButton.addEventListener('click', async () => {
+    if (!activeHouseId) {
+      showStatus('Open a house first, then export its list.');
+      return;
+    }
+
+    try {
+      const { activeHouse, rows } = buildHouseExportRows(activeHouseId);
+      if (!activeHouse) {
+        showStatus('House details could not be resolved for export.');
+        return;
+      }
+
+      const safeHouseName = activeHouse.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'house';
+
+      await exportProfessionalWorkbook({
+        fileName: `${safeHouseName}-house-register.xlsx`,
+        sheetName: 'House Register',
+        title: 'Official House Register',
+        contextLine: `${activeHouse.name} • Manage Houses`,
+        metaLine: `Members: ${rows.length}`,
+        columns: [
+          { header: 'Role', key: 'role', width: 12, align: 'center' },
+          { header: 'Full Name', key: 'fullName', width: 30, align: 'left' },
+          { header: 'Admission/Staff No.', key: 'identifier', width: 20, align: 'center' },
+          { header: 'Gender', key: 'gender', width: 14, align: 'center' },
+          { header: 'Class', key: 'className', width: 16, align: 'center' },
+          { header: 'Sporting Codes', key: 'sportingCodes', width: 40, align: 'left', wrapText: true }
+        ],
+        rows,
+        note: 'Notice: This register is generated from the current enrollment and house assignment records.'
+      });
+
+      showStatus(`${activeHouse.name} house list exported (.xlsx).`);
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to export house list.');
+    }
   });
 
   const openHouseModal = async (houseId: string) => {
