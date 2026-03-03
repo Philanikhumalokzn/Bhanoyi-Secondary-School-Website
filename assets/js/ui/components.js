@@ -2009,11 +2009,9 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="netball">Netball</option>
                   </select>
                 </label>
-                <div class="fixture-fairness-control">
-                  <span class="fixture-fairness-label">Fixture fairness rules</span>
-                  <button type="button" class="btn btn-secondary" data-fixture-open-fairness-modal>Add Fixture fairness rule</button>
-                  <p class="fixture-fairness-summary" data-fixture-fairness-summary></p>
-                  <select data-fixture-fairness-rules multiple size="7" class="is-hidden" aria-hidden="true" tabindex="-1">
+                <label>
+                  Fixture fairness rules (multi-select)
+                  <select data-fixture-fairness-rules multiple size="7">
                     <option value="equal_matches_season" selected>Every team plays the same number of matches each season</option>
                     <option value="equal_matches_leg" selected>Every team plays the same number of matches in each leg</option>
                     <option value="balanced_home_away" selected>Each team keeps balanced home/away matches per leg and season</option>
@@ -2022,19 +2020,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="no_double_round_booking" selected>No team plays more than once in a single round</option>
                     <option value="fifa_no_self_match" selected>No self-fixtures (team cannot play itself)</option>
                   </select>
-                </div>
-              </div>
-              <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
-                <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
-                <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
-                  <h3>Fixture fairness rules</h3>
-                  <p class="enrollment-class-modal-subtitle">Select rules to enforce in auto-generated draft fixtures.</p>
-                  <div class="fixture-fairness-checklist" data-fixture-fairness-options></div>
-                  <div class="enrollment-class-modal-actions">
-                    <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Cancel</button>
-                    <button type="button" class="btn btn-primary" data-fixture-apply-fairness-rules>Apply selected rules</button>
-                  </div>
-                </article>
+                </label>
               </div>
               <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
                 <h3>Soccer Format</h3>
