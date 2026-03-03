@@ -1,6 +1,9 @@
+import { syncEnrollmentStoreFromRemote } from '../content/enrollment.persistence.js';
+
 const enrollmentSectionKey = 'enrollment_manager';
 const enrollmentStorageKey = `bhanoyi.enrollmentClasses.${enrollmentSectionKey}`;
 const staffSessionKey = `bhanoyi.staffSession.${enrollmentSectionKey}`;
+const staffSessionPasswordKey = `bhanoyi.staffSessionPassword.${enrollmentSectionKey}`;
 
 const normalizeText = (value: unknown, maxLength = 160) =>
   String(value ?? '')
@@ -53,6 +56,11 @@ const readStaffCredentials = (): StaffAuthRow[] => {
   }
 };
 
+const loadStaffCredentials = async (): Promise<StaffAuthRow[]> => {
+  await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
+  return readStaffCredentials();
+};
+
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const refs = {
@@ -70,15 +78,17 @@ const redirectToMyClass = () => {
   window.location.href = 'enrollment.html?staff=1';
 };
 
-const isStoredSessionValid = () => {
+const isStoredSessionValid = async () => {
   const email = normalizeText(sessionStorage.getItem(staffSessionKey), 120).toLowerCase();
+  const password = normalizeText(sessionStorage.getItem(staffSessionPasswordKey), 120);
   if (!email) return false;
-  const rows = readStaffCredentials();
-  return rows.some((row) => row.loginEmail === email);
+  if (!password) return false;
+  const rows = await loadStaffCredentials();
+  return rows.some((row) => row.loginEmail === email && row.loginPassword === password);
 };
 
 const bindForm = () => {
-  refs.loginForm.addEventListener('submit', (event) => {
+  refs.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     const loginEmail = normalizeText(refs.emailInput.value, 120).toLowerCase();
@@ -88,7 +98,7 @@ const bindForm = () => {
       return;
     }
 
-    const rows = readStaffCredentials();
+    const rows = await loadStaffCredentials();
     if (!rows.length) {
       setStatus('No staff profiles are available yet. Ask admin to add staff first.');
       return;
@@ -101,22 +111,23 @@ const bindForm = () => {
     }
 
     sessionStorage.setItem(staffSessionKey, matched.loginEmail);
+    sessionStorage.setItem(staffSessionPasswordKey, matched.loginPassword);
     setStatus('Login successful. Redirecting...');
     redirectToMyClass();
   });
 };
 
-const init = () => {
+const init = async () => {
   bindForm();
 
-  if (isStoredSessionValid()) {
+  if (await isStoredSessionValid()) {
     redirectToMyClass();
     return;
   }
 
-  if (readStaffCredentials().length === 0) {
+  if ((await loadStaffCredentials()).length === 0) {
     setStatus('No staff profiles found yet.');
   }
 };
 
-init();
+void init();

@@ -14,6 +14,7 @@ import {
   uploadNewsImage,
   signOut
 } from './api';
+import { persistEnrollmentStore, syncEnrollmentStoreFromRemote } from '../content/enrollment.persistence.js';
 
 type AnnouncementRecord = {
   id: string;
@@ -3408,6 +3409,8 @@ const wireSportsHouseManagerInline = () => {
     { label: 'Black', value: '#111827' },
     { label: 'Grey', value: '#475569' }
   ];
+  const enrollmentSectionKey = 'enrollment_manager';
+  const enrollmentStorageKey = `bhanoyi.enrollmentClasses.${enrollmentSectionKey}`;
   const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
 
   const normalizeHouseColor = (value: unknown, fallback = '#64748b') => {
@@ -3985,6 +3988,9 @@ const wireSportsHouseManagerInline = () => {
       const firstRecord = records.find((record) => record.storageKey === storageKey);
       if (!firstRecord) return;
       localStorage.setItem(storageKey, JSON.stringify(firstRecord.rootStore));
+      if (storageKey === enrollmentStorageKey) {
+        void persistEnrollmentStore(enrollmentSectionKey, enrollmentStorageKey, firstRecord.rootStore);
+      }
     });
   };
 
@@ -4497,7 +4503,8 @@ const wireSportsHouseManagerInline = () => {
     showStatus(`Pulled ${selectedRecords.length} learner${selectedRecords.length === 1 ? '' : 's'} into ${houseName}.`);
   });
 
-  const openHouseModal = (houseId: string) => {
+  const openHouseModal = async (houseId: string) => {
+    await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
     activeHouseId = houseId;
     memberSearchValue = '';
     memberGenderFilterValue = 'all';
@@ -4536,7 +4543,7 @@ const wireSportsHouseManagerInline = () => {
       button.appendChild(colorDot);
       button.appendChild(label);
       button.addEventListener('click', () => {
-        openHouseModal(house.id);
+        void openHouseModal(house.id);
       });
       houseButtonList.appendChild(button);
     });

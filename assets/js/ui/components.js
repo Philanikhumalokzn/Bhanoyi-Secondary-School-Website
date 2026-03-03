@@ -1,6 +1,12 @@
 import { Calendar } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
+import {
+  persistEnrollmentStore,
+  readEnrollmentStoreLocal,
+  stampEnrollmentStorePayload,
+  syncEnrollmentStoreFromRemote
+} from '../content/enrollment.persistence.js';
 
 const escapeHtmlAttribute = (value = '') =>
   String(value)
@@ -2617,9 +2623,12 @@ const hydrateEnrollmentManager = (managerNode) => {
   let manageLearners = [];
   let selectedStaffHouseId = '';
   const staffSessionKey = `bhanoyi.staffSession.${sectionKey}`;
+  const staffSessionPasswordKey = `bhanoyi.staffSessionPassword.${sectionKey}`;
   let staffSessionEmail = '';
   let loggedInStaff = null;
   let hasAutoOpenedAssignedClass = false;
+  let pendingRemoteEnrollmentPayload = null;
+  let isRemoteEnrollmentSaveInFlight = false;
 
   const staffPostLevelRanks = {
     PL1: 'Educator',
@@ -3089,6 +3098,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!loggedInStaff) {
       staffSessionEmail = '';
       sessionStorage.removeItem(staffSessionKey);
+      sessionStorage.removeItem(staffSessionPasswordKey);
       return;
     }
     staffSessionEmail = loggedInStaff.loginEmail;
@@ -3324,66 +3334,75 @@ const hydrateEnrollmentManager = (managerNode) => {
     return normalized;
   };
 
-  const loadStore = () => {
+  const defaultLoadedStore = () => ({
+    activeGrades: [...gradeNumbers],
+    classesByGrade: normalizeClassesStore({}),
+    classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
+    staffMembers: []
+  });
+
+  const normalizeLoadedStore = (parsed) => {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultLoadedStore();
+    }
+
+    const parsedActive = Array.isArray(parsed.activeGrades)
+      ? parsed.activeGrades
+          .map((entry) => String(entry || '').trim())
+          .filter((entry) => gradeNumbers.includes(entry))
+      : [];
+
+    const normalizedActive = parsedActive.length
+      ? Array.from(new Set(parsedActive)).sort((left, right) => Number(left) - Number(right))
+      : [...gradeNumbers];
+
+    const rawClasses =
+      parsed.classesByGrade && typeof parsed.classesByGrade === 'object' && !Array.isArray(parsed.classesByGrade)
+        ? parsed.classesByGrade
+        : parsed;
+
+    const normalizedClasses = normalizeClassesStore(rawClasses);
+    return {
+      activeGrades: normalizedActive,
+      classesByGrade: normalizedClasses,
+      classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizedClasses),
+      staffMembers: normalizeStaffMembers(parsed.staffMembers)
+    };
+  };
+
+  const loadStore = () => normalizeLoadedStore(readEnrollmentStoreLocal(storageKey));
+
+  const buildStorePayload = () => ({
+    activeGrades: [...activeGrades],
+    classesByGrade: normalizeClassesStore(classesByGrade),
+    classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade),
+    staffMembers: normalizeStaffMembers(staffMembers)
+  });
+
+  const flushRemoteEnrollmentSave = async () => {
+    if (isRemoteEnrollmentSaveInFlight || !pendingRemoteEnrollmentPayload) return;
+
+    isRemoteEnrollmentSaveInFlight = true;
+    const payload = pendingRemoteEnrollmentPayload;
+    pendingRemoteEnrollmentPayload = null;
+
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) {
-        return {
-          activeGrades: [...gradeNumbers],
-          classesByGrade: normalizeClassesStore({})
-        };
+      await persistEnrollmentStore(sectionKey, storageKey, payload);
+    } finally {
+      isRemoteEnrollmentSaveInFlight = false;
+      if (pendingRemoteEnrollmentPayload) {
+        void flushRemoteEnrollmentSave();
       }
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const parsedActive = Array.isArray(parsed.activeGrades)
-          ? parsed.activeGrades
-              .map((entry) => String(entry || '').trim())
-              .filter((entry) => gradeNumbers.includes(entry))
-          : [];
-
-        const normalizedActive = parsedActive.length
-          ? Array.from(new Set(parsedActive)).sort((left, right) => Number(left) - Number(right))
-          : [...gradeNumbers];
-
-        const rawClasses =
-          parsed.classesByGrade && typeof parsed.classesByGrade === 'object' && !Array.isArray(parsed.classesByGrade)
-            ? parsed.classesByGrade
-            : parsed;
-
-        return {
-          activeGrades: normalizedActive,
-          classesByGrade: normalizeClassesStore(rawClasses),
-          classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizeClassesStore(rawClasses)),
-          staffMembers: normalizeStaffMembers(parsed.staffMembers)
-        };
-      }
-
-      return {
-        activeGrades: [...gradeNumbers],
-        classesByGrade: normalizeClassesStore({}),
-        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
-        staffMembers: []
-      };
-    } catch {
-      return {
-        activeGrades: [...gradeNumbers],
-        classesByGrade: normalizeClassesStore({}),
-        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
-        staffMembers: []
-      };
     }
   };
 
-  const saveStore = () => {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({
-        activeGrades: [...activeGrades],
-        classesByGrade: normalizeClassesStore(classesByGrade),
-        classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade),
-        staffMembers: normalizeStaffMembers(staffMembers)
-      })
-    );
+  const saveStore = ({ syncRemote = true } = {}) => {
+    const payload = stampEnrollmentStorePayload(buildStorePayload());
+    localStorage.setItem(storageKey, JSON.stringify(payload));
+
+    if (!syncRemote) return;
+    pendingRemoteEnrollmentPayload = payload;
+    void flushRemoteEnrollmentSave();
   };
 
   const getMissingGrades = () => gradeNumbers.filter((grade) => !activeGrades.includes(grade));
@@ -4044,7 +4063,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   classProfilesByGrade = loaded.classProfilesByGrade;
   staffMembers = normalizeStaffMembers(loaded.staffMembers);
   syncClassTeachersFromStaffAssignments();
-  saveStore();
+  saveStore({ syncRemote: false });
   staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
   syncStaffSession();
 
@@ -4057,6 +4076,37 @@ const hydrateEnrollmentManager = (managerNode) => {
   renderStaffAssignedClassOptions();
   renderStaffMembers();
   render();
+
+  const hydrateStoreFromRemote = async () => {
+    const remoteStore = await syncEnrollmentStoreFromRemote(sectionKey, storageKey);
+    if (!remoteStore) return;
+
+    const normalizedRemote = normalizeLoadedStore(remoteStore);
+    const currentPayload = buildStorePayload();
+    const samePayload = JSON.stringify(normalizedRemote) === JSON.stringify(currentPayload);
+    if (samePayload) return;
+
+    activeGrades = normalizedRemote.activeGrades;
+    classesByGrade = normalizedRemote.classesByGrade;
+    classProfilesByGrade = normalizedRemote.classProfilesByGrade;
+    staffMembers = normalizeStaffMembers(normalizedRemote.staffMembers);
+    syncClassTeachersFromStaffAssignments();
+    saveStore({ syncRemote: false });
+    staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
+    syncStaffSession();
+
+    if (isStaffMode && !loggedInStaff) {
+      window.location.href = 'staff.html';
+      return;
+    }
+
+    renderStaffHouseSelector();
+    renderStaffAssignedClassOptions();
+    renderStaffMembers();
+    render();
+  };
+
+  void hydrateStoreFromRemote();
 
   gradeListNode.addEventListener('click', (event) => {
     const target = event.target;
