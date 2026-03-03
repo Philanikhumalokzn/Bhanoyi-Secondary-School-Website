@@ -2285,7 +2285,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <div class="enrollment-class-manage-grid">
                 <label class="enrollment-class-modal-field">
                   Class Teacher
-                  <input type="text" maxlength="120" data-enrollment-manage-teacher placeholder="e.g. Ms. Dlamini" />
+                  <select data-enrollment-manage-teacher>
+                    <option value="">Select teacher</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary" data-enrollment-open-staff-workflow>Add / manage teachers</button>
                 </label>
                 <label class="enrollment-class-modal-field">
                   Room
@@ -2366,7 +2369,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const closeButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-modal]'));
   const manageModal = managerNode.querySelector('[data-enrollment-manage-modal]');
   const manageTitleNode = managerNode.querySelector('[data-enrollment-manage-title]');
-  const manageTeacherInput = managerNode.querySelector('[data-enrollment-manage-teacher]');
+  const manageTeacherSelect = managerNode.querySelector('[data-enrollment-manage-teacher]');
+  const openStaffWorkflowButton = managerNode.querySelector('[data-enrollment-open-staff-workflow]');
   const manageRoomInput = managerNode.querySelector('[data-enrollment-manage-room]');
   const manageCapacityInput = managerNode.querySelector('[data-enrollment-manage-capacity]');
   const manageNotesInput = managerNode.querySelector('[data-enrollment-manage-notes]');
@@ -2409,7 +2413,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(classSelect instanceof HTMLSelectElement) ||
     !(addClassButton instanceof HTMLButtonElement) ||
     !(manageModal instanceof HTMLElement) ||
-    !(manageTeacherInput instanceof HTMLInputElement) ||
+    !(manageTeacherSelect instanceof HTMLSelectElement) ||
+    !(openStaffWorkflowButton instanceof HTMLButtonElement) ||
     !(manageRoomInput instanceof HTMLInputElement) ||
     !(manageCapacityInput instanceof HTMLInputElement) ||
     !(manageNotesInput instanceof HTMLTextAreaElement) ||
@@ -3447,6 +3452,28 @@ const hydrateEnrollmentManager = (managerNode) => {
     ].join('');
   };
 
+  const renderManageTeacherOptions = (selectedTeacher = '') => {
+    const selected = normalizeText(selectedTeacher || '', 120);
+    const teacherNames = Array.from(
+      new Set(
+        staffMembers
+          .map((staff) => normalizeText(resolveStaffDisplayName(staff), 120))
+          .filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right));
+
+    const hasSelectedInStaff = selected && teacherNames.includes(selected);
+    manageTeacherSelect.innerHTML = [
+      '<option value="">Select teacher</option>',
+      ...teacherNames.map(
+        (name) => `<option value="${escapeHtmlAttribute(name)}" ${selected === name ? 'selected' : ''}>${escapeHtmlText(name)}</option>`
+      ),
+      ...(selected && !hasSelectedInStaff
+        ? [`<option value="${escapeHtmlAttribute(selected)}" selected>Legacy teacher: ${escapeHtmlText(selected)}</option>`]
+        : [])
+    ].join('');
+  };
+
   const renderStaffMembers = () => {
     if (!staffMembers.length) {
       staffListNode.innerHTML = '<p class="enrollment-class-empty">No staff members added yet.</p>';
@@ -3550,6 +3577,8 @@ const hydrateEnrollmentManager = (managerNode) => {
         `;
       })
       .join('');
+
+    renderManageTeacherOptions(manageTeacherSelect.value);
   };
 
   const clearStaffForm = () => {
@@ -3586,7 +3615,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const profile = getClassProfile(normalizedGrade, normalizedLetter);
-    manageTeacherInput.value = profile.teacher;
+    renderManageTeacherOptions(profile.teacher);
     manageRoomInput.value = profile.room;
     manageNotesInput.value = profile.notes;
     manageLearners = [...profile.learners];
@@ -3596,7 +3625,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerGenderSelect.value = '';
 
     const canEditAssignments = canCurrentUserEditLearnerAssignments(normalizedGrade, normalizedLetter);
-    manageTeacherInput.disabled = !isAdminMode;
+    manageTeacherSelect.disabled = !isAdminMode;
     manageRoomInput.disabled = !isAdminMode;
     manageCapacityInput.disabled = true;
     manageCapacityInput.readOnly = true;
@@ -3668,6 +3697,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffDisplayOverrideInput.disabled = staffReadOnly;
     staffNotesInput.disabled = staffReadOnly;
     addStaffButton.disabled = staffReadOnly;
+    openStaffWorkflowButton.disabled = staffReadOnly;
     renderStaffAssignedClassOptions();
     renderStaffHouseSelector();
     renderStaffMembers();
@@ -3885,6 +3915,24 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   closeManageButtons.forEach((button) => {
     button.addEventListener('click', closeManageModal);
+  });
+
+  openStaffWorkflowButton.addEventListener('click', () => {
+    if (!isAdminMode) return;
+    closeManageModal();
+    const staffStepEntry = enrollmentWorkflowSteps.find(
+      (entry) => entry.stepNode.dataset.enrollmentWorkflowId === 'staff'
+    );
+    const manageStepEntry = enrollmentWorkflowSteps.find(
+      (entry) => entry.stepNode.dataset.enrollmentWorkflowId === 'manage-enrollment'
+    );
+    if (manageStepEntry) {
+      setEnrollmentWorkflowExpanded(manageStepEntry, false);
+    }
+    if (staffStepEntry) {
+      setEnrollmentWorkflowExpanded(staffStepEntry, true);
+      staffFirstNameInput.focus();
+    }
   });
 
   classModal.addEventListener('click', (event) => {
@@ -4229,7 +4277,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const existingProfile = getClassProfile(selectedManageGrade, selectedManageLetter);
 
     setClassProfile(selectedManageGrade, selectedManageLetter, {
-      teacher: isAdminMode ? normalizeText(manageTeacherInput.value, 120) : existingProfile.teacher,
+      teacher: isAdminMode ? normalizeText(manageTeacherSelect.value, 120) : existingProfile.teacher,
       room: isAdminMode ? normalizeText(manageRoomInput.value, 40) : existingProfile.room,
       capacity: normalizedCapacity,
       notes: isAdminMode ? normalizeText(manageNotesInput.value, 600) : existingProfile.notes,
