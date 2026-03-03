@@ -65,6 +65,7 @@ export const exportProfessionalWorkbook = async ({
   columns,
   rows,
   note,
+  signatures,
   logoUrl = '/branding/bhanoyi-logo.png',
   afterRows
 }) => {
@@ -217,13 +218,80 @@ export const exportProfessionalWorkbook = async ({
     });
   }
 
+  let footerRowNumber = dataStartRow + safeRows.length + 2;
+
   if (note) {
-    const noteRowNumber = dataStartRow + safeRows.length + 2;
-    sheet.mergeCells(`A${noteRowNumber}:${endColumnLabel}${noteRowNumber}`);
-    const noteCell = sheet.getCell(`A${noteRowNumber}`);
+    sheet.mergeCells(`A${footerRowNumber}:${endColumnLabel}${footerRowNumber}`);
+    const noteCell = sheet.getCell(`A${footerRowNumber}`);
     noteCell.value = note;
     noteCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
     noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    footerRowNumber += 2;
+  }
+
+  const safeSignatures = Array.isArray(signatures)
+    ? signatures
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry, index) => ({
+          name: String(entry.name || '').trim(),
+          role: String(entry.role || '').trim(),
+          anchor: entry.anchor === 'right' ? 'right' : index === 0 ? 'left' : 'right'
+        }))
+    : [];
+
+  if (safeSignatures.length) {
+    const midpoint = Math.ceil(safeColumns.length / 2);
+    const leftRange = { start: 1, end: Math.max(1, midpoint) };
+    const rightRange = {
+      start: Math.min(safeColumns.length, midpoint + 1),
+      end: Math.max(Math.min(safeColumns.length, midpoint + 1), safeColumns.length)
+    };
+
+    const applySignatureBlock = (signature, range) => {
+      if (!signature || range.start > range.end) return;
+
+      const lineRow = footerRowNumber;
+      const nameRow = footerRowNumber + 1;
+      const roleRow = footerRowNumber + 2;
+      const hintRow = footerRowNumber + 3;
+      const startLabel = toColumnLabel(range.start);
+      const endLabel = toColumnLabel(range.end);
+
+      for (let columnIndex = range.start; columnIndex <= range.end; columnIndex += 1) {
+        const lineCell = sheet.getRow(lineRow).getCell(columnIndex);
+        lineCell.border = {
+          top: { style: 'medium', color: { argb: `FF${theme.deepBlue}` } }
+        };
+      }
+
+      sheet.mergeCells(`${startLabel}${nameRow}:${endLabel}${nameRow}`);
+      sheet.mergeCells(`${startLabel}${roleRow}:${endLabel}${roleRow}`);
+      sheet.mergeCells(`${startLabel}${hintRow}:${endLabel}${hintRow}`);
+
+      const alignment = signature.anchor === 'right' ? 'right' : 'left';
+      const nameCell = sheet.getCell(`${startLabel}${nameRow}`);
+      nameCell.value = signature.name || '';
+      nameCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+      nameCell.alignment = { horizontal: alignment, vertical: 'middle' };
+
+      const roleCell = sheet.getCell(`${startLabel}${roleRow}`);
+      roleCell.value = signature.role || '';
+      roleCell.font = { name: 'Calibri', size: 9.5, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+      roleCell.alignment = { horizontal: alignment, vertical: 'middle' };
+
+      const hintCell = sheet.getCell(`${startLabel}${hintRow}`);
+      hintCell.value = 'Signature & Date';
+      hintCell.font = { name: 'Calibri', size: 9, color: { argb: `FF${theme.deepBlue}` } };
+      hintCell.alignment = { horizontal: alignment, vertical: 'middle' };
+    };
+
+    const leftSignature = safeSignatures.find((entry) => entry.anchor === 'left') || safeSignatures[0];
+    const rightSignature = safeSignatures.find((entry) => entry.anchor === 'right') || safeSignatures[1] || null;
+
+    applySignatureBlock(leftSignature, leftRange);
+    if (rightSignature) {
+      applySignatureBlock(rightSignature, rightRange);
+    }
   }
 
   const normalizedFileName = String(fileName || 'export.xlsx').trim() || 'export.xlsx';

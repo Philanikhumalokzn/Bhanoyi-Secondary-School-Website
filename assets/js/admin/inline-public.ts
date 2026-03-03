@@ -4818,6 +4818,19 @@ const wireSportsHouseManagerInline = () => {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'house';
 
+      const roleStore = loadHouseRoleAssignments();
+      const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+      const staffByKey = new Map(
+        collectEnrollmentLearners()
+          .filter((record) => record.houseId === activeHouse.id && record.memberType === 'teacher')
+          .map((record) => [record.key, record.displayName])
+      );
+      const managerNames = Object.entries(houseRoleEntry.staffRoles)
+        .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
+        .map(([memberKey]) => staffByKey.get(memberKey) || '')
+        .filter((entry) => Boolean(entry));
+      const houseManagerSignatureName = managerNames[0] || '____________________________';
+
       await exportProfessionalWorkbook({
         fileName: `${safeHouseName}-house-register.xlsx`,
         sheetName: 'House Register',
@@ -4833,7 +4846,19 @@ const wireSportsHouseManagerInline = () => {
           { header: 'Sporting Codes', key: 'sportingCodes', width: 40, align: 'left', wrapText: true }
         ],
         rows,
-        note: 'Notice: This register is generated from the current enrollment and house assignment records.'
+        note: 'Notice: This register is generated from the current enrollment and house assignment records.',
+        signatures: [
+          {
+            anchor: 'left',
+            name: houseManagerSignatureName,
+            role: 'House Manager'
+          },
+          {
+            anchor: 'right',
+            name: 'Mr. B.C Dlamini',
+            role: 'Sports Committee Coordinator'
+          }
+        ]
       });
 
       showStatus(`${activeHouse.name} house list exported (.xlsx).`);
