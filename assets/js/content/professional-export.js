@@ -93,6 +93,8 @@ export const exportProfessionalWorkbook = async ({
     }
   });
 
+  sheet.headerFooter.oddFooter = '&LConfidential school record&RPage &P of &N';
+
   const safeColumns = Array.isArray(columns) && columns.length
     ? columns
     : [{ key: 'value', header: 'Value', width: 32, align: 'left', wrapText: true }];
@@ -235,7 +237,8 @@ export const exportProfessionalWorkbook = async ({
         .map((entry, index) => ({
           name: String(entry.name || '').trim(),
           role: String(entry.role || '').trim(),
-          anchor: entry.anchor === 'right' ? 'right' : entry.anchor === 'center' ? 'center' : index === 0 ? 'left' : 'right'
+          anchor: entry.anchor === 'right' ? 'right' : entry.anchor === 'center' ? 'center' : index === 0 ? 'left' : 'right',
+          shiftColumns: Math.max(0, Math.floor(Number(entry.shiftColumns) || 0))
         }))
     : [];
 
@@ -260,17 +263,36 @@ export const exportProfessionalWorkbook = async ({
       return { start: range.start, end: Math.min(range.end, range.start + span - 1) };
     };
 
+    const resolveBlockRange = (range, signature) => {
+      if (!signature || signature.anchor !== 'right') {
+        return { ...range };
+      }
+
+      const width = Math.max(1, range.end - range.start + 1);
+      const minWidth = Math.min(3, width);
+      const requestedShift = Math.min(signature.shiftColumns || 0, Math.max(0, width - minWidth));
+      const shiftedStart = range.start + requestedShift;
+      const adjustedStart = Math.min(shiftedStart, range.end - minWidth + 1);
+      return {
+        start: Math.max(range.start, adjustedStart),
+        end: range.end
+      };
+    };
+
     const applySignatureBlock = (signature, range) => {
       if (!signature || range.start > range.end) return;
+
+      const effectiveRange = resolveBlockRange(range, signature);
+      if (effectiveRange.start > effectiveRange.end) return;
 
       const blankSignatureRow = footerRowNumber;
       const signatureLineRow = footerRowNumber + 1;
       const nameLabelRow = footerRowNumber + 2;
       const roleLabelRow = footerRowNumber + 3;
       const dateLabelRow = footerRowNumber + 4;
-      const startLabel = toColumnLabel(range.start);
-      const endLabel = toColumnLabel(range.end);
-      const shortLineRange = resolveLineRange(range, signature.anchor);
+      const startLabel = toColumnLabel(effectiveRange.start);
+      const endLabel = toColumnLabel(effectiveRange.end);
+      const shortLineRange = resolveLineRange(effectiveRange, signature.anchor);
 
       sheet.mergeCells(`${startLabel}${blankSignatureRow}:${endLabel}${blankSignatureRow}`);
       sheet.getCell(`${startLabel}${blankSignatureRow}`).value = '';
@@ -291,17 +313,23 @@ export const exportProfessionalWorkbook = async ({
       const nameCell = sheet.getCell(`${startLabel}${nameLabelRow}`);
       nameCell.value = 'Name:';
       nameCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
-      nameCell.alignment = { horizontal: alignment, vertical: 'middle' };
+      nameCell.alignment = { horizontal: alignment, vertical: 'middle', wrapText: true };
 
       const roleCell = sheet.getCell(`${startLabel}${roleLabelRow}`);
       roleCell.value = signature.role || '';
       roleCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
-      roleCell.alignment = { horizontal: alignment, vertical: 'middle' };
+      roleCell.alignment = { horizontal: alignment, vertical: 'middle', wrapText: true };
 
       const dateCell = sheet.getCell(`${startLabel}${dateLabelRow}`);
       dateCell.value = 'Date:';
       dateCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
-      dateCell.alignment = { horizontal: alignment, vertical: 'middle' };
+      dateCell.alignment = { horizontal: alignment, vertical: 'middle', wrapText: true };
+
+      sheet.getRow(blankSignatureRow).height = Math.max(sheet.getRow(blankSignatureRow).height || 16, 16);
+      sheet.getRow(signatureLineRow).height = Math.max(sheet.getRow(signatureLineRow).height || 16, 16);
+      sheet.getRow(nameLabelRow).height = Math.max(sheet.getRow(nameLabelRow).height || 16, 16);
+      sheet.getRow(roleLabelRow).height = Math.max(sheet.getRow(roleLabelRow).height || 18, 18);
+      sheet.getRow(dateLabelRow).height = Math.max(sheet.getRow(dateLabelRow).height || 16, 16);
     };
 
     if (safeSignatures.length === 1) {

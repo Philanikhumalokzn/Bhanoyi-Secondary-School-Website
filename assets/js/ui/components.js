@@ -6978,7 +6978,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
           {
             anchor: 'right',
             name: 'Mr. B.C Dlamini',
-            role: 'Sports Committee Coordinator'
+            role: 'Sports Committee Coordinator',
+            shiftColumns: 2
           }
         ],
         afterRows: ({ sheet, dataStartRow }) => {
