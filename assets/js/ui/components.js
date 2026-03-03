@@ -2344,6 +2344,13 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       </label>
                       <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
                     </div>
+                    <div class="enrollment-import-row" data-enrollment-admin-only>
+                      <label class="enrollment-class-modal-field enrollment-import-file-field">
+                        Bulk Excel files
+                        <input type="file" data-enrollment-bulk-import-files accept=".xlsx,.xls" multiple />
+                      </label>
+                      <button type="button" class="btn btn-secondary" data-enrollment-bulk-import-learners>Bulk upload class files</button>
+                    </div>
                     <div class="enrollment-learner-form" data-enrollment-admin-only>
                       <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                       <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
@@ -2408,6 +2415,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
+  const bulkImportFileInput = managerNode.querySelector('[data-enrollment-bulk-import-files]');
+  const bulkImportLearnersButton = managerNode.querySelector('[data-enrollment-bulk-import-learners]');
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
@@ -2453,6 +2462,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
     !(importLearnersButton instanceof HTMLButtonElement) ||
+    !(bulkImportFileInput instanceof HTMLInputElement) ||
+    !(bulkImportLearnersButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
     !(staffTitleSelect instanceof HTMLSelectElement) ||
@@ -3339,6 +3350,26 @@ const hydrateEnrollmentManager = (managerNode) => {
     return extractLearnersFromRows(rows);
   };
 
+  const parseClassKeyFromImportFileName = (name) => {
+    const baseName = String(name || '')
+      .trim()
+      .replace(/\.[^.]+$/, '');
+    if (!baseName) return null;
+
+    const match = baseName.match(/^(\d{1,2})\s*([a-zA-Z])$/);
+    if (!match) return null;
+
+    const grade = String(match[1] || '').trim();
+    const letter = normalizeLetter(match[2] || '');
+    if (!gradeNumbers.includes(grade) || !letter) return null;
+    return { grade, letter };
+  };
+
+  const classExistsInStore = (grade, letter) => {
+    const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+    return classes.some((entry) => normalizeLetter(entry) === normalizeLetter(letter));
+  };
+
   const getImportFormat = () => {
     const format = String(importFormatSelect.value || '').trim().toLowerCase();
     return format === 'csv' ? 'csv' : 'excel';
@@ -3519,6 +3550,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerAdmissionInput.value = '';
     learnerGenderSelect.value = '';
     importFileInput.value = '';
+    bulkImportFileInput.value = '';
     manageCapacityInput.value = '';
   };
 
@@ -4192,6 +4224,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.disabled = !isAdminMode;
     importFileInput.disabled = !isAdminMode;
     importLearnersButton.disabled = !isAdminMode;
+    bulkImportFileInput.disabled = !isAdminMode;
+    bulkImportLearnersButton.disabled = !isAdminMode;
     clearLearnersButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       button.disabled = !isAdminMode;
@@ -4205,6 +4239,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.value = 'excel';
     syncImportInputAccept();
     importFileInput.value = '';
+    bulkImportFileInput.value = '';
 
     const classDetailsStep = manageModalWorkflowSteps.find(
       (entry) => entry.stepNode.dataset.manageWorkflowId === 'class-details'
@@ -4867,6 +4902,129 @@ const hydrateEnrollmentManager = (managerNode) => {
     } finally {
       importLearnersButton.disabled = !isAdminMode;
       importLearnersButton.textContent = originalLabel;
+    }
+  });
+
+  bulkImportLearnersButton.addEventListener('click', async () => {
+    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+
+    const selectedFiles = Array.from(bulkImportFileInput.files || []);
+    if (!selectedFiles.length) {
+      if (statusNode) {
+        statusNode.textContent = 'Choose one or more Excel class files first.';
+      }
+      return;
+    }
+
+    const originalLabel = bulkImportLearnersButton.textContent;
+    bulkImportLearnersButton.disabled = true;
+    bulkImportLearnersButton.textContent = 'Bulk importing...';
+
+    const invalidNameFiles = [];
+    const unconfiguredClassFiles = [];
+    const parseFailedFiles = [];
+    const emptyFiles = [];
+    let duplicateClassTargets = 0;
+    const byClassKey = new Map();
+
+    try {
+      for (const file of selectedFiles) {
+        const target = parseClassKeyFromImportFileName(file?.name || '');
+        if (!target) {
+          invalidNameFiles.push(String(file?.name || 'Unknown file'));
+          continue;
+        }
+
+        if (!classExistsInStore(target.grade, target.letter)) {
+          unconfiguredClassFiles.push(`${target.grade}${target.letter}`);
+          continue;
+        }
+
+        let importedLearners = [];
+        try {
+          importedLearners = await parseLearnersFromExcelFile(file);
+        } catch {
+          parseFailedFiles.push(String(file?.name || `${target.grade}${target.letter}`));
+          continue;
+        }
+
+        if (!importedLearners.length) {
+          emptyFiles.push(`${target.grade}${target.letter}`);
+          continue;
+        }
+
+        const classKey = `${target.grade}|${target.letter}`;
+        if (byClassKey.has(classKey)) {
+          duplicateClassTargets += 1;
+        }
+
+        const normalizedLearners = normalizeLearners(
+          importedLearners.map((learner) => withLearnerDefaultSportingCodes(learner))
+        );
+        byClassKey.set(classKey, {
+          grade: target.grade,
+          letter: target.letter,
+          learners: normalizedLearners
+        });
+      }
+
+      if (!byClassKey.size) {
+        if (statusNode) {
+          statusNode.textContent = 'No valid class files were imported. Use names like 10A, 10 B, 11C.';
+        }
+        return;
+      }
+
+      let updatedClasses = 0;
+      let totalLearners = 0;
+
+      byClassKey.forEach((entry) => {
+        const existingProfile = getClassProfile(entry.grade, entry.letter);
+        const normalizedLearners = normalizeLearners(entry.learners);
+
+        setClassProfile(entry.grade, entry.letter, {
+          teacher: existingProfile.teacher,
+          room: existingProfile.room,
+          capacity: String(normalizedLearners.length),
+          notes: existingProfile.notes,
+          learners: normalizedLearners
+        });
+
+        syncHouseAssignmentsForClass(entry.grade, entry.letter, normalizedLearners);
+
+        if (selectedManageGrade === entry.grade && selectedManageLetter === entry.letter) {
+          manageLearners = [...normalizedLearners];
+          syncCapacityWithLearners();
+          renderManageLearners();
+        }
+
+        updatedClasses += 1;
+        totalLearners += normalizedLearners.length;
+      });
+
+      saveStore();
+      render();
+      bulkImportFileInput.value = '';
+
+      if (statusNode) {
+        const skipNotes = [
+          invalidNameFiles.length ? `${invalidNameFiles.length} invalid filename${invalidNameFiles.length === 1 ? '' : 's'}` : '',
+          unconfiguredClassFiles.length
+            ? `${unconfiguredClassFiles.length} file${unconfiguredClassFiles.length === 1 ? '' : 's'} for unconfigured classes`
+            : '',
+          emptyFiles.length ? `${emptyFiles.length} empty class list${emptyFiles.length === 1 ? '' : 's'}` : '',
+          parseFailedFiles.length ? `${parseFailedFiles.length} unreadable file${parseFailedFiles.length === 1 ? '' : 's'}` : '',
+          duplicateClassTargets ? `${duplicateClassTargets} duplicate class file${duplicateClassTargets === 1 ? '' : 's'} (latest kept)` : ''
+        ].filter(Boolean);
+
+        statusNode.textContent =
+          `Bulk import updated ${updatedClasses} class${updatedClasses === 1 ? '' : 'es'} with ${totalLearners} learner${
+            totalLearners === 1 ? '' : 's'
+          }.` + (skipNotes.length ? ` Skipped: ${skipNotes.join(', ')}.` : '');
+      }
+    } finally {
+      bulkImportLearnersButton.disabled = !isAdminMode;
+      bulkImportLearnersButton.textContent = originalLabel;
     }
   });
 
