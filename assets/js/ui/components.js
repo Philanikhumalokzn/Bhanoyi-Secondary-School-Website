@@ -7822,20 +7822,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
     applyFairnessRulesSelection();
   });
 
-  fairnessOpenButton?.addEventListener('click', (event) => {
-    event.stopPropagation();
-    openFairnessModal();
-  });
-
-  fixtureNode.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const trigger = target.closest('[data-fixture-open-fairness-modal]');
-    if (!(trigger instanceof HTMLButtonElement)) return;
-    event.stopPropagation();
-    openFairnessModal();
-  });
-
   fairnessOptionsNode?.addEventListener('change', (event) => {
     if (!isAdminMode) return;
     const target = event.target;
