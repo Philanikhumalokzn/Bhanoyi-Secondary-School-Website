@@ -2878,6 +2878,16 @@ body.match-log-workspace-open {
   width: min(720px, 100%);
 }
 
+.enrollment-manage-modal .enrollment-class-modal-section {
+  margin-top: 2px;
+}
+
+.enrollment-manage-modal .enrollment-class-modal-section .sports-workflow-body {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
 .enrollment-class-modal-actions-top {
   position: sticky;
   top: 0;

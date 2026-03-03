@@ -2281,55 +2281,65 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                 <button type="button" class="btn btn-secondary" data-enrollment-clear-learners>Clear class list</button>
                 <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
               </div>
-              <div class="enrollment-class-manage-grid">
-                <label class="enrollment-class-modal-field">
-                  Class Teacher
-                  <select data-enrollment-manage-teacher>
-                    <option value="">Select teacher</option>
-                  </select>
-                  <button type="button" class="btn btn-secondary" data-enrollment-open-staff-workflow>Add / manage teachers</button>
-                </label>
-                <label class="enrollment-class-modal-field">
-                  Room
-                  <input type="text" maxlength="40" data-enrollment-manage-room placeholder="e.g. Block B / Room 4" />
-                </label>
-                <label class="enrollment-class-modal-field">
-                  Capacity
-                  <input type="number" min="1" max="120" step="1" data-enrollment-manage-capacity placeholder="e.g. 45" />
-                </label>
-              </div>
-              <label class="enrollment-class-modal-field">
-                Notes
-                <textarea rows="3" maxlength="600" data-enrollment-manage-notes placeholder="Class notes"></textarea>
-              </label>
-              <section class="enrollment-learner-section">
-                <h4>Learners</h4>
-                <div class="enrollment-import-row">
+              <section class="sports-workflow-step is-expanded enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
+                <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="true">Class Details</button>
+                <div class="sports-workflow-body enrollment-workflow-body" data-manage-workflow-body>
+                  <div class="enrollment-class-manage-grid">
+                    <label class="enrollment-class-modal-field">
+                      Class Teacher
+                      <select data-enrollment-manage-teacher>
+                        <option value="">Select teacher</option>
+                      </select>
+                      <button type="button" class="btn btn-secondary" data-enrollment-open-staff-workflow>Add / manage teachers</button>
+                    </label>
+                    <label class="enrollment-class-modal-field">
+                      Room
+                      <input type="text" maxlength="40" data-enrollment-manage-room placeholder="e.g. Block B / Room 4" />
+                    </label>
+                    <label class="enrollment-class-modal-field">
+                      Capacity
+                      <input type="number" min="1" max="120" step="1" data-enrollment-manage-capacity placeholder="e.g. 45" />
+                    </label>
+                  </div>
                   <label class="enrollment-class-modal-field">
-                    Import Format
-                    <select data-enrollment-import-format>
-                      <option value="excel" selected>Excel (.xlsx, .xls)</option>
-                      <option value="csv">CSV (.csv)</option>
-                    </select>
+                    Notes
+                    <textarea rows="3" maxlength="600" data-enrollment-manage-notes placeholder="Class notes"></textarea>
                   </label>
-                  <label class="enrollment-class-modal-field enrollment-import-file-field">
-                    File
-                    <input type="file" data-enrollment-import-file accept=".xlsx,.xls" />
-                  </label>
-                  <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
                 </div>
-                <div class="enrollment-learner-form">
-                  <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
-                  <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
-                  <select data-enrollment-learner-gender>
-                    <option value="">Gender (optional)</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                  <button type="button" class="btn btn-secondary" data-enrollment-add-learner>Add learner</button>
+              </section>
+
+              <section class="sports-workflow-step is-expanded enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="learners">
+                <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="true">Learners</button>
+                <div class="sports-workflow-body enrollment-workflow-body" data-manage-workflow-body>
+                  <section class="enrollment-learner-section">
+                    <div class="enrollment-import-row">
+                      <label class="enrollment-class-modal-field">
+                        Import Format
+                        <select data-enrollment-import-format>
+                          <option value="excel" selected>Excel (.xlsx, .xls)</option>
+                          <option value="csv">CSV (.csv)</option>
+                        </select>
+                      </label>
+                      <label class="enrollment-class-modal-field enrollment-import-file-field">
+                        File
+                        <input type="file" data-enrollment-import-file accept=".xlsx,.xls" />
+                      </label>
+                      <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
+                    </div>
+                    <div class="enrollment-learner-form">
+                      <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
+                      <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
+                      <select data-enrollment-learner-gender>
+                        <option value="">Gender (optional)</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                      <button type="button" class="btn btn-secondary" data-enrollment-add-learner>Add learner</button>
+                    </div>
+                    <div class="enrollment-learner-list" data-enrollment-learner-list></div>
+                  </section>
                 </div>
-                <div class="enrollment-learner-list" data-enrollment-learner-list></div>
               </section>
               <div class="enrollment-class-modal-actions">
                 <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
@@ -2485,8 +2495,46 @@ const hydrateEnrollmentManager = (managerNode) => {
     });
   });
 
+  const manageModalWorkflowSteps = Array.from(manageModal.querySelectorAll('[data-manage-workflow-step]'))
+    .map((stepNode) => {
+      if (!(stepNode instanceof HTMLElement)) return null;
+      const toggle = stepNode.querySelector('[data-manage-workflow-toggle]');
+      const body = stepNode.querySelector('[data-manage-workflow-body]');
+      if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
+      return { stepNode, toggle, body };
+    })
+    .filter(Boolean);
+
+  const setManageModalWorkflowExpanded = (entry, expanded) => {
+    if (!entry) return;
+    entry.stepNode.classList.toggle('is-expanded', expanded);
+    entry.stepNode.classList.toggle('is-collapsed', !expanded);
+    entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    entry.body.style.maxHeight = expanded ? getExpandedWorkflowBodyMaxHeight(entry.body) : '0px';
+  };
+
+  const refreshManageModalWorkflowHeights = () => {
+    manageModalWorkflowSteps.forEach((entry) => {
+      if (!entry.stepNode.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = getExpandedWorkflowBodyMaxHeight(entry.body);
+    });
+  };
+
+  manageModalWorkflowSteps.forEach((entry) => {
+    const startsExpanded = entry.stepNode.classList.contains('is-expanded');
+    setManageModalWorkflowExpanded(entry, startsExpanded);
+    entry.toggle.addEventListener('click', () => {
+      const expanded = entry.stepNode.classList.contains('is-expanded');
+      setManageModalWorkflowExpanded(entry, !expanded);
+      requestAnimationFrame(() => {
+        refreshManageModalWorkflowHeights();
+      });
+    });
+  });
+
   window.addEventListener('resize', () => {
     refreshEnrollmentWorkflowHeights();
+    refreshManageModalWorkflowHeights();
   });
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
@@ -3295,6 +3343,9 @@ const hydrateEnrollmentManager = (managerNode) => {
   const renderManageLearners = () => {
     if (!manageLearners.length) {
       learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
+      requestAnimationFrame(() => {
+        refreshManageModalWorkflowHeights();
+      });
       return;
     }
 
@@ -3377,6 +3428,10 @@ const hydrateEnrollmentManager = (managerNode) => {
         `;
       })
       .join('');
+
+    requestAnimationFrame(() => {
+      refreshManageModalWorkflowHeights();
+    });
   };
 
   const renderStaffHouseSelector = () => {
@@ -3652,6 +3707,9 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     renderManageLearners();
     manageModal.classList.remove('is-hidden');
+    requestAnimationFrame(() => {
+      refreshManageModalWorkflowHeights();
+    });
   };
 
   const openModalForGrade = (grade) => {
