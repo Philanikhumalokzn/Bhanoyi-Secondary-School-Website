@@ -5195,6 +5195,46 @@ const buildSingleRoundRobin = (teamIds = []) => {
   });
 };
 
+const buildGenerationTeamOrders = (teamIds = [], maxVariants = 120) => {
+  const normalized = Array.from(new Set((teamIds || []).filter(Boolean)));
+  if (!normalized.length) return [];
+
+  const variants = [];
+  const seen = new Set();
+  const addVariant = (order) => {
+    const normalizedOrder = Array.from(new Set((order || []).filter(Boolean)));
+    if (normalizedOrder.length !== normalized.length) return;
+    const key = normalizedOrder.join('|');
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push(normalizedOrder);
+  };
+
+  addVariant(normalized);
+
+  for (let shift = 1; shift < normalized.length && variants.length < maxVariants; shift += 1) {
+    const rotated = [...normalized.slice(shift), ...normalized.slice(0, shift)];
+    addVariant(rotated);
+    if (variants.length >= maxVariants) break;
+    addVariant([...rotated].reverse());
+  }
+
+  let randomGuard = 0;
+  while (variants.length < maxVariants && randomGuard < maxVariants * 8) {
+    randomGuard += 1;
+    const shuffled = [...normalized];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      const current = shuffled[index];
+      shuffled[index] = shuffled[swapIndex];
+      shuffled[swapIndex] = current;
+    }
+    addVariant(shuffled);
+  }
+
+  return variants;
+};
+
 const hydrateFixtureCreator = (fixtureNode) => {
   if (!(fixtureNode instanceof HTMLElement)) return;
 
@@ -7390,73 +7430,83 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastFormatLabel = String(setup.formatLabel || '').trim();
 
     const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teams);
-    const nextFixtures = buildSingleRoundRobin(teams).map((fixture) => ({
-      ...fixture,
-      sportKey: profile.key,
-      sportLabel: profile.label,
-      formatLabel: lastFormatLabel
-    }));
+    const selectedRules = selectedFairnessRuleIds();
+    const generationOrders = buildGenerationTeamOrders(teams, 120);
+    let successfulGeneration = null;
+    let generationFailureReason = 'Unable to generate fixtures that satisfy selected fairness rules.';
 
-    const pinnedIndexes = [];
-    const constrainedFixtures = nextFixtures.map((fixture, index) => {
-      const slotKey = fixtureSlotKey(fixture);
-      const pinned = pinnedBySlot[slotKey];
-      if (!pinned) return fixture;
-      pinnedIndexes.push(index);
-      return {
+    generationOrders.some((teamOrder) => {
+      const nextFixtures = buildSingleRoundRobin(teamOrder).map((fixture) => ({
         ...fixture,
-        homeId: pinned.homeId,
-        awayId: pinned.awayId
+        sportKey: profile.key,
+        sportLabel: profile.label,
+        formatLabel: lastFormatLabel
+      }));
+
+      const pinnedIndexes = [];
+      const constrainedFixtures = nextFixtures.map((fixture, index) => {
+        const slotKey = fixtureSlotKey(fixture);
+        const pinned = pinnedBySlot[slotKey];
+        if (!pinned) return fixture;
+        pinnedIndexes.push(index);
+        return {
+          ...fixture,
+          homeId: pinned.homeId,
+          awayId: pinned.awayId
+        };
+      });
+
+      const pinRepairResult = repairRoundRobinFixtureSet({
+        fixtures: constrainedFixtures,
+        teamIds: teamOrder,
+        lockedIndexes: pinnedIndexes
+      });
+
+      if (!pinRepairResult.ok) {
+        generationFailureReason = `Pinned fixture constraints conflict with round-robin fairness. ${pinRepairResult.message}`;
+        return false;
+      }
+
+      const fairnessEnforcement = enforceSelectedFairnessRules({
+        fixtures: pinRepairResult.fixtures,
+        teamIds: teamOrder,
+        selectedRuleIds: selectedRules,
+        lockedIndexes: pinnedIndexes
+      });
+
+      if (!fairnessEnforcement.ok) {
+        generationFailureReason = `Selected fairness rules could not be satisfied with current pinned/manual constraints. ${fairnessEnforcement.message}`;
+        return false;
+      }
+
+      const generationValidation = validateNoDuplicatePairingsPerLeg(fairnessEnforcement.fixtures, teamOrder);
+      if (!generationValidation.ok) {
+        generationFailureReason = generationValidation.message;
+        return false;
+      }
+
+      successfulGeneration = {
+        fixtures: fairnessEnforcement.fixtures,
+        pinnedIndexes
       };
+      return true;
     });
 
-    const pinRepairResult = repairRoundRobinFixtureSet({
-      fixtures: constrainedFixtures,
-      teamIds: teams,
-      lockedIndexes: pinnedIndexes
-    });
-
-    if (!pinRepairResult.ok) {
+    if (!successfulGeneration) {
       lastFixtures = [];
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = `Pinned fixture constraints conflict with round-robin fairness. ${pinRepairResult.message}`;
+        statusNode.textContent = generationFailureReason;
       }
       return;
     }
 
-    lastFixtures = pinRepairResult.fixtures;
+    lastFixtures = successfulGeneration.fixtures;
     pinnedFixtureSlotKeys = new Set(
-      pinnedIndexes
+      successfulGeneration.pinnedIndexes
         .map((index) => fixtureSlotKey(lastFixtures[index]))
         .filter(Boolean)
     );
-
-    const selectedRules = selectedFairnessRuleIds();
-    const fairnessEnforcement = enforceSelectedFairnessRules({
-      fixtures: lastFixtures,
-      teamIds: teams,
-      selectedRuleIds: selectedRules,
-      lockedIndexes: pinnedIndexes
-    });
-    if (!fairnessEnforcement.ok) {
-      lastFixtures = [];
-      renderFixtures(lastFixtures);
-      if (statusNode) {
-        statusNode.textContent = `Selected fairness rules could not be satisfied with current pinned/manual constraints. ${fairnessEnforcement.message}`;
-      }
-      return;
-    }
-
-    lastFixtures = fairnessEnforcement.fixtures;
-
-    const generationValidation = validateNoDuplicatePairingsPerLeg(lastFixtures, teams);
-    if (!generationValidation.ok) {
-      lastFixtures = [];
-      renderFixtures(lastFixtures);
-      if (statusNode) statusNode.textContent = generationValidation.message;
-      return;
-    }
 
     refreshCurrentUnfairnessReport(lastFixtures);
     if (isAdminMode) {
