@@ -3558,36 +3558,31 @@ const hydrateEnrollmentManager = (managerNode) => {
             <div class="enrollment-learner-summary">
               <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
               <div class="enrollment-learner-form enrollment-learner-inline-fields">
-                <label class="enrollment-class-modal-field">
-                  RCL role
-                  <select data-enrollment-learner-rcl-index="${index}" ${canEditAssignments ? '' : 'disabled'}>
-                    ${rclRoleOptions
-                      .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
-                      .join('')}
-                  </select>
-                </label>
-                <label class="enrollment-class-modal-field">
-                  Sporting codes
-                  <select
-                    multiple
-                    size="3"
-                    class="enrollment-learner-sporting-select"
-                    data-enrollment-learner-sporting-index="${index}"
-                    ${canEditAssignments ? '' : 'disabled'}
-                  >
-                    ${sportingCodeDefinitions
-                      .map((entry) => {
-                        const selected = sportingCodes.some(
-                          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
-                        )
-                          ? 'selected'
-                          : '';
-                        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
-                      })
-                      .join('')}
-                  </select>
-                  <span class="enrollment-class-empty enrollment-learner-sporting-summary" title="${escapeHtmlAttribute(sportingCodesTitle || 'No sporting code selected')}">${escapeHtmlText(sportingCodesSummary)}</span>
-                </label>
+                <select data-enrollment-learner-rcl-index="${index}" ${canEditAssignments ? '' : 'disabled'} aria-label="RCL role">
+                  ${rclRoleOptions
+                    .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
+                    .join('')}
+                </select>
+                <select
+                  multiple
+                  size="2"
+                  class="enrollment-learner-sporting-select"
+                  data-enrollment-learner-sporting-index="${index}"
+                  aria-label="Sporting codes"
+                  ${canEditAssignments ? '' : 'disabled'}
+                >
+                  ${sportingCodeDefinitions
+                    .map((entry) => {
+                      const selected = sportingCodes.some(
+                        (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+                      )
+                        ? 'selected'
+                        : '';
+                      return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
+                    })
+                    .join('')}
+                </select>
+                <span class="enrollment-class-empty enrollment-learner-sporting-summary" title="${escapeHtmlAttribute(sportingCodesTitle || 'No sporting code selected')}">${escapeHtmlText(sportingCodesSummary)}</span>
               </div>
               <div class="enrollment-house-row">
                 ${houseOptionsMarkup}

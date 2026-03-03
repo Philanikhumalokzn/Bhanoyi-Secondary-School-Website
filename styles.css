@@ -2987,25 +2987,33 @@ body.match-log-workspace-open {
 }
 
 .enrollment-learner-inline-fields {
-  grid-template-columns: minmax(130px, 0.75fr) minmax(190px, 1.25fr);
-  align-items: end;
-  gap: 6px 8px;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 0.9fr) minmax(180px, 1.3fr);
+  align-items: center;
+  gap: 4px 8px;
 }
 
 .enrollment-learner-sporting-select {
-  min-height: 64px;
-  max-height: 64px;
-  padding: 4px 8px;
+  height: 34px !important;
+  min-height: 34px !important;
+  max-height: 34px !important;
+  padding: 2px 8px;
+  overflow: auto;
+  white-space: nowrap;
 }
 
 .enrollment-learner-sporting-summary {
-  display: block;
-  margin-top: 3px;
+  display: inline-block;
+  margin-top: 0;
   font-size: 0.74rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+
+.enrollment-learner-inline-fields > select {
+  min-height: 34px;
+  padding: 6px 8px;
 }
 
 .enrollment-house-row {
