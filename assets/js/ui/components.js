@@ -2009,9 +2009,11 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="netball">Netball</option>
                   </select>
                 </label>
-                <label>
-                  Fixture fairness rules (select to enforce)
-                  <select data-fixture-fairness-rules multiple size="7">
+                <div class="fixture-fairness-control">
+                  <span class="fixture-fairness-label">Fixture fairness rules</span>
+                  <button type="button" class="btn btn-secondary" data-fixture-open-fairness-modal>Add Fixture fairness rule</button>
+                  <p class="fixture-fairness-summary" data-fixture-fairness-summary></p>
+                  <select data-fixture-fairness-rules multiple size="7" class="is-hidden" aria-hidden="true" tabindex="-1">
                     <option value="equal_matches_season" selected>Every team plays the same number of matches each season</option>
                     <option value="equal_matches_leg" selected>Every team plays the same number of matches in each leg</option>
                     <option value="balanced_home_away" selected>Each team keeps balanced home/away matches per leg and season</option>
@@ -2020,7 +2022,19 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="no_double_round_booking" selected>No team plays more than once in a single round</option>
                     <option value="fifa_no_self_match" selected>No self-fixtures (team cannot play itself)</option>
                   </select>
-                </label>
+                </div>
+              </div>
+              <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
+                <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
+                <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
+                  <h3>Fixture fairness rules</h3>
+                  <p class="enrollment-class-modal-subtitle">Select rules to enforce in auto-generated draft fixtures.</p>
+                  <div class="fixture-fairness-checklist" data-fixture-fairness-options></div>
+                  <div class="enrollment-class-modal-actions">
+                    <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Cancel</button>
+                    <button type="button" class="btn btn-primary" data-fixture-apply-fairness-rules>Apply selected rules</button>
+                  </div>
+                </article>
               </div>
               <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
                 <h3>Soccer Format</h3>
@@ -5178,7 +5192,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const rulesSaveButton = fixtureNode.querySelector('[data-fixture-rules-save]');
   const rulesPreviewNode = fixtureNode.querySelector('[data-fixture-rules-preview-output]');
   const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
+  const fairnessOpenButton = fixtureNode.querySelector('[data-fixture-open-fairness-modal]');
+  const fairnessSummaryNode = fixtureNode.querySelector('[data-fixture-fairness-summary]');
   const fairnessRulesSelect = fixtureNode.querySelector('[data-fixture-fairness-rules]');
+  const fairnessModal = fixtureNode.querySelector('[data-fixture-fairness-modal]');
+  const fairnessOptionsNode = fixtureNode.querySelector('[data-fixture-fairness-options]');
+  const fairnessCloseButtons = Array.from(fixtureNode.querySelectorAll('[data-fixture-close-fairness-modal]'));
+  const fairnessApplyButton = fixtureNode.querySelector('[data-fixture-apply-fairness-rules]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
   const netballPanel = fixtureNode.querySelector('[data-fixture-sport-panel="netball"]');
@@ -5249,6 +5269,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
   }
   if (fairnessRulesSelect instanceof HTMLSelectElement) {
     fairnessRulesSelect.disabled = !isAdminMode;
+  }
+  if (fairnessOpenButton instanceof HTMLButtonElement) {
+    fairnessOpenButton.disabled = !isAdminMode;
+  }
+  if (fairnessApplyButton instanceof HTMLButtonElement) {
+    fairnessApplyButton.disabled = !isAdminMode;
   }
   if (autoFillToggle instanceof HTMLInputElement) {
     autoFillToggle.disabled = !isAdminMode;
@@ -6106,6 +6132,49 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return selected.length ? Array.from(new Set(selected)) : [...defaultFairnessRuleIds];
   };
 
+  const fairnessRuleLabelById = (ruleId) => {
+    if (!(fairnessRulesSelect instanceof HTMLSelectElement)) return String(ruleId || '').trim();
+    const match = Array.from(fairnessRulesSelect.options).find(
+      (option) => String(option.value || '').trim() === String(ruleId || '').trim()
+    );
+    return match ? normalizeText(match.textContent || match.label || match.value, 160) : String(ruleId || '').trim();
+  };
+
+  const refreshFairnessSummary = () => {
+    if (!(fairnessSummaryNode instanceof HTMLElement)) return;
+    const selectedIds = selectedFairnessRuleIds();
+    if (!selectedIds.length) {
+      fairnessSummaryNode.textContent = 'No fairness rules selected.';
+      return;
+    }
+    const labels = selectedIds.map((ruleId) => fairnessRuleLabelById(ruleId)).filter(Boolean);
+    fairnessSummaryNode.textContent = `${selectedIds.length} rule${selectedIds.length === 1 ? '' : 's'} selected.` +
+      (labels.length ? ` ${labels.join(' • ')}` : '');
+  };
+
+  const renderFairnessModalOptions = () => {
+    if (!(fairnessOptionsNode instanceof HTMLElement) || !(fairnessRulesSelect instanceof HTMLSelectElement)) return;
+    const selected = new Set(selectedFairnessRuleIds());
+    fairnessOptionsNode.innerHTML = Array.from(fairnessRulesSelect.options)
+      .map((option, index) => {
+        const optionValue = String(option.value || '').trim();
+        const optionLabel = normalizeText(option.textContent || option.label || option.value, 200);
+        return `
+          <label class="fixture-fairness-option">
+            <input
+              type="checkbox"
+              data-fixture-fairness-option
+              value="${escapeHtmlAttribute(optionValue)}"
+              ${selected.has(optionValue) ? 'checked' : ''}
+              ${isAdminMode ? '' : 'disabled'}
+            />
+            <span>${escapeHtmlText(optionLabel || `Rule ${index + 1}`)}</span>
+          </label>
+        `;
+      })
+      .join('');
+  };
+
   const setSelectedFairnessRuleIds = (ruleIds = []) => {
     if (!(fairnessRulesSelect instanceof HTMLSelectElement)) return;
     const requested = new Set(
@@ -6118,6 +6187,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     Array.from(fairnessRulesSelect.options).forEach((option) => {
       option.selected = fallback.has(String(option.value || '').trim());
     });
+
+    refreshFairnessSummary();
+    renderFairnessModalOptions();
   };
 
   const setSelectedTeamIds = (teamIds) => {
@@ -7647,7 +7719,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     input.addEventListener('change', generateFixtures);
   });
 
-  fairnessRulesSelect?.addEventListener('change', () => {
+  const applyFairnessRulesSelection = () => {
     persistActiveSportState();
     if (!lastFixtures.length) return;
 
@@ -7686,6 +7758,51 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (statusNode) {
       statusNode.textContent = 'Fairness rules updated and applied to current fixtures.';
     }
+  };
+
+  const closeFairnessModal = () => {
+    if (!(fairnessModal instanceof HTMLElement)) return;
+    fairnessModal.classList.add('is-hidden');
+  };
+
+  const openFairnessModal = () => {
+    if (!isAdminMode) return;
+    if (!(fairnessModal instanceof HTMLElement)) return;
+    renderFairnessModalOptions();
+    fairnessModal.classList.remove('is-hidden');
+  };
+
+  fairnessRulesSelect?.addEventListener('change', () => {
+    refreshFairnessSummary();
+    renderFairnessModalOptions();
+    applyFairnessRulesSelection();
+  });
+
+  fairnessOpenButton?.addEventListener('click', () => {
+    openFairnessModal();
+  });
+
+  fairnessCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', () => {
+      closeFairnessModal();
+    });
+  });
+
+  fairnessApplyButton?.addEventListener('click', () => {
+    if (!isAdminMode || !(fairnessOptionsNode instanceof HTMLElement)) {
+      closeFairnessModal();
+      return;
+    }
+
+    const selectedRuleIds = Array.from(fairnessOptionsNode.querySelectorAll('[data-fixture-fairness-option]'))
+      .filter((input) => input instanceof HTMLInputElement && input.checked)
+      .map((input) => String(input.value || '').trim())
+      .filter(Boolean);
+
+    setSelectedFairnessRuleIds(selectedRuleIds);
+    applyFairnessRulesSelection();
+    closeFairnessModal();
   });
 
   rulesSaveButton?.addEventListener('click', () => {
@@ -8064,6 +8181,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
   }
   hydrateDateRules(activeRulesBucket());
   refreshSportPanelState();
+  refreshFairnessSummary();
+  renderFairnessModalOptions();
   const bootSport = selectedSportKey();
   if (!restoreSavedStateForSport(bootSport)) {
     generateFixtures();

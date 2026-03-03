@@ -3439,6 +3439,52 @@ body.match-log-workspace-open {
   font-weight: 600;
 }
 
+.fixture-fairness-control {
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  align-content: start;
+}
+
+.fixture-fairness-label {
+  color: var(--text);
+}
+
+.fixture-fairness-summary {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.fixture-fairness-modal-panel {
+  max-width: 760px;
+}
+
+.fixture-fairness-checklist {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  max-height: 44vh;
+  overflow-y: auto;
+}
+
+.fixture-fairness-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.fixture-fairness-option input[type='checkbox'] {
+  margin-top: 2px;
+}
+
 .fixture-creator-sport-grid input,
 .fixture-creator-sport-grid select {
   border: 1px solid var(--border);
