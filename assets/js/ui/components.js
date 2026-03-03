@@ -6974,6 +6974,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
         ],
         rows: fixtureRows,
         note: 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.',
+        signatures: [
+          {
+            anchor: 'right',
+            name: 'Mr. B.C Dlamini',
+            role: 'Sports Committee Coordinator'
+          }
+        ],
         afterRows: ({ sheet, dataStartRow }) => {
           let runStart = 0;
           while (runStart < exportFixtures.length) {

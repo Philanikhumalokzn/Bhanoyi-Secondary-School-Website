@@ -235,7 +235,7 @@ export const exportProfessionalWorkbook = async ({
         .map((entry, index) => ({
           name: String(entry.name || '').trim(),
           role: String(entry.role || '').trim(),
-          anchor: entry.anchor === 'right' ? 'right' : index === 0 ? 'left' : 'right'
+          anchor: entry.anchor === 'right' ? 'right' : entry.anchor === 'center' ? 'center' : index === 0 ? 'left' : 'right'
         }))
     : [];
 
@@ -268,7 +268,7 @@ export const exportProfessionalWorkbook = async ({
       sheet.mergeCells(`${startLabel}${roleRow}:${endLabel}${roleRow}`);
       sheet.mergeCells(`${startLabel}${hintRow}:${endLabel}${hintRow}`);
 
-      const alignment = signature.anchor === 'right' ? 'right' : 'left';
+      const alignment = signature.anchor === 'right' ? 'right' : signature.anchor === 'center' ? 'center' : 'left';
       const nameCell = sheet.getCell(`${startLabel}${nameRow}`);
       nameCell.value = signature.name || '';
       nameCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
@@ -285,12 +285,16 @@ export const exportProfessionalWorkbook = async ({
       hintCell.alignment = { horizontal: alignment, vertical: 'middle' };
     };
 
-    const leftSignature = safeSignatures.find((entry) => entry.anchor === 'left') || safeSignatures[0];
-    const rightSignature = safeSignatures.find((entry) => entry.anchor === 'right') || safeSignatures[1] || null;
+    if (safeSignatures.length === 1) {
+      applySignatureBlock(safeSignatures[0], { start: 1, end: safeColumns.length });
+    } else {
+      const leftSignature = safeSignatures.find((entry) => entry.anchor === 'left') || safeSignatures[0];
+      const rightSignature = safeSignatures.find((entry) => entry.anchor === 'right') || safeSignatures[1] || null;
 
-    applySignatureBlock(leftSignature, leftRange);
-    if (rightSignature) {
-      applySignatureBlock(rightSignature, rightRange);
+      applySignatureBlock(leftSignature, leftRange);
+      if (rightSignature) {
+        applySignatureBlock(rightSignature, rightRange);
+      }
     }
   }
 
