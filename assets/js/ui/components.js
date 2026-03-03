@@ -7775,6 +7775,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const modalNode = resolveFairnessModalNode();
     if (!(modalNode instanceof HTMLElement)) return;
     modalNode.classList.add('is-hidden');
+    modalNode.style.removeProperty('display');
+    modalNode.style.removeProperty('visibility');
+    modalNode.style.removeProperty('opacity');
+    modalNode.style.removeProperty('pointer-events');
   };
 
   const openFairnessModal = () => {
@@ -7791,8 +7795,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
       }
       return;
     }
+
+    portalOverlayToBody(modalNode, fairnessModalPortalKey);
     renderFairnessModalOptions();
     modalNode.classList.remove('is-hidden');
+    modalNode.style.display = 'grid';
+    modalNode.style.visibility = 'visible';
+    modalNode.style.opacity = '1';
+    modalNode.style.pointerEvents = 'auto';
+
+    requestAnimationFrame(() => {
+      const stillHidden = modalNode.classList.contains('is-hidden');
+      if (stillHidden) {
+        modalNode.classList.remove('is-hidden');
+      }
+    });
   };
 
   fairnessRulesSelect?.addEventListener('change', () => {
@@ -7802,6 +7819,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
 
   fairnessOpenButton?.addEventListener('click', () => {
+    openFairnessModal();
+  });
+
+  fixtureNode.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const trigger = target.closest('[data-fixture-open-fairness-modal]');
+    if (!(trigger instanceof HTMLButtonElement)) return;
     openFairnessModal();
   });
 
