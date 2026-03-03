@@ -43,6 +43,16 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
+select[multiple],
+select[size]:not([size="1"]) {
+  height: auto;
+  min-height: 168px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  overflow: auto;
+  white-space: normal;
+}
+
 html,
 body {
   margin: 0;
@@ -2228,6 +2238,12 @@ body.news-read-open {
   color: var(--text);
   font: inherit;
   padding: 8px 10px;
+}
+
+.inline-house-members-section select[multiple],
+.inline-house-members-section select[size]:not([size="1"]) {
+  min-height: 220px;
+  padding: 6px 8px;
 }
 
 .inline-house-sport-rules {
