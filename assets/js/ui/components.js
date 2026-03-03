@@ -2066,6 +2066,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   </div>
                   <div class="enrollment-class-modal-actions">
                     <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
+                    <button type="button" class="btn btn-primary" data-fixture-apply-fairness-rules>Apply rules</button>
                   </div>
                 </article>
               </div>
@@ -5236,6 +5237,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const fairnessModal = fixtureNode.querySelector('[data-fixture-fairness-modal]');
   const fairnessOptionsNode = fixtureNode.querySelector('[data-fixture-fairness-options]');
   const fairnessCloseButtons = Array.from(fixtureNode.querySelectorAll('[data-fixture-close-fairness-modal]'));
+  const fairnessApplyButton = fixtureNode.querySelector('[data-fixture-apply-fairness-rules]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
   const netballPanel = fixtureNode.querySelector('[data-fixture-sport-panel="netball"]');
@@ -7842,6 +7844,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     button.addEventListener('click', () => {
       closeFairnessModal();
     });
+  });
+
+  fairnessApplyButton?.addEventListener('click', () => {
+    closeFairnessModal();
   });
 
   resolveFairnessModalNode()?.addEventListener('click', (event) => {
