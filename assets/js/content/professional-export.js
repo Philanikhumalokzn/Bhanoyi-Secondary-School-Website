@@ -247,42 +247,78 @@ export const exportProfessionalWorkbook = async ({
       end: Math.max(Math.min(safeColumns.length, midpoint + 1), safeColumns.length)
     };
 
+    const resolveLineRange = (range, anchor) => {
+      const width = Math.max(1, range.end - range.start + 1);
+      const span = Math.max(2, Math.min(4, width));
+      if (anchor === 'right') {
+        return { start: Math.max(range.start, range.end - span + 1), end: range.end };
+      }
+      if (anchor === 'center') {
+        const start = range.start + Math.max(0, Math.floor((width - span) / 2));
+        return { start, end: Math.min(range.end, start + span - 1) };
+      }
+      return { start: range.start, end: Math.min(range.end, range.start + span - 1) };
+    };
+
     const applySignatureBlock = (signature, range) => {
       if (!signature || range.start > range.end) return;
 
-      const lineRow = footerRowNumber;
-      const nameRow = footerRowNumber + 1;
-      const roleRow = footerRowNumber + 2;
-      const hintRow = footerRowNumber + 3;
+      const blankSignatureRow = footerRowNumber;
+      const signatureLineRow = footerRowNumber + 1;
+      const nameLabelRow = footerRowNumber + 2;
+      const positionLabelRow = footerRowNumber + 3;
+      const dateLabelRow = footerRowNumber + 4;
+      const printedNameLineRow = footerRowNumber + 5;
+      const expectedRoleRow = footerRowNumber + 6;
       const startLabel = toColumnLabel(range.start);
       const endLabel = toColumnLabel(range.end);
+      const shortLineRange = resolveLineRange(range, signature.anchor);
+      const shortStartLabel = toColumnLabel(shortLineRange.start);
+      const shortEndLabel = toColumnLabel(shortLineRange.end);
 
-      for (let columnIndex = range.start; columnIndex <= range.end; columnIndex += 1) {
-        const lineCell = sheet.getRow(lineRow).getCell(columnIndex);
+      sheet.mergeCells(`${startLabel}${blankSignatureRow}:${endLabel}${blankSignatureRow}`);
+      sheet.getCell(`${startLabel}${blankSignatureRow}`).value = '';
+
+      for (let columnIndex = shortLineRange.start; columnIndex <= shortLineRange.end; columnIndex += 1) {
+        const lineCell = sheet.getRow(signatureLineRow).getCell(columnIndex);
         lineCell.border = {
-          top: { style: 'medium', color: { argb: `FF${theme.deepBlue}` } }
+          top: { style: 'thick', color: { argb: `FF${theme.deepBlue}` } }
         };
       }
 
-      sheet.mergeCells(`${startLabel}${nameRow}:${endLabel}${nameRow}`);
-      sheet.mergeCells(`${startLabel}${roleRow}:${endLabel}${roleRow}`);
-      sheet.mergeCells(`${startLabel}${hintRow}:${endLabel}${hintRow}`);
+      for (let columnIndex = shortLineRange.start; columnIndex <= shortLineRange.end; columnIndex += 1) {
+        const lineCell = sheet.getRow(printedNameLineRow).getCell(columnIndex);
+        lineCell.border = {
+          top: { style: 'thick', color: { argb: `FF${theme.deepBlue}` } }
+        };
+      }
+
+      sheet.mergeCells(`${startLabel}${nameLabelRow}:${endLabel}${nameLabelRow}`);
+      sheet.mergeCells(`${startLabel}${positionLabelRow}:${endLabel}${positionLabelRow}`);
+      sheet.mergeCells(`${startLabel}${dateLabelRow}:${endLabel}${dateLabelRow}`);
+      sheet.mergeCells(`${shortStartLabel}${expectedRoleRow}:${shortEndLabel}${expectedRoleRow}`);
 
       const alignment = signature.anchor === 'right' ? 'right' : signature.anchor === 'center' ? 'center' : 'left';
-      const nameCell = sheet.getCell(`${startLabel}${nameRow}`);
-      nameCell.value = signature.name || '';
-      nameCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+
+      const nameCell = sheet.getCell(`${startLabel}${nameLabelRow}`);
+      nameCell.value = 'Name:';
+      nameCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
       nameCell.alignment = { horizontal: alignment, vertical: 'middle' };
 
-      const roleCell = sheet.getCell(`${startLabel}${roleRow}`);
-      roleCell.value = signature.role || '';
-      roleCell.font = { name: 'Calibri', size: 9.5, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+      const roleCell = sheet.getCell(`${startLabel}${positionLabelRow}`);
+      roleCell.value = `Position: ${signature.role || ''}`;
+      roleCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
       roleCell.alignment = { horizontal: alignment, vertical: 'middle' };
 
-      const hintCell = sheet.getCell(`${startLabel}${hintRow}`);
-      hintCell.value = 'Signature & Date';
-      hintCell.font = { name: 'Calibri', size: 9, color: { argb: `FF${theme.deepBlue}` } };
-      hintCell.alignment = { horizontal: alignment, vertical: 'middle' };
+      const dateCell = sheet.getCell(`${startLabel}${dateLabelRow}`);
+      dateCell.value = 'Date:';
+      dateCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
+      dateCell.alignment = { horizontal: alignment, vertical: 'middle' };
+
+      const expectedRoleCell = sheet.getCell(`${shortStartLabel}${expectedRoleRow}`);
+      expectedRoleCell.value = signature.role || '';
+      expectedRoleCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+      expectedRoleCell.alignment = { horizontal: alignment, vertical: 'middle' };
     };
 
     if (safeSignatures.length === 1) {
