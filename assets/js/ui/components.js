@@ -6182,7 +6182,17 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const refreshFairnessSummary = () => {
     if (!(fairnessSummaryNode instanceof HTMLElement)) return;
-    fairnessSummaryNode.textContent = 'Reference list only (not applied to auto-generate).';
+    const labels = selectedFairnessRuleIds()
+      .map((ruleId) => fairnessRuleLabelById(ruleId))
+      .map((label) => normalizeText(label, 160))
+      .filter(Boolean);
+
+    if (!labels.length) {
+      fairnessSummaryNode.textContent = 'No fairness rules selected.';
+      return;
+    }
+
+    fairnessSummaryNode.textContent = `Selected fairness rules (${labels.length}): ${labels.join(', ')}`;
   };
 
   const syncFairnessCheckboxesFromState = () => {
