@@ -2033,34 +2033,34 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                 <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
                 <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
                   <h3>Fixture Fairness Rules</h3>
-                  <p class="enrollment-class-modal-subtitle">Reference list (display only).</p>
+                  <p class="enrollment-class-modal-subtitle">Select rules, then click Apply (state only).</p>
                   <div class="fixture-fairness-checklist">
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="equal_matches_season" checked />
                       <span>Every team plays the same number of matches each season</span>
                     </label>
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="equal_matches_leg" checked />
                       <span>Every team plays the same number of matches in each leg</span>
                     </label>
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="balanced_home_away" checked />
                       <span>Each team keeps balanced home/away matches per leg and season</span>
                     </label>
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="equal_round_participation" checked />
                       <span>Each team has balanced round participation within each leg</span>
                     </label>
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="unique_opponent_per_leg" checked />
                       <span>No duplicate opponent pairing in the same leg</span>
                     </label>
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="no_double_round_booking" checked />
                       <span>No team plays more than once in a single round</span>
                     </label>
                     <label class="fixture-fairness-option">
-                      <input type="checkbox" />
+                      <input type="checkbox" data-fixture-fairness-check value="fifa_no_self_match" checked />
                       <span>No self-fixtures (team cannot play itself)</span>
                     </label>
                   </div>
