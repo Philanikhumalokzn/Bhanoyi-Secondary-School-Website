@@ -251,7 +251,7 @@ export const exportProfessionalWorkbook = async ({
       const width = Math.max(1, range.end - range.start + 1);
       const span = Math.max(2, Math.min(4, width));
       if (anchor === 'right') {
-        return { start: Math.max(range.start, range.end - span + 1), end: range.end };
+        return { start: range.start, end: Math.min(range.end, range.start + span - 1) };
       }
       if (anchor === 'center') {
         const start = range.start + Math.max(0, Math.floor((width - span) / 2));
@@ -266,15 +266,11 @@ export const exportProfessionalWorkbook = async ({
       const blankSignatureRow = footerRowNumber;
       const signatureLineRow = footerRowNumber + 1;
       const nameLabelRow = footerRowNumber + 2;
-      const positionLabelRow = footerRowNumber + 3;
+      const roleLabelRow = footerRowNumber + 3;
       const dateLabelRow = footerRowNumber + 4;
-      const printedNameLineRow = footerRowNumber + 5;
-      const expectedRoleRow = footerRowNumber + 6;
       const startLabel = toColumnLabel(range.start);
       const endLabel = toColumnLabel(range.end);
       const shortLineRange = resolveLineRange(range, signature.anchor);
-      const shortStartLabel = toColumnLabel(shortLineRange.start);
-      const shortEndLabel = toColumnLabel(shortLineRange.end);
 
       sheet.mergeCells(`${startLabel}${blankSignatureRow}:${endLabel}${blankSignatureRow}`);
       sheet.getCell(`${startLabel}${blankSignatureRow}`).value = '';
@@ -286,27 +282,19 @@ export const exportProfessionalWorkbook = async ({
         };
       }
 
-      for (let columnIndex = shortLineRange.start; columnIndex <= shortLineRange.end; columnIndex += 1) {
-        const lineCell = sheet.getRow(printedNameLineRow).getCell(columnIndex);
-        lineCell.border = {
-          top: { style: 'thick', color: { argb: `FF${theme.deepBlue}` } }
-        };
-      }
-
       sheet.mergeCells(`${startLabel}${nameLabelRow}:${endLabel}${nameLabelRow}`);
-      sheet.mergeCells(`${startLabel}${positionLabelRow}:${endLabel}${positionLabelRow}`);
+      sheet.mergeCells(`${startLabel}${roleLabelRow}:${endLabel}${roleLabelRow}`);
       sheet.mergeCells(`${startLabel}${dateLabelRow}:${endLabel}${dateLabelRow}`);
-      sheet.mergeCells(`${shortStartLabel}${expectedRoleRow}:${shortEndLabel}${expectedRoleRow}`);
 
-      const alignment = signature.anchor === 'right' ? 'right' : signature.anchor === 'center' ? 'center' : 'left';
+      const alignment = signature.anchor === 'center' ? 'center' : 'left';
 
       const nameCell = sheet.getCell(`${startLabel}${nameLabelRow}`);
       nameCell.value = 'Name:';
       nameCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
       nameCell.alignment = { horizontal: alignment, vertical: 'middle' };
 
-      const roleCell = sheet.getCell(`${startLabel}${positionLabelRow}`);
-      roleCell.value = `Position: ${signature.role || ''}`;
+      const roleCell = sheet.getCell(`${startLabel}${roleLabelRow}`);
+      roleCell.value = signature.role || '';
       roleCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
       roleCell.alignment = { horizontal: alignment, vertical: 'middle' };
 
@@ -314,15 +302,17 @@ export const exportProfessionalWorkbook = async ({
       dateCell.value = 'Date:';
       dateCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
       dateCell.alignment = { horizontal: alignment, vertical: 'middle' };
-
-      const expectedRoleCell = sheet.getCell(`${shortStartLabel}${expectedRoleRow}`);
-      expectedRoleCell.value = signature.role || '';
-      expectedRoleCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
-      expectedRoleCell.alignment = { horizontal: alignment, vertical: 'middle' };
     };
 
     if (safeSignatures.length === 1) {
-      applySignatureBlock(safeSignatures[0], { start: 1, end: safeColumns.length });
+      const onlySignature = safeSignatures[0];
+      if (onlySignature.anchor === 'right') {
+        applySignatureBlock(onlySignature, rightRange);
+      } else if (onlySignature.anchor === 'left') {
+        applySignatureBlock(onlySignature, leftRange);
+      } else {
+        applySignatureBlock(onlySignature, { start: 1, end: safeColumns.length });
+      }
     } else {
       const leftSignature = safeSignatures.find((entry) => entry.anchor === 'left') || safeSignatures[0];
       const rightSignature = safeSignatures.find((entry) => entry.anchor === 'right') || safeSignatures[1] || null;
