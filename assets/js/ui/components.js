@@ -2035,15 +2035,34 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   <h3>Fixture Fairness Rules</h3>
                   <p class="enrollment-class-modal-subtitle">Reference list (display only).</p>
                   <div class="fixture-fairness-checklist">
-                    <ul class="fixture-fairness-list">
-                      <li class="fixture-fairness-list-item">Every team plays the same number of matches each season</li>
-                      <li class="fixture-fairness-list-item">Every team plays the same number of matches in each leg</li>
-                      <li class="fixture-fairness-list-item">Each team keeps balanced home/away matches per leg and season</li>
-                      <li class="fixture-fairness-list-item">Each team has balanced round participation within each leg</li>
-                      <li class="fixture-fairness-list-item">No duplicate opponent pairing in the same leg</li>
-                      <li class="fixture-fairness-list-item">No team plays more than once in a single round</li>
-                      <li class="fixture-fairness-list-item">No self-fixtures (team cannot play itself)</li>
-                    </ul>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>Every team plays the same number of matches each season</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>Every team plays the same number of matches in each leg</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>Each team keeps balanced home/away matches per leg and season</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>Each team has balanced round participation within each leg</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>No duplicate opponent pairing in the same leg</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>No team plays more than once in a single round</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" />
+                      <span>No self-fixtures (team cannot play itself)</span>
+                    </label>
                   </div>
                   <div class="enrollment-class-modal-actions">
                     <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
