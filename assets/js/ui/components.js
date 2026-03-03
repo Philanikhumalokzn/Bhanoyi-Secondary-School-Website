@@ -3293,6 +3293,61 @@ const hydrateEnrollmentManager = (managerNode) => {
     return normalizeLearners(learners);
   };
 
+  const resolveDeterministicExcelColumnIndexes = (worksheet) => {
+    if (!worksheet) return null;
+    const normalizeHeaderCell = (value) => normalizeText(normalizeTabularCell(value), 120).toLowerCase();
+    const headerRowNumber = 9;
+    const headerValues = Array.isArray(worksheet.getRow(headerRowNumber).values)
+      ? worksheet.getRow(headerRowNumber).values.slice(1)
+      : [];
+    const header = headerValues.map((entry) => normalizeHeaderCell(entry));
+
+    const admissionIndex = header.findIndex((entry) => entry === 'acc no');
+    const learnerIndex = header.findIndex((entry) => entry === 'learner');
+    const genderIndex = header.findIndex((entry) => entry === 'gender');
+
+    if (admissionIndex < 0 || learnerIndex < 0 || genderIndex < 0) {
+      return null;
+    }
+
+    return { admissionIndex, learnerIndex, genderIndex };
+  };
+
+  const extractLearnersFromDeterministicExcelSheet = (worksheet) => {
+    const columnIndexes = resolveDeterministicExcelColumnIndexes(worksheet);
+    if (!columnIndexes) return [];
+    const { admissionIndex, learnerIndex, genderIndex } = columnIndexes;
+    const firstLearnerRowNumber = 10;
+
+    const learners = [];
+    const safeLastRow = Math.max(firstLearnerRowNumber, worksheet.actualRowCount || firstLearnerRowNumber);
+
+    for (let rowNumber = firstLearnerRowNumber; rowNumber <= safeLastRow + 20; rowNumber += 1) {
+      const row = worksheet.getRow(rowNumber);
+      const rowValues = Array.isArray(row.values) ? row.values.slice(1) : [];
+      const normalizedRow = rowValues.map((entry) => normalizeTabularCell(entry));
+      const hasAnyCell = normalizedRow.some((entry) => normalizeText(entry, 120));
+      if (!hasAnyCell && rowNumber > safeLastRow) break;
+
+      const hasAverageMarker = normalizedRow.some((entry) => /^average\s*%?$/i.test(normalizeText(entry, 40)));
+      if (hasAverageMarker) {
+        break;
+      }
+
+      const learner = normalizeLearner({
+        admissionNo: normalizedRow[admissionIndex],
+        name: normalizedRow[learnerIndex],
+        gender: normalizedRow[genderIndex]
+      });
+
+      if (learner) {
+        learners.push(learner);
+      }
+    }
+
+    return normalizeLearners(learners);
+  };
+
   const parseLearnersFromExcelFile = async (file) => {
     const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
@@ -3302,24 +3357,12 @@ const hydrateEnrollmentManager = (managerNode) => {
     const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
     if (!worksheet) return [];
 
-    const rows = [];
-    worksheet.eachRow({ includeEmpty: false }, (row) => {
-      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
-      rows.push(values.map((entry) => normalizeTabularCell(entry)));
-    });
-
-    const firstRow = Array.isArray(rows[0]) ? rows[0] : [];
-    const firstRowLower = firstRow.map((entry) => normalizeText(entry, 120).toLowerCase());
-    const hasHeaderKeywords = firstRowLower.some((entry) => /name|learner|student|admission|gender/.test(entry));
-
-    if (!hasHeaderKeywords) {
-      const simplifiedLearners = extractLearnersFromSimplifiedExcelRows(rows);
-      if (simplifiedLearners.length) {
-        return simplifiedLearners;
-      }
+    if (!resolveDeterministicExcelColumnIndexes(worksheet)) {
+      throw new Error('INVALID_DETERMINISTIC_EXCEL_TEMPLATE');
     }
 
-    return extractLearnersFromRows(rows);
+    const deterministicLearners = extractLearnersFromDeterministicExcelSheet(worksheet);
+    return deterministicLearners;
   };
 
   const parseClassFromImportFilename = (fileName) => {
@@ -4873,9 +4916,13 @@ const hydrateEnrollmentManager = (managerNode) => {
             ? `${addedCount} learner${addedCount === 1 ? '' : 's'} imported to Class ${selectedManageGrade}${selectedManageLetter}.`
             : 'Imported list matched existing learners (no new records added).';
       }
-    } catch {
+    } catch (error) {
       if (statusNode) {
-        statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
+        const isDeterministicTemplateError =
+          error instanceof Error && error.message === 'INVALID_DETERMINISTIC_EXCEL_TEMPLATE';
+        statusNode.textContent = isDeterministicTemplateError
+          ? 'Invalid Excel template. Expected row 9 headers: Acc No, Learner, Gender.'
+          : `Could not import the selected ${format.toUpperCase()} file.`;
       }
     }
   });
@@ -4894,6 +4941,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     let importedClassCount = 0;
     let importedLearnerCount = 0;
     const invalidNameFiles = [];
+    const invalidTemplateFiles = [];
     const emptyFiles = [];
 
     for (const file of files) {
@@ -4907,8 +4955,14 @@ const hydrateEnrollmentManager = (managerNode) => {
       let importedLearners = [];
       try {
         importedLearners = await parseLearnersFromImportFile(file);
-      } catch {
-        invalidNameFiles.push(file.name);
+      } catch (error) {
+        const isDeterministicTemplateError =
+          error instanceof Error && error.message === 'INVALID_DETERMINISTIC_EXCEL_TEMPLATE';
+        if (isDeterministicTemplateError) {
+          invalidTemplateFiles.push(file.name);
+        } else {
+          invalidNameFiles.push(file.name);
+        }
         continue;
       }
 
@@ -4969,6 +5023,11 @@ const hydrateEnrollmentManager = (managerNode) => {
       }
       if (invalidNameFiles.length) {
         statusParts.push(`${invalidNameFiles.length} file${invalidNameFiles.length === 1 ? '' : 's'} skipped (use filenames like 10A.xlsx).`);
+      }
+      if (invalidTemplateFiles.length) {
+        statusParts.push(
+          `${invalidTemplateFiles.length} file${invalidTemplateFiles.length === 1 ? '' : 's'} skipped (expected row 9 headers: Acc No, Learner, Gender).`
+        );
       }
       statusNode.textContent = statusParts.join(' ');
     }
