@@ -127,12 +127,23 @@ const renderCard = (item, clickable = false, context = {}) => {
   return `<article class="${cardClass}" ${attrs}>${content}</article>`;
 };
 
-const withAdminQuery = (href) => {
+const isAdminModeEnabled = () => {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('admin') === '1';
+};
+
+const isStaffModeEnabled = () => {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('staff') === '1';
+};
+
+const withAudienceQuery = (href) => {
   if (!href) return href;
   if (typeof window === 'undefined') return href;
 
-  const adminMode = new URLSearchParams(window.location.search).get('admin') === '1';
-  if (!adminMode) return href;
+  const adminMode = isAdminModeEnabled();
+  const staffMode = !adminMode && isStaffModeEnabled();
+  if (!adminMode && !staffMode) return href;
 
   if (/^(https?:|mailto:|tel:|#)/i.test(href)) {
     return href;
@@ -140,16 +151,17 @@ const withAdminQuery = (href) => {
 
   try {
     const url = new URL(href, window.location.origin);
-    url.searchParams.set('admin', '1');
+    if (adminMode) {
+      url.searchParams.set('admin', '1');
+      url.searchParams.delete('staff');
+    } else {
+      url.searchParams.set('staff', '1');
+      url.searchParams.delete('admin');
+    }
     return `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return href;
   }
-};
-
-const isAdminModeEnabled = () => {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('admin') === '1';
 };
 
 const ensureToastHost = () => {
@@ -348,12 +360,31 @@ const renderLatestNewsSection = (section, sectionIndex) => {
 };
 
 export const renderHeader = (siteContent, pageKey) => {
+  const adminMode = isAdminModeEnabled();
+  const staffMode = !adminMode && isStaffModeEnabled();
+
   const links = siteContent.navigation
-    .filter((item) => !item?.adminOnly || isAdminModeEnabled())
+    .flatMap((item) => {
+      if (!item) return [];
+
+      if (item.adminOnly) {
+        if (adminMode) {
+          return [item];
+        }
+
+        if (staffMode && String(item.key || '') === 'enrollment') {
+          return [{ ...item, label: 'My Class', href: 'enrollment.html' }];
+        }
+
+        return [];
+      }
+
+      return [item];
+    })
     .map((item) => {
-    const current = item.key === pageKey ? ' aria-current="page"' : '';
-    return `<li><a href="${withAdminQuery(item.href)}"${current}>${item.label}</a></li>`;
-  })
+      const current = item.key === pageKey ? ' aria-current="page"' : '';
+      return `<li><a href="${withAudienceQuery(item.href)}"${current}>${item.label}</a></li>`;
+    })
     .join('');
   const headerBackgroundImage = (siteContent.school?.headerBackgroundImage || '').trim();
   const headerBackgroundAttr = headerBackgroundImage.replace(/"/g, '&quot;');
@@ -365,7 +396,7 @@ export const renderHeader = (siteContent, pageKey) => {
   return `
     <header class="site-header ${headerBackgroundImage ? 'has-header-bg' : ''}" data-header-bg-url="${headerBackgroundAttr}">
       <div class="container header-inner">
-        <a class="brand" href="${withAdminQuery('index.html')}" aria-label="${siteContent.school.name} home">
+        <a class="brand" href="${withAudienceQuery('index.html')}" aria-label="${siteContent.school.name} home">
           <span class="brand-visual-desktop" aria-hidden="true">${brandVisual}</span>
           <span class="brand-name">${siteContent.school.name}</span>
         </a>
@@ -2141,6 +2172,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
 
 const renderEnrollmentManagerSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const staffMode = isStaffModeEnabled() && !isAdminModeEnabled();
   const config = {
     sectionKey: fallbackSectionKey,
     title: (section.title || 'Enrollment Management').trim() || 'Enrollment Management',
@@ -2150,14 +2182,66 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="enrollment-manager" data-section-key="${fallbackSectionKey}">
       <div class="container">
-        <h2>${config.title}</h2>
-        ${config.body ? `<p class="lead">${config.body}</p>` : ''}
         <article class="panel enrollment-manager-shell" data-enrollment-manager="true" data-enrollment-config="${escapeHtmlAttribute(JSON.stringify(config))}">
-          <div class="enrollment-manager-actions">
-            <button type="button" class="btn btn-secondary" data-enrollment-open-add-grade>Add grade</button>
-          </div>
-          <div class="enrollment-grade-list" data-enrollment-grade-list></div>
-          <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
+          <section class="sports-workflow-step is-collapsed" data-enrollment-workflow-step data-enrollment-workflow-id="staff">
+            <button type="button" class="sports-workflow-toggle" data-enrollment-workflow-toggle aria-expanded="false">Staff</button>
+            <div class="sports-workflow-body enrollment-workflow-body" data-enrollment-workflow-body>
+              <section class="enrollment-staff-section">
+                <div class="enrollment-staff-head">
+                  <h3>Staff</h3>
+                  <p class="enrollment-class-empty">Add staff members, set post level (PL1–PL4), and assign each to a house.</p>
+                </div>
+                <div class="enrollment-staff-form" data-enrollment-staff-form>
+                  <select data-enrollment-staff-title>
+                    <option value="Mr.">Mr.</option>
+                    <option value="Mrs.">Mrs.</option>
+                    <option value="Ms.">Ms.</option>
+                    <option value="Miss">Miss</option>
+                    <option value="Dr.">Dr.</option>
+                    <option value="Prof.">Prof.</option>
+                    <option value="Coach">Coach</option>
+                    <option value="Mx.">Mx.</option>
+                  </select>
+                  <input type="text" maxlength="20" data-enrollment-staff-initials placeholder="Initials (e.g. N.K.)" />
+                  <input type="text" maxlength="80" data-enrollment-staff-first-name placeholder="First name" />
+                  <input type="text" maxlength="80" data-enrollment-staff-surname placeholder="Surname" />
+                  <input type="text" maxlength="40" data-enrollment-staff-number placeholder="Staff no. (optional)" />
+                  <select data-enrollment-staff-gender>
+                    <option value="">Gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <select data-enrollment-staff-post-level>
+                    <option value="PL1">PL1 · Educator</option>
+                    <option value="PL2">PL2 · Departmental Head</option>
+                    <option value="PL3">PL3 · Deputy Principal</option>
+                    <option value="PL4">PL4 · Principal</option>
+                  </select>
+                  <select data-enrollment-staff-assigned-class></select>
+                  <input type="text" maxlength="80" data-enrollment-staff-subject placeholder="Subject / Department (optional)" />
+                  <input type="email" maxlength="120" data-enrollment-staff-email placeholder="Email (optional)" />
+                  <input type="text" maxlength="30" data-enrollment-staff-phone placeholder="Phone (optional)" />
+                  <input type="text" maxlength="120" data-enrollment-staff-display-override placeholder="Custom display format override (optional)" />
+                  <textarea rows="2" maxlength="280" data-enrollment-staff-notes placeholder="Notes (optional)"></textarea>
+                  <button type="button" class="btn btn-secondary" data-enrollment-add-staff>Add staff member</button>
+                </div>
+                <div class="enrollment-house-row" data-enrollment-staff-house-row></div>
+                <div class="enrollment-staff-list" data-enrollment-staff-list></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="sports-workflow-step is-expanded" data-enrollment-workflow-step data-enrollment-workflow-id="manage-enrollment">
+            <button type="button" class="sports-workflow-toggle" data-enrollment-workflow-toggle aria-expanded="true">${staffMode ? 'My Class' : 'Manage Enrollment'}</button>
+            <div class="sports-workflow-body enrollment-workflow-body" data-enrollment-workflow-body>
+              <div class="enrollment-manager-actions">
+                <button type="button" class="btn btn-secondary" data-enrollment-open-add-grade>Add grade</button>
+              </div>
+              <div class="enrollment-grade-list" data-enrollment-grade-list></div>
+              <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
+            </div>
+          </section>
           <div class="enrollment-grade-modal is-hidden" data-enrollment-grade-modal>
             <div class="enrollment-class-modal-backdrop" data-enrollment-close-grade-modal></div>
             <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Add grade">
@@ -2295,6 +2379,23 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
+  const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
+  const staffTitleSelect = managerNode.querySelector('[data-enrollment-staff-title]');
+  const staffInitialsInput = managerNode.querySelector('[data-enrollment-staff-initials]');
+  const staffFirstNameInput = managerNode.querySelector('[data-enrollment-staff-first-name]');
+  const staffSurnameInput = managerNode.querySelector('[data-enrollment-staff-surname]');
+  const staffNumberInput = managerNode.querySelector('[data-enrollment-staff-number]');
+  const staffGenderSelect = managerNode.querySelector('[data-enrollment-staff-gender]');
+  const staffPostLevelSelect = managerNode.querySelector('[data-enrollment-staff-post-level]');
+  const staffAssignedClassSelect = managerNode.querySelector('[data-enrollment-staff-assigned-class]');
+  const staffSubjectInput = managerNode.querySelector('[data-enrollment-staff-subject]');
+  const staffEmailInput = managerNode.querySelector('[data-enrollment-staff-email]');
+  const staffPhoneInput = managerNode.querySelector('[data-enrollment-staff-phone]');
+  const staffDisplayOverrideInput = managerNode.querySelector('[data-enrollment-staff-display-override]');
+  const staffNotesInput = managerNode.querySelector('[data-enrollment-staff-notes]');
+  const addStaffButton = managerNode.querySelector('[data-enrollment-add-staff]');
+  const staffHouseRowNode = managerNode.querySelector('[data-enrollment-staff-house-row]');
+  const staffListNode = managerNode.querySelector('[data-enrollment-staff-list]');
   const saveManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-save-manage]'));
   const closeManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-manage-modal]'));
 
@@ -2321,6 +2422,22 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importLearnersButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
+    !(staffTitleSelect instanceof HTMLSelectElement) ||
+    !(staffInitialsInput instanceof HTMLInputElement) ||
+    !(staffFirstNameInput instanceof HTMLInputElement) ||
+    !(staffSurnameInput instanceof HTMLInputElement) ||
+    !(staffNumberInput instanceof HTMLInputElement) ||
+    !(staffGenderSelect instanceof HTMLSelectElement) ||
+    !(staffPostLevelSelect instanceof HTMLSelectElement) ||
+    !(staffAssignedClassSelect instanceof HTMLSelectElement) ||
+    !(staffSubjectInput instanceof HTMLInputElement) ||
+    !(staffEmailInput instanceof HTMLInputElement) ||
+    !(staffPhoneInput instanceof HTMLInputElement) ||
+    !(staffDisplayOverrideInput instanceof HTMLInputElement) ||
+    !(staffNotesInput instanceof HTMLTextAreaElement) ||
+    !(addStaffButton instanceof HTMLButtonElement) ||
+    !(staffHouseRowNode instanceof HTMLElement) ||
+    !(staffListNode instanceof HTMLElement) ||
     !saveManageButtons.length
   ) {
     return;
@@ -2330,7 +2447,46 @@ const hydrateEnrollmentManager = (managerNode) => {
   portalOverlayToBody(classModal, `enrollment-class-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
   portalOverlayToBody(manageModal, `enrollment-manage-modal:${String(config.sectionKey || 'enrollment_manager').trim()}`);
 
+  const enrollmentWorkflowSteps = Array.from(managerNode.querySelectorAll('[data-enrollment-workflow-step]'))
+    .map((stepNode) => {
+      if (!(stepNode instanceof HTMLElement)) return null;
+      const toggle = stepNode.querySelector('[data-enrollment-workflow-toggle]');
+      const body = stepNode.querySelector('[data-enrollment-workflow-body]');
+      if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
+      return { stepNode, toggle, body };
+    })
+    .filter(Boolean);
+
+  const setEnrollmentWorkflowExpanded = (entry, expanded) => {
+    if (!entry) return;
+    entry.stepNode.classList.toggle('is-expanded', expanded);
+    entry.stepNode.classList.toggle('is-collapsed', !expanded);
+    entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    entry.body.style.maxHeight = expanded ? getExpandedWorkflowBodyMaxHeight(entry.body) : '0px';
+  };
+
+  const refreshEnrollmentWorkflowHeights = () => {
+    enrollmentWorkflowSteps.forEach((entry) => {
+      if (!entry.stepNode.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = getExpandedWorkflowBodyMaxHeight(entry.body);
+    });
+  };
+
+  enrollmentWorkflowSteps.forEach((entry) => {
+    const startsExpanded = entry.stepNode.classList.contains('is-expanded');
+    setEnrollmentWorkflowExpanded(entry, startsExpanded);
+    entry.toggle.addEventListener('click', () => {
+      const expanded = entry.stepNode.classList.contains('is-expanded');
+      setEnrollmentWorkflowExpanded(entry, !expanded);
+    });
+  });
+
+  window.addEventListener('resize', () => {
+    refreshEnrollmentWorkflowHeights();
+  });
+
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  const isStaffMode = !isAdminMode && new URLSearchParams(window.location.search).get('staff') === '1';
   const sectionKey = String(config.sectionKey || 'enrollment_manager').trim() || 'enrollment_manager';
   const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
   const gradeNumbers = Array.from({ length: 7 }, (_, index) => String(index + 6));
@@ -2402,12 +2558,42 @@ const hydrateEnrollmentManager = (managerNode) => {
   let activeGrades = [];
   let classesByGrade = {};
   let classProfilesByGrade = {};
+  let staffMembers = [];
   let selectedManageGrade = '';
   let selectedManageLetter = '';
   let manageLearners = [];
+  let selectedStaffHouseId = '';
+  const staffSessionKey = `bhanoyi.staffSession.${sectionKey}`;
+  let staffSessionEmail = '';
+  let loggedInStaff = null;
+
+  const staffPostLevelRanks = {
+    PL1: 'Educator',
+    PL2: 'Departmental Head',
+    PL3: 'Deputy Principal',
+    PL4: 'Principal'
+  };
 
   const normalizeLetter = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
   const normalizeText = (value, maxLength = 300) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
+
+  const normalizeLoginToken = (value) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const buildDefaultStaffCredentials = (staffLike) => {
+    const surnameToken = normalizeLoginToken(staffLike?.surname || '').slice(0, 16) || 'staff';
+    const firstToken = normalizeLoginToken(staffLike?.firstName || '');
+    const initialsToken = normalizeLoginToken(staffLike?.initials || '');
+    const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
+    const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+    return {
+      email: `${handle}@bhanoyi.education`,
+      password: handle
+    };
+  };
 
   const dedupeLetters = (values) => {
     const seen = new Set();
@@ -2432,6 +2618,8 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const normalizeLearner = (entry) => {
     if (!entry || typeof entry !== 'object') return null;
+    const allowedRclRoles = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
+
     const normalizeGender = (value) => {
       const raw = normalizeText(value, 20).toLowerCase();
       if (!raw) return '';
@@ -2447,12 +2635,43 @@ const hydrateEnrollmentManager = (managerNode) => {
       return schoolHouseOptions.some((house) => house.id === raw) ? raw : '';
     };
 
+    const normalizeRclRole = (value) => {
+      const role = normalizeText(value, 40);
+      if (!role) return '';
+      return allowedRclRoles.includes(role) ? role : '';
+    };
+
+    const normalizeSportingCodes = (value) => {
+      if (Array.isArray(value)) {
+        return Array.from(
+          new Set(
+            value
+              .map((entry) => normalizeText(entry, 40))
+              .filter(Boolean)
+          )
+        ).slice(0, 8);
+      }
+
+      const raw = normalizeText(value, 240);
+      if (!raw) return [];
+      return Array.from(
+        new Set(
+          raw
+            .split(',')
+            .map((entry) => normalizeText(entry, 40))
+            .filter(Boolean)
+        )
+      ).slice(0, 8);
+    };
+
     const name = normalizeText(entry.name, 120);
     const admissionNo = normalizeText(entry.admissionNo || entry.admission || '', 40);
     const gender = normalizeGender(entry.gender || entry.sex || '');
     const houseId = normalizeHouseId(entry.houseId || entry.house || '');
+    const rclRole = normalizeRclRole(entry.rclRole || entry.rcl || '');
+    const sportingCodes = normalizeSportingCodes(entry.sportingCodes || entry.sportsCodes || entry.sports || '');
     if (!name) return null;
-    return { name, admissionNo, gender, houseId };
+    return { name, admissionNo, gender, houseId, rclRole, sportingCodes };
   };
 
   const normalizeLearners = (values) => {
@@ -2469,7 +2688,12 @@ const hydrateEnrollmentManager = (managerNode) => {
           name: existing.name,
           admissionNo: existing.admissionNo || learner.admissionNo,
           gender: existing.gender || learner.gender,
-          houseId: existing.houseId || learner.houseId
+          houseId: existing.houseId || learner.houseId,
+          rclRole: existing.rclRole || learner.rclRole,
+          sportingCodes:
+            Array.isArray(existing.sportingCodes) && existing.sportingCodes.length
+              ? existing.sportingCodes
+              : learner.sportingCodes
         };
         return;
       }
@@ -2477,6 +2701,187 @@ const hydrateEnrollmentManager = (managerNode) => {
       learners.push(learner);
     });
     return learners;
+  };
+
+  const normalizeStaffPostLevel = (value) => {
+    const normalized = String(value || '').trim().toUpperCase();
+    if (normalized === 'PL2' || normalized === 'PL3' || normalized === 'PL4') {
+      return normalized;
+    }
+    return 'PL1';
+  };
+
+  const normalizeStaffTitle = (value) => {
+    const allowed = ['Mr.', 'Mrs.', 'Ms.', 'Miss', 'Dr.', 'Prof.', 'Coach', 'Mx.'];
+    const normalized = normalizeText(value, 20);
+    return allowed.includes(normalized) ? normalized : 'Mr.';
+  };
+
+  const normalizeStaffInitials = (value) => {
+    const raw = String(value || '')
+      .toUpperCase()
+      .replace(/[^A-Z]/g, '')
+      .slice(0, 8);
+    if (!raw) return '';
+    return raw.split('').join('.') + '.';
+  };
+
+  const inferInitialsFromFirstName = (value) => {
+    const raw = normalizeText(value, 80);
+    if (!raw) return '';
+    const letters = raw
+      .split(/\s+/)
+      .map((part) => part.charAt(0).toUpperCase())
+      .filter(Boolean)
+      .join('');
+    if (!letters) return '';
+    return letters.split('').join('.') + '.';
+  };
+
+  const inferFromLegacyName = (value) => {
+    const normalized = normalizeText(value, 120);
+    if (!normalized) {
+      return {
+        title: 'Mr.',
+        firstName: '',
+        surname: '',
+        initials: ''
+      };
+    }
+
+    const parts = normalized.split(/\s+/).filter(Boolean);
+    const knownTitles = ['mr.', 'mrs.', 'ms.', 'miss', 'dr.', 'prof.', 'coach', 'mx.'];
+    let title = 'Mr.';
+    if (parts.length && knownTitles.includes(parts[0].toLowerCase())) {
+      title = normalizeStaffTitle(parts.shift());
+    }
+
+    const surname = parts.length ? parts[parts.length - 1] : normalized;
+    const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
+    const initials = inferInitialsFromFirstName(firstName || surname);
+
+    return {
+      title,
+      firstName: normalizeText(firstName, 80),
+      surname: normalizeText(surname, 80),
+      initials
+    };
+  };
+
+  const formatStaffDefaultDisplayName = (staff) => {
+    const title = normalizeText(staff?.title, 20);
+    const initials = normalizeStaffInitials(staff?.initials || inferInitialsFromFirstName(staff?.firstName || ''));
+    const surname = normalizeText(staff?.surname, 80);
+    const fallback = [normalizeText(staff?.firstName, 80), surname].filter(Boolean).join(' ');
+    const formatted = [title, initials, surname].filter(Boolean).join(' ').trim();
+    return formatted || fallback || normalizeText(staff?.name, 120);
+  };
+
+  const resolveStaffDisplayName = (staff) => {
+    const custom = normalizeText(staff?.displayNameOverride, 120);
+    if (custom) return custom;
+    return formatStaffDefaultDisplayName(staff);
+  };
+
+  const normalizeStaffMember = (entry) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const normalizeGender = (value) => {
+      const raw = normalizeText(value, 20).toLowerCase();
+      if (!raw) return '';
+      if (raw === 'm' || raw === 'male' || raw === 'boy') return 'Male';
+      if (raw === 'f' || raw === 'female' || raw === 'girl') return 'Female';
+      if (raw === 'o' || raw === 'other') return 'Other';
+      return '';
+    };
+
+    const normalizeHouseId = (value) => {
+      const raw = normalizeText(value, 30).toLowerCase().replace(/[^a-z0-9_]/g, '');
+      if (!raw) return '';
+      return schoolHouseOptions.some((house) => house.id === raw) ? raw : '';
+    };
+
+    const legacy = inferFromLegacyName(entry.name);
+    const title = normalizeStaffTitle(entry.title || legacy.title);
+    const firstName = normalizeText(entry.firstName || '', 80) || legacy.firstName;
+    const surname = normalizeText(entry.surname || '', 80) || legacy.surname;
+    const initials = normalizeStaffInitials(entry.initials || '') || legacy.initials;
+    if (!surname) return null;
+
+    const postLevel = normalizeStaffPostLevel(entry.postLevel || 'PL1');
+    const assignedGradeRaw = normalizeText(entry.assignedGrade || '', 4);
+    const assignedGrade = gradeNumbers.includes(assignedGradeRaw) ? assignedGradeRaw : '';
+    const assignedClassLetter = normalizeLetter(entry.assignedClassLetter || entry.assignedLetter || '');
+    const defaultCredentials = buildDefaultStaffCredentials({ surname, firstName, initials });
+    const loginEmail = normalizeText(entry.loginEmail || entry.staffEmail || '', 120).toLowerCase() || defaultCredentials.email;
+    const loginPassword = normalizeText(entry.loginPassword || '', 120) || defaultCredentials.password;
+    const displayNameOverride = normalizeText(entry.displayNameOverride || entry.displayName || '', 120);
+    const normalized = {
+      title,
+      initials,
+      firstName,
+      surname,
+      displayNameOverride,
+      displayName: '',
+      name: '',
+      loginEmail,
+      loginPassword,
+      staffNumber: normalizeText(entry.staffNumber || '', 40),
+      gender: normalizeGender(entry.gender || ''),
+      postLevel,
+      rank: staffPostLevelRanks[postLevel] || 'Educator',
+      assignedGrade,
+      assignedClassLetter,
+      subject: normalizeText(entry.subject || '', 80),
+      email: normalizeText(entry.email || '', 120),
+      phone: normalizeText(entry.phone || '', 30),
+      notes: normalizeText(entry.notes || '', 280),
+      houseId: normalizeHouseId(entry.houseId || entry.house || '')
+    };
+
+    normalized.displayName = resolveStaffDisplayName(normalized);
+    normalized.name = normalized.displayName;
+    return normalized;
+  };
+
+  const normalizeStaffMembers = (values) => {
+    const seen = new Set();
+    const normalized = [];
+    (Array.isArray(values) ? values : []).forEach((entry) => {
+      const staff = normalizeStaffMember(entry);
+      if (!staff) return;
+      const dedupeKey = `${String(staff.surname || '').toLowerCase()}::${String(staff.initials || '').toLowerCase()}::${String(staff.staffNumber || '').toLowerCase()}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      normalized.push(staff);
+    });
+    return normalized;
+  };
+
+  const isStaffAssignedToClass = (staff, grade, letter) => {
+    if (!staff) return false;
+    const assignedGrade = String(staff.assignedGrade || '').trim();
+    const assignedLetter = normalizeLetter(staff.assignedClassLetter || '');
+    return assignedGrade === String(grade || '').trim() && assignedLetter === normalizeLetter(letter);
+  };
+
+  const resolveLoggedInStaff = () => {
+    if (!staffSessionEmail) return null;
+    return (
+      staffMembers.find(
+        (entry) => normalizeText(entry.loginEmail || '', 120).toLowerCase() === normalizeText(staffSessionEmail, 120).toLowerCase()
+      ) || null
+    );
+  };
+
+  const syncStaffSession = () => {
+    loggedInStaff = resolveLoggedInStaff();
+    if (!loggedInStaff) {
+      staffSessionEmail = '';
+      sessionStorage.removeItem(staffSessionKey);
+      return;
+    }
+    staffSessionEmail = loggedInStaff.loginEmail;
+    sessionStorage.setItem(staffSessionKey, staffSessionEmail);
   };
 
   const syncCapacityWithLearners = () => {
@@ -2737,20 +3142,23 @@ const hydrateEnrollmentManager = (managerNode) => {
         return {
           activeGrades: normalizedActive,
           classesByGrade: normalizeClassesStore(rawClasses),
-          classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizeClassesStore(rawClasses))
+          classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizeClassesStore(rawClasses)),
+          staffMembers: normalizeStaffMembers(parsed.staffMembers)
         };
       }
 
       return {
         activeGrades: [...gradeNumbers],
         classesByGrade: normalizeClassesStore({}),
-        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({}))
+        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
+        staffMembers: []
       };
     } catch {
       return {
         activeGrades: [...gradeNumbers],
         classesByGrade: normalizeClassesStore({}),
-        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({}))
+        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
+        staffMembers: []
       };
     }
   };
@@ -2761,7 +3169,8 @@ const hydrateEnrollmentManager = (managerNode) => {
       JSON.stringify({
         activeGrades: [...activeGrades],
         classesByGrade: normalizeClassesStore(classesByGrade),
-        classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade)
+        classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade),
+        staffMembers: normalizeStaffMembers(staffMembers)
       })
     );
   };
@@ -2839,16 +3248,32 @@ const hydrateEnrollmentManager = (managerNode) => {
     classProfilesByGrade[normalizedGrade][normalizedLetter] = normalizeProfile(profile);
   };
 
+  const canCurrentUserManageClass = (grade, letter) => {
+    if (isAdminMode) return true;
+    if (!isStaffMode) return false;
+    return isStaffAssignedToClass(loggedInStaff, grade, letter);
+  };
+
+  const canCurrentUserEditLearnerAssignments = (grade = selectedManageGrade, letter = selectedManageLetter) => {
+    if (isAdminMode) return true;
+    if (!isStaffMode) return false;
+    return canCurrentUserManageClass(grade, letter);
+  };
+
   const renderManageLearners = () => {
     if (!manageLearners.length) {
       learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
       return;
     }
 
+    const canEditAssignments = canCurrentUserEditLearnerAssignments();
+    const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
+
     learnerListNode.innerHTML = manageLearners
       .map((learner, index) => {
         const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
         const detail = details ? ` • ${details}` : '';
+        const sportingCodesValue = Array.isArray(learner.sportingCodes) ? learner.sportingCodes.join(', ') : '';
         const houseOptionsMarkup = schoolHouseOptions
           .map(
             (house) => `
@@ -2859,7 +3284,7 @@ const hydrateEnrollmentManager = (managerNode) => {
                   value="${escapeHtmlAttribute(house.id)}"
                   data-enrollment-learner-house-index="${index}"
                   ${learner.houseId === house.id ? 'checked' : ''}
-                  ${isAdminMode ? '' : 'disabled'}
+                  ${canEditAssignments ? '' : 'disabled'}
                 />
                 <span class="enrollment-house-avatar" style="--house-color:${escapeHtmlAttribute(house.color || '#64748b')};"></span>
                 <span>${escapeHtmlText(house.name)}</span>
@@ -2868,7 +3293,7 @@ const hydrateEnrollmentManager = (managerNode) => {
           )
           .join('');
 
-        const clearChoice = isAdminMode
+        const clearChoice = canEditAssignments
           ? `
               <label class="enrollment-house-choice enrollment-house-choice-clear">
                 <input
@@ -2887,6 +3312,27 @@ const hydrateEnrollmentManager = (managerNode) => {
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
               <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
+              <div class="enrollment-learner-form">
+                <label class="enrollment-class-modal-field">
+                  RCL role
+                  <select data-enrollment-learner-rcl-index="${index}" ${canEditAssignments ? '' : 'disabled'}>
+                    ${rclRoleOptions
+                      .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
+                      .join('')}
+                  </select>
+                </label>
+                <label class="enrollment-class-modal-field">
+                  Sporting codes (comma separated)
+                  <input
+                    type="text"
+                    maxlength="240"
+                    data-enrollment-learner-sporting-index="${index}"
+                    value="${escapeHtmlAttribute(sportingCodesValue)}"
+                    placeholder="e.g. Football, Netball"
+                    ${canEditAssignments ? '' : 'disabled'}
+                  />
+                </label>
+              </div>
               <div class="enrollment-house-row">
                 ${houseOptionsMarkup}
                 ${clearChoice}
@@ -2901,12 +3347,208 @@ const hydrateEnrollmentManager = (managerNode) => {
       .join('');
   };
 
+  const renderStaffHouseSelector = () => {
+    const optionsMarkup = schoolHouseOptions
+      .map(
+        (house) => `
+          <label class="enrollment-house-choice">
+            <input
+              type="radio"
+              name="enrollment_staff_house_form"
+              value="${escapeHtmlAttribute(house.id)}"
+              data-enrollment-staff-form-house="${escapeHtmlAttribute(house.id)}"
+              ${selectedStaffHouseId === house.id ? 'checked' : ''}
+              ${isAdminMode ? '' : 'disabled'}
+            />
+            <span class="enrollment-house-avatar" style="--house-color:${escapeHtmlAttribute(house.color || '#64748b')};"></span>
+            <span>${escapeHtmlText(house.name)}</span>
+          </label>
+        `
+      )
+      .join('');
+
+    const clearOption = `
+      <label class="enrollment-house-choice enrollment-house-choice-clear">
+        <input
+          type="radio"
+          name="enrollment_staff_house_form"
+          value=""
+          data-enrollment-staff-form-house=""
+          ${selectedStaffHouseId ? '' : 'checked'}
+          ${isAdminMode ? '' : 'disabled'}
+        />
+        <span>Unassigned</span>
+      </label>
+    `;
+
+    staffHouseRowNode.innerHTML = optionsMarkup + clearOption;
+  };
+
+  const getClassOptionRows = () =>
+    activeGrades
+      .map((grade) => {
+        const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+        return classes.map((letter) => ({ grade, letter }));
+      })
+      .flat()
+      .sort((left, right) => {
+        const byGrade = Number(left.grade) - Number(right.grade);
+        if (byGrade !== 0) return byGrade;
+        return left.letter.localeCompare(right.letter);
+      });
+
+  const parseAssignedClassValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw || !raw.includes('|')) {
+      return { assignedGrade: '', assignedClassLetter: '' };
+    }
+    const [gradeRaw, letterRaw] = raw.split('|');
+    const assignedGrade = gradeNumbers.includes(String(gradeRaw || '').trim()) ? String(gradeRaw || '').trim() : '';
+    const assignedClassLetter = normalizeLetter(letterRaw || '');
+    return { assignedGrade, assignedClassLetter };
+  };
+
+  const renderStaffAssignedClassOptions = () => {
+    const options = getClassOptionRows();
+    staffAssignedClassSelect.innerHTML = [
+      '<option value="">Assigned class (optional)</option>',
+      ...options.map(
+        (entry) =>
+          `<option value="${escapeHtmlAttribute(`${entry.grade}|${entry.letter}`)}">Grade ${escapeHtmlText(entry.grade)}${escapeHtmlText(entry.letter)}</option>`
+      )
+    ].join('');
+  };
+
+  const renderStaffMembers = () => {
+    if (!staffMembers.length) {
+      staffListNode.innerHTML = '<p class="enrollment-class-empty">No staff members added yet.</p>';
+      return;
+    }
+
+    staffListNode.innerHTML = staffMembers
+      .map((staff, index) => {
+        const displayName = resolveStaffDisplayName(staff);
+        const details = [
+          staff.postLevel ? `${staff.postLevel} · ${staff.rank || staffPostLevelRanks[staff.postLevel] || ''}` : '',
+          staff.gender || '',
+          staff.staffNumber ? `No: ${staff.staffNumber}` : '',
+          staff.assignedGrade && staff.assignedClassLetter ? `Class: ${staff.assignedGrade}${staff.assignedClassLetter}` : '',
+          staff.loginEmail ? `Login: ${staff.loginEmail}` : '',
+          staff.loginPassword ? `Default password: ${staff.loginPassword}` : '',
+          staff.subject || '',
+          staff.email || '',
+          staff.phone || ''
+        ]
+          .filter(Boolean)
+          .join(' • ');
+
+        const houseOptionsMarkup = schoolHouseOptions
+          .map(
+            (house) => `
+              <label class="enrollment-house-choice">
+                <input
+                  type="radio"
+                  name="enrollment_staff_house_${index}"
+                  value="${escapeHtmlAttribute(house.id)}"
+                  data-enrollment-staff-house-index="${index}"
+                  ${staff.houseId === house.id ? 'checked' : ''}
+                  ${isAdminMode ? '' : 'disabled'}
+                />
+                <span class="enrollment-house-avatar" style="--house-color:${escapeHtmlAttribute(house.color || '#64748b')};"></span>
+                <span>${escapeHtmlText(house.name)}</span>
+              </label>
+            `
+          )
+          .join('');
+
+        const clearChoice = isAdminMode
+          ? `
+              <label class="enrollment-house-choice enrollment-house-choice-clear">
+                <input
+                  type="radio"
+                  name="enrollment_staff_house_${index}"
+                  value=""
+                  data-enrollment-staff-house-index="${index}"
+                  ${staff.houseId ? '' : 'checked'}
+                />
+                <span>Unassigned</span>
+              </label>
+            `
+          : '';
+
+        return `
+          <div class="enrollment-learner-item enrollment-staff-item">
+            <div class="enrollment-learner-summary">
+              <span>${escapeHtmlText(displayName)}${details ? ` • ${escapeHtmlText(details)}` : ''}</span>
+              ${isAdminMode ? `
+                <label class="enrollment-class-modal-field enrollment-staff-display-override-field">
+                  Custom display format (optional)
+                  <input
+                    type="text"
+                    maxlength="120"
+                    value="${escapeHtmlAttribute(staff.displayNameOverride || '')}"
+                    placeholder="Default: ${escapeHtmlAttribute(formatStaffDefaultDisplayName(staff))}"
+                    data-enrollment-staff-display-override-index="${index}"
+                  />
+                </label>
+                <label class="enrollment-class-modal-field enrollment-staff-display-override-field">
+                  Assigned class
+                  <select data-enrollment-staff-assigned-class-index="${index}">
+                    <option value="">No class assigned</option>
+                    ${getClassOptionRows()
+                      .map((entry) => {
+                        const value = `${entry.grade}|${entry.letter}`;
+                        const selected =
+                          String(staff.assignedGrade || '') === String(entry.grade || '') &&
+                          normalizeLetter(staff.assignedClassLetter || '') === normalizeLetter(entry.letter || '')
+                            ? 'selected'
+                            : '';
+                        return `<option value="${escapeHtmlAttribute(value)}" ${selected}>Grade ${escapeHtmlText(entry.grade)}${escapeHtmlText(entry.letter)}</option>`;
+                      })
+                      .join('')}
+                  </select>
+                </label>
+              ` : ''}
+              ${staff.notes ? `<span class="enrollment-class-empty">${escapeHtmlText(staff.notes)}</span>` : ''}
+              <div class="enrollment-house-row">
+                ${houseOptionsMarkup}
+                ${clearChoice}
+              </div>
+            </div>
+            <div class="enrollment-learner-actions">
+              ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-staff-index="${index}" aria-label="Remove staff ${escapeHtmlAttribute(displayName)}" title="Remove staff ${escapeHtmlAttribute(displayName)}">×</button>` : ''}
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const clearStaffForm = () => {
+    staffTitleSelect.value = 'Mr.';
+    staffInitialsInput.value = '';
+    staffFirstNameInput.value = '';
+    staffSurnameInput.value = '';
+    staffNumberInput.value = '';
+    staffGenderSelect.value = '';
+    staffPostLevelSelect.value = 'PL1';
+    staffAssignedClassSelect.value = '';
+    staffSubjectInput.value = '';
+    staffEmailInput.value = '';
+    staffPhoneInput.value = '';
+    staffDisplayOverrideInput.value = '';
+    staffNotesInput.value = '';
+    selectedStaffHouseId = '';
+    renderStaffHouseSelector();
+  };
+
   const openManageModal = (grade, letter) => {
     const normalizedGrade = String(grade || '').trim();
     const normalizedLetter = normalizeLetter(letter);
     if (!normalizedGrade || !normalizedLetter) return;
     const classes = Array.isArray(classesByGrade[normalizedGrade]) ? classesByGrade[normalizedGrade] : [];
     if (!classes.includes(normalizedLetter)) return;
+    if (!canCurrentUserManageClass(normalizedGrade, normalizedLetter)) return;
 
     selectedManageGrade = normalizedGrade;
     selectedManageLetter = normalizedLetter;
@@ -2925,27 +3567,27 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerAdmissionInput.value = '';
     learnerGenderSelect.value = '';
 
-    const readOnly = !isAdminMode;
-    manageTeacherInput.disabled = readOnly;
-    manageRoomInput.disabled = readOnly;
+    const canEditAssignments = canCurrentUserEditLearnerAssignments(normalizedGrade, normalizedLetter);
+    manageTeacherInput.disabled = !isAdminMode;
+    manageRoomInput.disabled = !isAdminMode;
     manageCapacityInput.disabled = true;
     manageCapacityInput.readOnly = true;
-    manageNotesInput.disabled = readOnly;
-    learnerNameInput.disabled = readOnly;
-    learnerAdmissionInput.disabled = readOnly;
-    learnerGenderSelect.disabled = readOnly;
-    addLearnerButton.disabled = readOnly;
-    importFormatSelect.disabled = readOnly;
-    importFileInput.disabled = readOnly;
-    importLearnersButton.disabled = readOnly;
+    manageNotesInput.disabled = !isAdminMode;
+    learnerNameInput.disabled = !isAdminMode;
+    learnerAdmissionInput.disabled = !isAdminMode;
+    learnerGenderSelect.disabled = !isAdminMode;
+    addLearnerButton.disabled = !isAdminMode;
+    importFormatSelect.disabled = !isAdminMode;
+    importFileInput.disabled = !isAdminMode;
+    importLearnersButton.disabled = !isAdminMode;
     clearLearnersButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
-      button.disabled = readOnly;
+      button.disabled = !isAdminMode;
     });
     saveManageButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
-      button.disabled = readOnly;
-      button.classList.toggle('is-hidden', readOnly);
+      button.disabled = !canEditAssignments;
+      button.classList.toggle('is-hidden', false);
     });
 
     importFormatSelect.value = 'excel';
@@ -2979,6 +3621,30 @@ const hydrateEnrollmentManager = (managerNode) => {
   const render = () => {
     addGradeTrigger.disabled = !isAdminMode || getMissingGrades().length === 0;
 
+    if (staffWorkflowStep instanceof HTMLElement) {
+      staffWorkflowStep.classList.toggle('is-hidden', !isAdminMode);
+    }
+
+    const staffReadOnly = !isAdminMode;
+    staffTitleSelect.disabled = staffReadOnly;
+    staffInitialsInput.disabled = staffReadOnly;
+    staffFirstNameInput.disabled = staffReadOnly;
+    staffSurnameInput.disabled = staffReadOnly;
+    staffNumberInput.disabled = staffReadOnly;
+    staffGenderSelect.disabled = staffReadOnly;
+    staffPostLevelSelect.disabled = staffReadOnly;
+    staffAssignedClassSelect.disabled = staffReadOnly;
+    staffSubjectInput.disabled = staffReadOnly;
+    staffEmailInput.disabled = staffReadOnly;
+    staffPhoneInput.disabled = staffReadOnly;
+    staffDisplayOverrideInput.disabled = staffReadOnly;
+    staffNotesInput.disabled = staffReadOnly;
+    addStaffButton.disabled = staffReadOnly;
+    renderStaffAssignedClassOptions();
+    renderStaffHouseSelector();
+    renderStaffMembers();
+    syncStaffSession();
+
     gradeListNode.innerHTML = activeGrades
       .map((grade) => {
         const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
@@ -2986,7 +3652,8 @@ const hydrateEnrollmentManager = (managerNode) => {
           ? classes
               .map((letter) => {
                 const classLabel = `${grade}${letter}`;
-                if (!isAdminMode) {
+                const canManage = canCurrentUserManageClass(grade, letter);
+                if (!isAdminMode && !canManage) {
                   return `<span class="enrollment-class-chip">${escapeHtmlText(classLabel)}</span>`;
                 }
 
@@ -2999,14 +3666,16 @@ const hydrateEnrollmentManager = (managerNode) => {
                       data-enrollment-open-manage-letter="${escapeHtmlAttribute(letter)}"
                       aria-label="Manage class ${escapeHtmlAttribute(classLabel)}"
                     >${escapeHtmlText(classLabel)}</button>
-                    <button
-                      type="button"
-                      class="enrollment-class-remove"
-                      data-enrollment-remove-grade="${escapeHtmlAttribute(grade)}"
-                      data-enrollment-remove-letter="${escapeHtmlAttribute(letter)}"
-                      aria-label="Remove class ${escapeHtmlAttribute(classLabel)}"
-                      title="Remove class ${escapeHtmlAttribute(classLabel)}"
-                    >×</button>
+                    ${isAdminMode ? `
+                      <button
+                        type="button"
+                        class="enrollment-class-remove"
+                        data-enrollment-remove-grade="${escapeHtmlAttribute(grade)}"
+                        data-enrollment-remove-letter="${escapeHtmlAttribute(letter)}"
+                        aria-label="Remove class ${escapeHtmlAttribute(classLabel)}"
+                        title="Remove class ${escapeHtmlAttribute(classLabel)}"
+                      >×</button>
+                    ` : ''}
                   </span>
                 `;
               })
@@ -3038,15 +3707,33 @@ const hydrateEnrollmentManager = (managerNode) => {
       } else {
         statusNode.textContent = isAdminMode
           ? 'Use Add class to create classes and click any class to manage details.'
-          : 'Enrollment classes are visible in read-only mode.';
+          : isStaffMode
+            ? loggedInStaff
+              ? `My Class active for ${resolveStaffDisplayName(loggedInStaff)}. You can update house, RCL roles, and sporting codes for your assigned class.`
+              : 'Sign in at /staff=1 to open My Class.'
+            : 'Enrollment classes are visible in read-only mode.';
       }
     }
+
+    refreshEnrollmentWorkflowHeights();
   };
 
   const loaded = loadStore();
   activeGrades = loaded.activeGrades;
   classesByGrade = loaded.classesByGrade;
   classProfilesByGrade = loaded.classProfilesByGrade;
+  staffMembers = normalizeStaffMembers(loaded.staffMembers);
+  staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
+  syncStaffSession();
+
+  if (isStaffMode && !loggedInStaff) {
+    window.location.href = 'staff.html';
+    return;
+  }
+
+  renderStaffHouseSelector();
+  renderStaffAssignedClassOptions();
+  renderStaffMembers();
   render();
 
   gradeListNode.addEventListener('click', (event) => {
@@ -3196,20 +3883,190 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 
   learnerListNode.addEventListener('change', (event) => {
+    if (!canCurrentUserEditLearnerAssignments()) return;
+    const target = event.target;
+
+    if (target instanceof HTMLInputElement && target.type === 'radio') {
+      const rawIndex = target.dataset.enrollmentLearnerHouseIndex;
+      if (rawIndex === undefined) return;
+      const index = Number.parseInt(String(rawIndex), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+      const houseId = String(target.value || '').trim();
+      const normalizedHouseId = schoolHouseOptions.some((house) => house.id === houseId) ? houseId : '';
+      manageLearners[index] = {
+        ...manageLearners[index],
+        houseId: normalizedHouseId
+      };
+      return;
+    }
+
+    if (target instanceof HTMLSelectElement && target.dataset.enrollmentLearnerRclIndex !== undefined) {
+      const index = Number.parseInt(String(target.dataset.enrollmentLearnerRclIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      const normalizedLearner = normalizeLearner({
+        ...manageLearners[index],
+        rclRole: target.value
+      });
+      if (!normalizedLearner) return;
+      manageLearners[index] = normalizedLearner;
+      renderManageLearners();
+      return;
+    }
+
+    if (target instanceof HTMLInputElement && target.dataset.enrollmentLearnerSportingIndex !== undefined) {
+      const index = Number.parseInt(String(target.dataset.enrollmentLearnerSportingIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      const normalizedLearner = normalizeLearner({
+        ...manageLearners[index],
+        sportingCodes: target.value
+      });
+      if (!normalizedLearner) return;
+      manageLearners[index] = normalizedLearner;
+      return;
+    }
+  });
+
+  staffHouseRowNode.addEventListener('change', (event) => {
     if (!isAdminMode) return;
     const target = event.target;
     if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
-    const rawIndex = target.dataset.enrollmentLearnerHouseIndex;
+    selectedStaffHouseId = schoolHouseOptions.some((house) => house.id === target.value) ? target.value : '';
+  });
+
+  staffListNode.addEventListener('click', (event) => {
+    if (!isAdminMode) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const removeButton = target.closest('[data-enrollment-remove-staff-index]');
+    if (!(removeButton instanceof HTMLButtonElement)) return;
+
+    const index = Number.parseInt(String(removeButton.dataset.enrollmentRemoveStaffIndex || ''), 10);
+    if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
+
+    const staffName = String(resolveStaffDisplayName(staffMembers[index]) || 'this staff member').trim();
+    const confirmed = window.confirm(`Remove ${staffName} from staff list?`);
+    if (!confirmed) return;
+    staffMembers.splice(index, 1);
+    saveStore();
+    renderStaffMembers();
+    if (statusNode) {
+      statusNode.textContent = `${staffName} removed from staff list.`;
+    }
+  });
+
+  staffListNode.addEventListener('change', (event) => {
+    if (!isAdminMode) return;
+    const target = event.target;
+
+    if (target instanceof HTMLInputElement && target.dataset.enrollmentStaffDisplayOverrideIndex !== undefined) {
+      const index = Number.parseInt(String(target.dataset.enrollmentStaffDisplayOverrideIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
+      const current = staffMembers[index];
+      const updated = normalizeStaffMember({
+        ...current,
+        displayNameOverride: target.value
+      });
+      if (!updated) return;
+      staffMembers[index] = updated;
+      saveStore();
+      renderStaffMembers();
+      if (statusNode) {
+        statusNode.textContent = `Display format updated for ${resolveStaffDisplayName(updated)}.`;
+      }
+      return;
+    }
+
+    if (target instanceof HTMLSelectElement && target.dataset.enrollmentStaffAssignedClassIndex !== undefined) {
+      const index = Number.parseInt(String(target.dataset.enrollmentStaffAssignedClassIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
+      const parsedClass = parseAssignedClassValue(target.value);
+      const current = staffMembers[index];
+      const updated = normalizeStaffMember({
+        ...current,
+        assignedGrade: parsedClass.assignedGrade,
+        assignedClassLetter: parsedClass.assignedClassLetter
+      });
+      if (!updated) return;
+      staffMembers[index] = updated;
+      saveStore();
+      syncStaffSession();
+      renderStaffMembers();
+      if (statusNode) {
+        statusNode.textContent = `Class assignment updated for ${resolveStaffDisplayName(updated)}.`;
+      }
+      return;
+    }
+
+    if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
+    const rawIndex = target.dataset.enrollmentStaffHouseIndex;
     if (rawIndex === undefined) return;
     const index = Number.parseInt(String(rawIndex), 10);
-    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+    if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
 
-    const houseId = String(target.value || '').trim();
-    const normalizedHouseId = schoolHouseOptions.some((house) => house.id === houseId) ? houseId : '';
-    manageLearners[index] = {
-      ...manageLearners[index],
-      houseId: normalizedHouseId
+    const houseId = schoolHouseOptions.some((house) => house.id === target.value) ? target.value : '';
+    staffMembers[index] = {
+      ...staffMembers[index],
+      houseId
     };
+    saveStore();
+    if (statusNode) {
+      statusNode.textContent = `${resolveStaffDisplayName(staffMembers[index])} house assignment updated.`;
+    }
+  });
+
+  addStaffButton.addEventListener('click', () => {
+    if (!isAdminMode) return;
+
+    const parsedAssignedClass = parseAssignedClassValue(staffAssignedClassSelect.value);
+
+    const normalized = normalizeStaffMember({
+      title: staffTitleSelect.value,
+      initials: staffInitialsInput.value,
+      firstName: staffFirstNameInput.value,
+      surname: staffSurnameInput.value,
+      loginEmail: staffEmailInput.value,
+      staffNumber: staffNumberInput.value,
+      gender: staffGenderSelect.value,
+      postLevel: staffPostLevelSelect.value,
+      assignedGrade: parsedAssignedClass.assignedGrade,
+      assignedClassLetter: parsedAssignedClass.assignedClassLetter,
+      subject: staffSubjectInput.value,
+      email: staffEmailInput.value,
+      phone: staffPhoneInput.value,
+      displayNameOverride: staffDisplayOverrideInput.value,
+      notes: staffNotesInput.value,
+      houseId: selectedStaffHouseId
+    });
+
+    if (!normalized) {
+      if (statusNode) {
+        statusNode.textContent = 'Enter at least surname (plus title/initials defaults) before adding staff.';
+      }
+      return;
+    }
+
+    const duplicate = staffMembers.some(
+      (entry) =>
+        String(entry.surname || '').toLowerCase() === String(normalized.surname || '').toLowerCase() &&
+        String(entry.initials || '').toLowerCase() === String(normalized.initials || '').toLowerCase() &&
+        String(entry.staffNumber || '').toLowerCase() === String(normalized.staffNumber || '').toLowerCase()
+    );
+    if (duplicate) {
+      if (statusNode) {
+        statusNode.textContent = `${resolveStaffDisplayName(normalized)} is already in staff list.`;
+      }
+      return;
+    }
+
+    staffMembers = normalizeStaffMembers([...staffMembers, normalized]);
+    saveStore();
+    syncStaffSession();
+    renderStaffMembers();
+    clearStaffForm();
+    if (statusNode) {
+      statusNode.textContent = `${resolveStaffDisplayName(normalized)} added. Login: ${normalized.loginEmail} | Password: ${normalized.loginPassword}`;
+    }
   });
 
   addClassButton.addEventListener('click', () => {
@@ -3331,20 +4188,24 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 
   const saveManageHandler = () => {
-    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+    if (!selectedManageGrade || !selectedManageLetter) return;
+    if (!canCurrentUserEditLearnerAssignments(selectedManageGrade, selectedManageLetter)) return;
     const normalizedCapacity = String(manageLearners.length);
+    const existingProfile = getClassProfile(selectedManageGrade, selectedManageLetter);
 
     setClassProfile(selectedManageGrade, selectedManageLetter, {
-      teacher: normalizeText(manageTeacherInput.value, 120),
-      room: normalizeText(manageRoomInput.value, 40),
+      teacher: isAdminMode ? normalizeText(manageTeacherInput.value, 120) : existingProfile.teacher,
+      room: isAdminMode ? normalizeText(manageRoomInput.value, 40) : existingProfile.room,
       capacity: normalizedCapacity,
-      notes: normalizeText(manageNotesInput.value, 600),
+      notes: isAdminMode ? normalizeText(manageNotesInput.value, 600) : existingProfile.notes,
       learners: normalizeLearners(manageLearners)
     });
 
     saveStore();
     if (statusNode) {
-      statusNode.textContent = `Class ${selectedManageGrade}${selectedManageLetter} updated.`;
+      statusNode.textContent = isAdminMode
+        ? `Class ${selectedManageGrade}${selectedManageLetter} updated.`
+        : `My Class (${selectedManageGrade}${selectedManageLetter}) assignments saved.`;
     }
     closeManageModal();
   };
@@ -4532,7 +5393,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (existing) {
       params.set('date', existing);
     }
-    return withAdminQuery(`calendar.html?${params.toString()}`);
+    return withAudienceQuery(`calendar.html?${params.toString()}`);
   };
 
   const selectedTeamIds = () =>
@@ -6361,7 +7222,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const incomingFixtureId = (params.get('fixtureId') || '').trim();
   const incomingFixtureLabel = (params.get('fixtureLabel') || '').trim();
   const incomingDate = (params.get('date') || '').trim();
-  const fixtureCreatorOverlayUrl = withAdminQuery('sports.html');
+  const fixtureCreatorOverlayUrl = withAudienceQuery('sports.html');
 
   const normalizeDateString = (value) => {
     const raw = String(value || '').trim();
@@ -8852,7 +9713,7 @@ export const renderFooter = (siteContent) => `
       <p>© 2026 ${siteContent.school.name}. All rights reserved.</p>
       ${
         isAdminModeEnabled()
-          ? `<p><a class="footer-utility-link" href="${withAdminQuery('email-tester.html')}">Email Tester</a></p>`
+          ? `<p><a class="footer-utility-link" href="${withAudienceQuery('email-tester.html')}">Email Tester</a></p>`
           : ''
       }
     </div>

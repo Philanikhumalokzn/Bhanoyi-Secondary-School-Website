@@ -3404,6 +3404,7 @@ const wireSportsHouseManagerInline = () => {
     { label: 'Orange', value: '#ea580c' },
     { label: 'Teal', value: '#0f766e' },
     { label: 'Brown', value: '#92400e' },
+    { label: 'White', value: '#ffffff' },
     { label: 'Black', value: '#111827' },
     { label: 'Grey', value: '#475569' }
   ];
@@ -3518,12 +3519,136 @@ const wireSportsHouseManagerInline = () => {
     storageKey: string;
     grade: string;
     classLetter: string;
+    memberType: 'learner' | 'teacher';
     displayName: string;
     admissionNo: string;
     gender: string;
+    roleLabel: string;
     houseId: string;
     learnerRef: Record<string, unknown>;
     rootStore: EnrollmentStoreRoot;
+  };
+
+  type SportEligibility = 'all' | 'female' | 'male';
+  type SportsCodeDefinition = {
+    id: string;
+    title: string;
+    eligibility: SportEligibility;
+  };
+  type HouseSportsAssignments = Record<string, Record<string, string[]>>;
+  type SportsRuleStore = Record<string, SportEligibility>;
+
+  const sportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
+  const sportsRuleStorageKey = 'bhanoyi.houseSportsCodeRules';
+
+  const toSportCodeId = (value: string, index: number) => {
+    const normalized = normalizeText(value, 80)
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return normalized || `sport_code_${index + 1}`;
+  };
+
+  const inferSportEligibility = (title: string): SportEligibility => {
+    const normalized = normalizeText(title, 100).toLowerCase();
+    if (/\b(girls|ladies|female|women|netball)\b/.test(normalized)) return 'female';
+    if (/\b(boys|male|men)\b/.test(normalized)) return 'male';
+    return 'all';
+  };
+
+  const loadSportRuleStore = (): SportsRuleStore => {
+    try {
+      const raw = localStorage.getItem(sportsRuleStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const store: SportsRuleStore = {};
+      Object.entries(parsed as Record<string, unknown>).forEach(([id, value]) => {
+        const normalizedId = normalizeHouseId(id, '');
+        if (!normalizedId) return;
+        const rawValue = String(value || '').toLowerCase();
+        if (rawValue === 'female' || rawValue === 'male') {
+          store[normalizedId] = rawValue;
+        } else {
+          store[normalizedId] = 'all';
+        }
+      });
+      return store;
+    } catch {
+      return {};
+    }
+  };
+
+  const persistSportRuleStore = (store: SportsRuleStore) => {
+    localStorage.setItem(sportsRuleStorageKey, JSON.stringify(store));
+  };
+
+  const loadSportingCodes = (): SportsCodeDefinition[] => {
+    const titleSet = new Set<string>();
+    const titleNodes = Array.from(
+      sportingCodesSection?.querySelectorAll('[data-editable-card="true"] .card-content h3, [data-editable-card="true"] h3') || []
+    );
+
+    titleNodes.forEach((node) => {
+      const title = normalizeText(node.textContent, 80);
+      if (title) {
+        titleSet.add(title);
+      }
+    });
+
+    if (!titleSet.size) {
+      ['Football', 'Netball', 'Athletics'].forEach((title) => titleSet.add(title));
+    }
+
+    const ruleStore = loadSportRuleStore();
+    const normalizedRules: SportsRuleStore = { ...ruleStore };
+    const codeById = new Map<string, SportsCodeDefinition>();
+
+    Array.from(titleSet).forEach((title, index) => {
+      const id = toSportCodeId(title, index);
+      const existing = normalizedRules[id];
+      const eligibility = existing || inferSportEligibility(title);
+      normalizedRules[id] = eligibility;
+      if (!codeById.has(id)) {
+        codeById.set(id, { id, title, eligibility });
+      }
+    });
+
+    persistSportRuleStore(normalizedRules);
+    return Array.from(codeById.values()).sort((left, right) => left.title.localeCompare(right.title));
+  };
+
+  const loadHouseSportsAssignments = (): HouseSportsAssignments => {
+    try {
+      const raw = localStorage.getItem(sportsAssignmentStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const normalized: HouseSportsAssignments = {};
+      Object.entries(parsed as Record<string, unknown>).forEach(([houseId, byLearner]) => {
+        const normalizedHouseId = normalizeHouseId(houseId, '');
+        if (!normalizedHouseId || !byLearner || typeof byLearner !== 'object' || Array.isArray(byLearner)) return;
+        normalized[normalizedHouseId] = {};
+        Object.entries(byLearner as Record<string, unknown>).forEach(([learnerKey, codeList]) => {
+          if (!learnerKey) return;
+          const values = Array.isArray(codeList)
+            ? codeList
+                .map((entry) => normalizeHouseId(entry, ''))
+                .filter((entry) => Boolean(entry))
+            : [];
+          if (!values.length) return;
+          normalized[normalizedHouseId][learnerKey] = Array.from(new Set(values));
+        });
+      });
+      return normalized;
+    } catch {
+      return {};
+    }
+  };
+
+  const persistHouseSportsAssignments = (store: HouseSportsAssignments) => {
+    localStorage.setItem(sportsAssignmentStorageKey, JSON.stringify(store));
   };
 
   const houseModal = document.createElement('div');
@@ -3536,16 +3661,71 @@ const wireSportsHouseManagerInline = () => {
         <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
       </div>
       <p class="inline-house-members-meta" data-house-members-meta></p>
-      <section class="inline-house-members-section">
-        <h4>Current members</h4>
-        <div class="inline-house-members-list" data-house-members-list></div>
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+        <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
+          Search and Filter Members
+        </button>
+        <div class="sports-workflow-body" data-house-members-body>
+          <div class="inline-house-members-filter-grid">
+            <label>
+              Search learner
+              <input type="search" placeholder="Name, admission, class" data-house-members-search />
+            </label>
+            <label>
+              Gender
+              <select data-house-members-gender-filter>
+                <option value="all">All genders</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+                <option value="unknown">Unspecified</option>
+              </select>
+            </label>
+            <label>
+              Sporting code
+              <select data-house-members-sport-filter>
+                <option value="all">All sporting codes</option>
+                <option value="unassigned">Unassigned to sporting code</option>
+              </select>
+            </label>
+          </div>
+        </div>
       </section>
-      <section class="inline-house-members-section">
-        <h4>Pull learners into this house</h4>
-        <p class="inline-house-members-meta">Select from learners in other houses or unassigned learners.</p>
-        <select data-house-members-pull-select multiple size="8"></select>
-        <div class="inline-house-members-actions">
-          <button type="button" class="btn btn-primary" data-house-members-pull>Pull selected learners</button>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+        <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
+          Sporting Code Rules
+        </button>
+        <div class="sports-workflow-body" data-house-members-body>
+          <p class="inline-house-members-meta">Set who can be assigned to each code (All learners, Girls only, Boys only).</p>
+          <div class="inline-house-sport-rules" data-house-sport-rules></div>
+        </div>
+      </section>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+        <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
+          Current Members
+        </button>
+        <div class="sports-workflow-body" data-house-members-body>
+          <div class="inline-house-members-actions inline-house-members-bulk-actions">
+            <select data-house-members-bulk-sport></select>
+            <button type="button" class="btn btn-primary" data-house-members-assign-sport>Assign code to selected</button>
+            <button type="button" class="btn btn-secondary" data-house-members-remove-sport>Remove code from selected</button>
+          </div>
+          <div class="inline-house-members-list" data-house-members-list></div>
+        </div>
+      </section>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+        <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
+          Pull Selected Members to this house
+        </button>
+        <div class="sports-workflow-body" data-house-members-body>
+          <p class="inline-house-members-meta">Select from learners in other houses or unassigned learners.</p>
+          <select data-house-members-pull-select multiple size="8"></select>
+          <div class="inline-house-members-actions">
+            <button type="button" class="btn btn-primary" data-house-members-pull>Pull selected learners</button>
+          </div>
         </div>
       </section>
     </article>
@@ -3555,6 +3735,13 @@ const wireSportsHouseManagerInline = () => {
   const houseModalTitle = houseModal.querySelector('[data-house-members-title]');
   const houseModalMeta = houseModal.querySelector('[data-house-members-meta]');
   const houseModalList = houseModal.querySelector('[data-house-members-list]');
+  const houseModalSearch = houseModal.querySelector('[data-house-members-search]');
+  const houseModalGenderFilter = houseModal.querySelector('[data-house-members-gender-filter]');
+  const houseModalSportFilter = houseModal.querySelector('[data-house-members-sport-filter]');
+  const houseModalRuleList = houseModal.querySelector('[data-house-sport-rules]');
+  const houseModalBulkSportSelect = houseModal.querySelector('[data-house-members-bulk-sport]');
+  const houseModalAssignSportButton = houseModal.querySelector('[data-house-members-assign-sport]');
+  const houseModalRemoveSportButton = houseModal.querySelector('[data-house-members-remove-sport]');
   const houseModalPullSelect = houseModal.querySelector('[data-house-members-pull-select]');
   const houseModalPullButton = houseModal.querySelector('[data-house-members-pull]');
   const houseModalCloseButtons = Array.from(houseModal.querySelectorAll('[data-house-members-close="true"]'));
@@ -3563,6 +3750,13 @@ const wireSportsHouseManagerInline = () => {
     !(houseModalTitle instanceof HTMLElement) ||
     !(houseModalMeta instanceof HTMLElement) ||
     !(houseModalList instanceof HTMLElement) ||
+    !(houseModalSearch instanceof HTMLInputElement) ||
+    !(houseModalGenderFilter instanceof HTMLSelectElement) ||
+    !(houseModalSportFilter instanceof HTMLSelectElement) ||
+    !(houseModalRuleList instanceof HTMLElement) ||
+    !(houseModalBulkSportSelect instanceof HTMLSelectElement) ||
+    !(houseModalAssignSportButton instanceof HTMLButtonElement) ||
+    !(houseModalRemoveSportButton instanceof HTMLButtonElement) ||
     !(houseModalPullSelect instanceof HTMLSelectElement) ||
     !(houseModalPullButton instanceof HTMLButtonElement)
   ) {
@@ -3570,6 +3764,62 @@ const wireSportsHouseManagerInline = () => {
   }
 
   let activeHouseId = '';
+  let memberSearchValue = '';
+  let memberGenderFilterValue = 'all';
+  let memberSportFilterValue = 'all';
+  let selectedMemberKeys = new Set<string>();
+
+  const getExpandedHouseSectionMaxHeight = (body: HTMLElement) => {
+    return `${Math.max(0, body.scrollHeight)}px`;
+  };
+
+  const houseSections = Array.from(houseModal.querySelectorAll('[data-house-members-section]'))
+    .map((sectionNode) => {
+      if (!(sectionNode instanceof HTMLElement)) return null;
+      const toggle = sectionNode.querySelector('[data-house-members-toggle]');
+      const body = sectionNode.querySelector('[data-house-members-body]');
+      if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
+      return { sectionNode, toggle, body };
+    })
+    .filter((entry): entry is { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement } => Boolean(entry));
+
+  const setHouseSectionExpanded = (
+    entry: { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement },
+    expanded: boolean
+  ) => {
+    entry.sectionNode.classList.toggle('is-expanded', expanded);
+    entry.sectionNode.classList.toggle('is-collapsed', !expanded);
+    entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    entry.body.style.maxHeight = expanded ? getExpandedHouseSectionMaxHeight(entry.body) : '0px';
+  };
+
+  const collapseAllHouseSections = () => {
+    houseSections.forEach((entry) => {
+      setHouseSectionExpanded(entry, false);
+    });
+  };
+
+  const refreshExpandedHouseSectionHeights = () => {
+    houseSections.forEach((entry) => {
+      if (!entry.sectionNode.classList.contains('is-expanded')) return;
+      entry.body.style.maxHeight = getExpandedHouseSectionMaxHeight(entry.body);
+    });
+  };
+
+  houseSections.forEach((entry) => {
+    setHouseSectionExpanded(entry, false);
+    entry.toggle.addEventListener('click', () => {
+      const currentlyExpanded = entry.sectionNode.classList.contains('is-expanded');
+      setHouseSectionExpanded(entry, !currentlyExpanded);
+      requestAnimationFrame(() => {
+        refreshExpandedHouseSectionHeights();
+      });
+    });
+  });
+
+  window.addEventListener('resize', () => {
+    refreshExpandedHouseSectionHeights();
+  });
 
   const normalizeEnrollmentHouseId = (value: unknown) =>
     String(value || '')
@@ -3583,6 +3833,43 @@ const wireSportsHouseManagerInline = () => {
     if (raw === 'f' || raw === 'female' || raw === 'girl') return 'Female';
     if (raw === 'o' || raw === 'other') return 'Other';
     return '';
+  };
+
+  const normalizeStaffInitials = (value: unknown) => {
+    const raw = String(value || '')
+      .toUpperCase()
+      .replace(/[^A-Z]/g, '')
+      .slice(0, 8);
+    if (!raw) return '';
+    return raw.split('').join('.') + '.';
+  };
+
+  const inferInitialsFromFirstName = (value: unknown) => {
+    const raw = normalizeText(value, 80);
+    if (!raw) return '';
+    const letters = raw
+      .split(/\s+/)
+      .map((entry) => entry.charAt(0).toUpperCase())
+      .filter(Boolean)
+      .join('');
+    if (!letters) return '';
+    return letters.split('').join('.') + '.';
+  };
+
+  const resolveStaffDisplayName = (staffRef: Record<string, unknown>) => {
+    const override = normalizeText(staffRef.displayNameOverride || staffRef.displayName || '', 120);
+    if (override) return override;
+
+    const title = normalizeText(staffRef.title || '', 20);
+    const initials = normalizeStaffInitials(staffRef.initials || inferInitialsFromFirstName(staffRef.firstName || ''));
+    const surname = normalizeText(staffRef.surname || '', 80);
+    const formatted = [title, initials, surname].filter(Boolean).join(' ').trim();
+    if (formatted) return formatted;
+
+    const fallbackName = normalizeText(staffRef.name || '', 120);
+    if (fallbackName) return fallbackName;
+
+    return normalizeText(staffRef.firstName || '', 80);
   };
 
   const collectEnrollmentLearners = (): EnrollmentLearnerRecord[] => {
@@ -3627,14 +3914,46 @@ const wireSportsHouseManagerInline = () => {
                 storageKey: key,
                 grade: normalizeText(grade, 4),
                 classLetter: normalizeText(classLetter, 2).toUpperCase(),
+                memberType: 'learner',
                 displayName,
                 admissionNo,
                 gender,
+                roleLabel: 'Learner',
                 houseId,
                 learnerRef,
                 rootStore
               });
             });
+          });
+        });
+
+        const staffMembers = Array.isArray(rootStore.staffMembers) ? rootStore.staffMembers : [];
+        staffMembers.forEach((staffEntry, staffIndex) => {
+          if (!staffEntry || typeof staffEntry !== 'object' || Array.isArray(staffEntry)) return;
+          const staffRef = staffEntry as Record<string, unknown>;
+          const displayName = resolveStaffDisplayName(staffRef);
+          if (!displayName) return;
+
+          const postLevel = normalizeText(staffRef.postLevel, 10).toUpperCase();
+          const rank = normalizeText(staffRef.rank, 60);
+          const roleLabel = postLevel || rank ? `Teacher · ${[postLevel, rank].filter(Boolean).join(' ')}` : 'Teacher';
+          const staffNumber = normalizeText(staffRef.staffNumber || '', 40);
+          const gender = normalizeGender(staffRef.gender || '');
+          const houseId = normalizeEnrollmentHouseId(staffRef.houseId || staffRef.house);
+
+          records.push({
+            key: `${key}|staff|${staffIndex}`,
+            storageKey: key,
+            grade: '',
+            classLetter: '',
+            memberType: 'teacher',
+            displayName,
+            admissionNo: staffNumber,
+            gender,
+            roleLabel,
+            houseId,
+            learnerRef: staffRef,
+            rootStore
           });
         });
       } catch {
@@ -3662,11 +3981,54 @@ const wireSportsHouseManagerInline = () => {
     houseModal.classList.add('is-hidden');
     document.body.classList.remove('inline-house-members-open');
     activeHouseId = '';
+    selectedMemberKeys = new Set();
   };
 
   houseModalCloseButtons.forEach((button) => {
     button.addEventListener('click', closeHouseModal);
   });
+
+  const learnerMatchesEligibility = (record: EnrollmentLearnerRecord, eligibility: SportEligibility) => {
+    if (eligibility === 'all') return true;
+    const gender = normalizeGender(record.gender).toLowerCase();
+    if (eligibility === 'female') return gender === 'female';
+    if (eligibility === 'male') return gender === 'male';
+    return true;
+  };
+
+  const normalizeHouseAssignmentsForMembers = (
+    houseAssignments: Record<string, string[]>,
+    validMemberKeys: Set<string>,
+    validSportCodeIds: Set<string>
+  ) => {
+    let changed = false;
+    const normalized: Record<string, string[]> = {};
+    Object.entries(houseAssignments).forEach(([learnerKey, codeIds]) => {
+      if (!validMemberKeys.has(learnerKey)) {
+        changed = true;
+        return;
+      }
+
+      const normalizedCodes = Array.from(
+        new Set(
+          (Array.isArray(codeIds) ? codeIds : [])
+            .map((codeId) => normalizeHouseId(codeId, ''))
+            .filter((codeId) => Boolean(codeId) && validSportCodeIds.has(codeId))
+        )
+      );
+
+      if (!normalizedCodes.length) {
+        changed = true;
+        return;
+      }
+
+      normalized[learnerKey] = normalizedCodes;
+      if (normalizedCodes.length !== (Array.isArray(codeIds) ? codeIds.length : 0)) {
+        changed = true;
+      }
+    });
+    return { normalized, changed };
+  };
 
   const renderHouseMembersModal = () => {
     if (!activeHouseId) return;
@@ -3676,34 +4038,274 @@ const wireSportsHouseManagerInline = () => {
       return;
     }
 
+    const sportCodes = loadSportingCodes();
+    const sportCodeById = new Map(sportCodes.map((entry) => [entry.id, entry]));
+    const validSportCodeIds = new Set(sportCodes.map((entry) => entry.id));
+
     const enrollmentRecords = collectEnrollmentLearners();
     const members = enrollmentRecords.filter((record) => record.houseId === activeHouse.id);
-    const available = enrollmentRecords.filter((record) => record.houseId !== activeHouse.id);
+    const available = enrollmentRecords.filter((record) => record.memberType === 'learner' && record.houseId !== activeHouse.id);
     const houseLabelById = new Map(readState.options.map((entry) => [entry.id, entry.name]));
+    const learnerMembers = members.filter((record) => record.memberType === 'learner');
+    const validMemberKeys = new Set(learnerMembers.map((record) => record.key));
+
+    const assignmentStore = loadHouseSportsAssignments();
+    const houseAssignmentsRaw = assignmentStore[activeHouse.id] || {};
+    const { normalized: houseAssignments, changed: assignmentChanged } = normalizeHouseAssignmentsForMembers(
+      houseAssignmentsRaw,
+      validMemberKeys,
+      validSportCodeIds
+    );
+    assignmentStore[activeHouse.id] = houseAssignments;
+    if (assignmentChanged) {
+      persistHouseSportsAssignments(assignmentStore);
+    }
+
+    const filteredSelected = Array.from(selectedMemberKeys).filter((key) => validMemberKeys.has(key));
+    selectedMemberKeys = new Set(filteredSelected);
+
+    const learnerCount = learnerMembers.length;
+    const teacherCount = members.filter((record) => record.memberType === 'teacher').length;
 
     houseModalTitle.textContent = `Manage ${activeHouse.name}`;
-    houseModalMeta.textContent = `${members.length} learner${members.length === 1 ? '' : 's'} in this house.`;
+    houseModalMeta.textContent = `${learnerCount} learner${learnerCount === 1 ? '' : 's'}, ${teacherCount} teacher${teacherCount === 1 ? '' : 's'} in this house. ${selectedMemberKeys.size} selected.`;
+
+    houseModalSearch.value = memberSearchValue;
+    houseModalGenderFilter.value = memberGenderFilterValue;
+
+    const selectedSportFilter = memberSportFilterValue;
+    houseModalSportFilter.innerHTML = '';
+    [
+      { value: 'all', label: 'All sporting codes' },
+      { value: 'unassigned', label: 'Unassigned to sporting code' },
+      ...sportCodes.map((entry) => ({ value: entry.id, label: entry.title }))
+    ].forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.value;
+      option.textContent = entry.label;
+      houseModalSportFilter.appendChild(option);
+    });
+    houseModalSportFilter.value =
+      Array.from(houseModalSportFilter.options).some((entry) => entry.value === selectedSportFilter)
+        ? selectedSportFilter
+        : 'all';
+    memberSportFilterValue = houseModalSportFilter.value;
+
+    houseModalBulkSportSelect.innerHTML = '';
+    sportCodes.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.id;
+      option.textContent = entry.title;
+      houseModalBulkSportSelect.appendChild(option);
+    });
+    houseModalBulkSportSelect.disabled = !sportCodes.length;
+    houseModalAssignSportButton.disabled = !sportCodes.length;
+    houseModalRemoveSportButton.disabled = !sportCodes.length;
+
+    houseModalRuleList.innerHTML = '';
+    const ruleStore = loadSportRuleStore();
+    sportCodes.forEach((entry) => {
+      const row = document.createElement('div');
+      row.className = 'inline-house-sport-rule-item';
+
+      const title = document.createElement('p');
+      title.className = 'inline-house-sport-rule-title';
+      title.textContent = entry.title;
+
+      const select = document.createElement('select');
+      select.innerHTML = `
+        <option value="all">All learners</option>
+        <option value="female">Girls only</option>
+        <option value="male">Boys only</option>
+      `;
+      const selectedRule = ruleStore[entry.id] || entry.eligibility;
+      select.value = selectedRule;
+      select.addEventListener('change', () => {
+        const nextValue = select.value === 'female' || select.value === 'male' ? select.value : 'all';
+        const nextStore = loadSportRuleStore();
+        nextStore[entry.id] = nextValue;
+        persistSportRuleStore(nextStore);
+        renderHouseMembersModal();
+      });
+
+      row.appendChild(title);
+      row.appendChild(select);
+      houseModalRuleList.appendChild(row);
+    });
+
+    const normalizedSearch = memberSearchValue.trim().toLowerCase();
+    const filteredMembers = members
+      .map((record) => {
+        const assignedCodeIds = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
+        const assignedCodes = assignedCodeIds
+          .map((codeId) => sportCodeById.get(codeId))
+          .filter((entry): entry is SportsCodeDefinition => Boolean(entry));
+        return {
+          record,
+          assignedCodes
+        };
+      })
+      .filter(({ record, assignedCodes }) => {
+        if (normalizedSearch) {
+          const classLabel = record.grade ? `grade ${record.grade}${record.classLetter || ''}` : '';
+          const haystack = [record.displayName, record.admissionNo, record.gender, classLabel]
+            .join(' ')
+            .toLowerCase();
+          if (!haystack.includes(normalizedSearch)) {
+            return false;
+          }
+        }
+
+        if (memberGenderFilterValue !== 'all') {
+          const normalizedGender = normalizeGender(record.gender).toLowerCase();
+          if (memberGenderFilterValue === 'unknown') {
+            if (normalizedGender) {
+              return false;
+            }
+          } else if (normalizedGender !== memberGenderFilterValue) {
+            return false;
+          }
+        }
+
+        if (memberSportFilterValue === 'unassigned') {
+          return record.memberType === 'teacher' ? false : assignedCodes.length === 0;
+        }
+
+        if (memberSportFilterValue !== 'all') {
+          return record.memberType === 'teacher' ? false : assignedCodes.some((entry) => entry.id === memberSportFilterValue);
+        }
+
+        return true;
+      })
+      .sort((left, right) => {
+        if (left.record.memberType !== right.record.memberType) {
+          return left.record.memberType === 'teacher' ? -1 : 1;
+        }
+        return left.record.displayName.localeCompare(right.record.displayName);
+      });
 
     houseModalList.innerHTML = '';
     if (!members.length) {
       const empty = document.createElement('p');
       empty.className = 'inline-house-members-empty';
-      empty.textContent = 'No learners are currently assigned to this house.';
+      empty.textContent = 'No learners or teachers are currently assigned to this house.';
+      houseModalList.appendChild(empty);
+    } else if (!filteredMembers.length) {
+      const empty = document.createElement('p');
+      empty.className = 'inline-house-members-empty';
+      empty.textContent = 'No members match the current search/filter criteria.';
       houseModalList.appendChild(empty);
     } else {
-      members
-        .sort((left, right) => left.displayName.localeCompare(right.displayName))
-        .forEach((record) => {
+      filteredMembers.forEach(({ record, assignedCodes }) => {
           const item = document.createElement('div');
           item.className = 'inline-house-member-item';
+          item.classList.toggle('inline-house-member-teacher-row', record.memberType === 'teacher');
+
+          const selectToggle = document.createElement('input');
+          selectToggle.type = 'checkbox';
+          selectToggle.checked = selectedMemberKeys.has(record.key);
+          if (record.memberType !== 'learner') {
+            selectToggle.disabled = true;
+            selectToggle.title = 'Teacher entries are not part of learner sporting-code batches.';
+          }
+          selectToggle.addEventListener('change', () => {
+            if (record.memberType !== 'learner') {
+              selectToggle.checked = false;
+              return;
+            }
+            if (selectToggle.checked) {
+              selectedMemberKeys.add(record.key);
+            } else {
+              selectedMemberKeys.delete(record.key);
+            }
+            houseModalMeta.textContent = `${learnerCount} learner${learnerCount === 1 ? '' : 's'}, ${teacherCount} teacher${teacherCount === 1 ? '' : 's'} in this house. ${selectedMemberKeys.size} selected.`;
+          });
 
           const summary = document.createElement('p');
           summary.className = 'inline-house-member-summary';
           const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter ? record.classLetter : ''}` : 'Class not set';
-          const details = [classLabel];
+          const details = [record.roleLabel || (record.memberType === 'teacher' ? 'Teacher' : 'Learner'), classLabel];
           if (record.admissionNo) details.push(`Adm: ${record.admissionNo}`);
           if (record.gender) details.push(record.gender);
           summary.textContent = `${record.displayName} · ${details.join(' · ')}`;
+
+          const assignmentWrap = document.createElement('div');
+          assignmentWrap.className = 'inline-house-member-codes';
+
+          if (record.memberType === 'teacher') {
+            const teacherTag = document.createElement('span');
+            teacherTag.className = 'inline-house-member-code empty';
+            teacherTag.textContent = 'Teacher member';
+            assignmentWrap.appendChild(teacherTag);
+          } else if (!assignedCodes.length) {
+            const emptyCode = document.createElement('span');
+            emptyCode.className = 'inline-house-member-code empty';
+            emptyCode.textContent = 'No sporting code yet';
+            assignmentWrap.appendChild(emptyCode);
+          } else {
+            assignedCodes.forEach((code) => {
+              const codeTag = document.createElement('button');
+              codeTag.type = 'button';
+              codeTag.className = 'inline-house-member-code';
+              codeTag.textContent = `Remove ${code.title}`;
+              codeTag.addEventListener('click', () => {
+                const currentCodes = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
+                const nextCodes = currentCodes.filter((entry) => entry !== code.id);
+                if (nextCodes.length) {
+                  houseAssignments[record.key] = nextCodes;
+                } else {
+                  delete houseAssignments[record.key];
+                }
+                assignmentStore[activeHouse.id] = houseAssignments;
+                persistHouseSportsAssignments(assignmentStore);
+                renderHouseMembersModal();
+                showStatus(`${record.displayName} removed from ${code.title}.`);
+              });
+              assignmentWrap.appendChild(codeTag);
+            });
+          }
+
+          const quickAssign = document.createElement('div');
+          quickAssign.className = 'inline-house-member-assign';
+          if (record.memberType === 'learner') {
+            const quickSelect = document.createElement('select');
+            sportCodes.forEach((code) => {
+              const option = document.createElement('option');
+              option.value = code.id;
+              option.textContent = code.title;
+              quickSelect.appendChild(option);
+            });
+
+            const quickButton = document.createElement('button');
+            quickButton.type = 'button';
+            quickButton.className = 'btn btn-secondary';
+            quickButton.textContent = 'Assign';
+            quickButton.disabled = !sportCodes.length;
+            quickButton.addEventListener('click', () => {
+              const selectedCode = sportCodeById.get(quickSelect.value);
+              if (!selectedCode) return;
+              if (!learnerMatchesEligibility(record, selectedCode.eligibility)) {
+                showStatus(`${record.displayName} does not meet ${selectedCode.title} eligibility.`);
+                return;
+              }
+              const currentCodes = new Set(Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : []);
+              currentCodes.add(selectedCode.id);
+              houseAssignments[record.key] = Array.from(currentCodes);
+              assignmentStore[activeHouse.id] = houseAssignments;
+              persistHouseSportsAssignments(assignmentStore);
+              renderHouseMembersModal();
+              showStatus(`${record.displayName} assigned to ${selectedCode.title}.`);
+            });
+
+            quickAssign.appendChild(quickSelect);
+            quickAssign.appendChild(quickButton);
+          }
+
+          const memberMain = document.createElement('div');
+          memberMain.className = 'inline-house-member-main';
+          memberMain.appendChild(summary);
+          memberMain.appendChild(assignmentWrap);
+          memberMain.appendChild(quickAssign);
 
           const removeButton = document.createElement('button');
           removeButton.type = 'button';
@@ -3712,15 +4314,23 @@ const wireSportsHouseManagerInline = () => {
           removeButton.dataset.houseRecordKey = record.key;
           removeButton.addEventListener('click', () => {
             record.learnerRef.houseId = '';
+            delete houseAssignments[record.key];
+            assignmentStore[activeHouse.id] = houseAssignments;
+            persistHouseSportsAssignments(assignmentStore);
             persistEnrollmentRecords([record]);
             renderHouseMembersModal();
             showStatus(`${record.displayName} removed from ${activeHouse.name}.`);
           });
 
-          item.appendChild(summary);
-          item.appendChild(removeButton);
+          const actionsWrap = document.createElement('div');
+          actionsWrap.className = 'inline-house-member-actions';
+          actionsWrap.appendChild(removeButton);
+
+          item.appendChild(selectToggle);
+          item.appendChild(memberMain);
+          item.appendChild(actionsWrap);
           houseModalList.appendChild(item);
-        });
+      });
     }
 
     houseModalPullSelect.innerHTML = '';
@@ -3736,7 +4346,110 @@ const wireSportsHouseManagerInline = () => {
       });
 
     houseModalPullButton.disabled = !available.length;
+
+    requestAnimationFrame(() => {
+      refreshExpandedHouseSectionHeights();
+    });
   };
+
+  houseModalSearch.addEventListener('input', () => {
+    memberSearchValue = houseModalSearch.value;
+    renderHouseMembersModal();
+  });
+
+  houseModalGenderFilter.addEventListener('change', () => {
+    memberGenderFilterValue = houseModalGenderFilter.value;
+    renderHouseMembersModal();
+  });
+
+  houseModalSportFilter.addEventListener('change', () => {
+    memberSportFilterValue = houseModalSportFilter.value;
+    renderHouseMembersModal();
+  });
+
+  const applySportCodeToSelectedMembers = (mode: 'assign' | 'remove') => {
+    if (!activeHouseId) return;
+    const selectedCodeId = normalizeHouseId(houseModalBulkSportSelect.value, '');
+    if (!selectedCodeId) {
+      showStatus('Select a sporting code first.');
+      return;
+    }
+
+    const sportCodes = loadSportingCodes();
+    const selectedCode = sportCodes.find((entry) => entry.id === selectedCodeId);
+    if (!selectedCode) {
+      showStatus('Sporting code not found.');
+      return;
+    }
+
+    const members = collectEnrollmentLearners().filter(
+      (record) => record.houseId === activeHouseId && record.memberType === 'learner'
+    );
+    const membersByKey = new Map(members.map((record) => [record.key, record]));
+    const targetMembers = Array.from(selectedMemberKeys)
+      .map((key) => membersByKey.get(key))
+      .filter((record): record is EnrollmentLearnerRecord => Boolean(record));
+
+    if (!targetMembers.length) {
+      showStatus('Select at least one house member first.');
+      return;
+    }
+
+    const assignmentStore = loadHouseSportsAssignments();
+    const houseAssignments = assignmentStore[activeHouseId] || {};
+
+    let affected = 0;
+    let skipped = 0;
+    targetMembers.forEach((record) => {
+      const canAssign = learnerMatchesEligibility(record, selectedCode.eligibility);
+      if (mode === 'assign' && !canAssign) {
+        skipped += 1;
+        return;
+      }
+
+      const currentCodes = new Set(Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : []);
+      if (mode === 'assign') {
+        const before = currentCodes.size;
+        currentCodes.add(selectedCode.id);
+        if (currentCodes.size !== before) {
+          affected += 1;
+        }
+      } else {
+        const deleted = currentCodes.delete(selectedCode.id);
+        if (deleted) {
+          affected += 1;
+        }
+      }
+
+      if (currentCodes.size) {
+        houseAssignments[record.key] = Array.from(currentCodes);
+      } else {
+        delete houseAssignments[record.key];
+      }
+    });
+
+    assignmentStore[activeHouseId] = houseAssignments;
+    persistHouseSportsAssignments(assignmentStore);
+    renderHouseMembersModal();
+
+    if (mode === 'assign') {
+      showStatus(
+        `Assigned ${selectedCode.title} to ${affected} learner${affected === 1 ? '' : 's'}${
+          skipped ? ` (${skipped} skipped by gender rule)` : ''
+        }.`
+      );
+    } else {
+      showStatus(`Removed ${selectedCode.title} from ${affected} learner${affected === 1 ? '' : 's'}.`);
+    }
+  };
+
+  houseModalAssignSportButton.addEventListener('click', () => {
+    applySportCodeToSelectedMembers('assign');
+  });
+
+  houseModalRemoveSportButton.addEventListener('click', () => {
+    applySportCodeToSelectedMembers('remove');
+  });
 
   houseModalPullButton.addEventListener('click', () => {
     if (!activeHouseId) return;
@@ -3768,6 +4481,11 @@ const wireSportsHouseManagerInline = () => {
 
   const openHouseModal = (houseId: string) => {
     activeHouseId = houseId;
+    memberSearchValue = '';
+    memberGenderFilterValue = 'all';
+    memberSportFilterValue = 'all';
+    selectedMemberKeys = new Set();
+    collapseAllHouseSections();
     renderHouseMembersModal();
     houseModal.classList.remove('is-hidden');
     document.body.classList.add('inline-house-members-open');

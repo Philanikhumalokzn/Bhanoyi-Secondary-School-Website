@@ -15,6 +15,7 @@ export default defineConfig({
         policies: resolve(__dirname, 'policies.html'),
         contact: resolve(__dirname, 'contact.html'),
         admin: resolve(__dirname, 'admin.html'),
+        staff: resolve(__dirname, 'staff.html'),
         emailTester: resolve(__dirname, 'email-tester.html')
       }
     }

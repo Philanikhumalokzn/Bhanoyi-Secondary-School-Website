@@ -2199,6 +2199,64 @@ body.news-read-open {
   gap: 8px;
 }
 
+.inline-house-members-section .sports-workflow-body {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.inline-house-members-filter-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.inline-house-members-filter-grid label,
+.inline-house-members-section label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.inline-house-members-filter-grid input,
+.inline-house-members-filter-grid select,
+.inline-house-members-section select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.inline-house-sport-rules {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-house-sport-rule-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface-alt);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inline-house-sport-rule-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.inline-house-sport-rule-item select {
+  min-width: 180px;
+}
+
 .inline-house-members-list {
   display: grid;
   gap: 8px;
@@ -2211,15 +2269,64 @@ body.news-read-open {
   border-radius: 8px;
   background: var(--surface-alt);
   padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   gap: 8px;
+}
+
+.inline-house-member-teacher-row {
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  background: color-mix(in srgb, var(--surface) 58%, var(--surface-alt));
+}
+
+.inline-house-member-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
 }
 
 .inline-house-member-summary {
   margin: 0;
   font-size: 0.88rem;
+}
+
+.inline-house-member-codes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.inline-house-member-code {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.inline-house-member-code.empty {
+  border-style: dashed;
+  cursor: default;
+}
+
+.inline-house-member-assign {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.inline-house-member-assign select {
+  min-width: 190px;
+}
+
+.inline-house-member-actions {
+  display: inline-flex;
 }
 
 .inline-house-members-empty {
@@ -2228,21 +2335,33 @@ body.news-read-open {
   font-size: 0.86rem;
 }
 
-.inline-house-members-section select {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
-  font: inherit;
-  background: var(--surface);
-}
-
 .inline-house-members-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inline-house-members-bulk-actions {
+  justify-content: space-between;
+}
+
+.inline-house-members-bulk-actions select {
+  min-width: 220px;
 }
 
 body.inline-house-members-open {
   overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .inline-house-member-item {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-house-members-bulk-actions {
+    justify-content: flex-end;
+  }
 }
 
 .match-log-modal-host {
@@ -2549,6 +2668,12 @@ body.match-log-workspace-open {
   gap: 12px;
 }
 
+.enrollment-workflow-body {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
 .enrollment-manager-actions {
   display: flex;
   justify-content: flex-end;
@@ -2557,6 +2682,53 @@ body.match-log-workspace-open {
 .enrollment-grade-list {
   display: grid;
   gap: 10px;
+}
+
+.enrollment-staff-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.enrollment-staff-head {
+  display: grid;
+  gap: 4px;
+}
+
+.enrollment-staff-head h3 {
+  margin: 0;
+}
+
+.enrollment-staff-form {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.enrollment-staff-form input,
+.enrollment-staff-form select,
+.enrollment-staff-form textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  background: var(--surface);
+}
+
+.enrollment-staff-form textarea {
+  resize: vertical;
+}
+
+.enrollment-staff-list {
+  display: grid;
+  gap: 6px;
+}
+
+.enrollment-staff-item {
+  align-items: flex-start;
 }
 
 .enrollment-grade-card {
