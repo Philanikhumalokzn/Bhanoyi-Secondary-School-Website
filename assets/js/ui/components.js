@@ -2243,6 +2243,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <div class="enrollment-manager-actions">
                 <button type="button" class="btn btn-secondary" data-enrollment-open-add-grade>Add grade</button>
               </div>
+              <p class="enrollment-class-empty">Grades/classes are saved automatically when you click Add grade or Add class.</p>
               <div class="enrollment-grade-list" data-enrollment-grade-list></div>
               <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
             </div>
@@ -3399,8 +3400,20 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
   };
 
-  const saveStore = ({ syncRemote = true } = {}) => {
-    const payload = stampEnrollmentStorePayload(buildStorePayload());
+  const saveStore = ({ syncRemote = true, preserveTimestamp = false } = {}) => {
+    const basePayload = buildStorePayload();
+    let payload;
+
+    if (!syncRemote && preserveTimestamp) {
+      const existing = readEnrollmentStoreLocal(storageKey);
+      const existingUpdatedAt = Number(existing?.updatedAt ?? existing?._meta?.updatedAt);
+      payload = Number.isFinite(existingUpdatedAt) && existingUpdatedAt > 0
+        ? stampEnrollmentStorePayload(basePayload, existingUpdatedAt)
+        : basePayload;
+    } else {
+      payload = stampEnrollmentStorePayload(basePayload);
+    }
+
     localStorage.setItem(storageKey, JSON.stringify(payload));
 
     if (!syncRemote) return;
@@ -4066,7 +4079,6 @@ const hydrateEnrollmentManager = (managerNode) => {
   classProfilesByGrade = loaded.classProfilesByGrade;
   staffMembers = normalizeStaffMembers(loaded.staffMembers);
   syncClassTeachersFromStaffAssignments();
-  saveStore({ syncRemote: false });
   staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
   syncStaffSession();
 
@@ -4094,7 +4106,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     classProfilesByGrade = normalizedRemote.classProfilesByGrade;
     staffMembers = normalizeStaffMembers(normalizedRemote.staffMembers);
     syncClassTeachersFromStaffAssignments();
-    saveStore({ syncRemote: false });
+    saveStore({ syncRemote: false, preserveTimestamp: true });
     staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
     syncStaffSession();
 

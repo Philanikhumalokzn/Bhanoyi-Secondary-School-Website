@@ -10,6 +10,23 @@ const normalizeStore = (value) => {
   return value;
 };
 
+const hasMeaningfulEnrollmentData = (store) => {
+  const source = normalizeStore(store);
+  if (!source) return false;
+
+  const activeGrades = Array.isArray(source.activeGrades) ? source.activeGrades.filter(Boolean) : [];
+  const classesByGrade = source.classesByGrade && typeof source.classesByGrade === 'object' && !Array.isArray(source.classesByGrade)
+    ? source.classesByGrade
+    : {};
+  const staffMembers = Array.isArray(source.staffMembers) ? source.staffMembers : [];
+
+  const hasClass = Object.values(classesByGrade).some(
+    (value) => Array.isArray(value) && value.some((entry) => String(entry || '').trim())
+  );
+
+  return activeGrades.length > 0 || hasClass || staffMembers.length > 0;
+};
+
 const getStoreUpdatedAt = (store) => {
   const source = normalizeStore(store);
   if (!source) return 0;
@@ -200,6 +217,14 @@ export const syncEnrollmentStoreFromRemote = async (sectionKey, storageKey = get
   const remoteStore = await fetchEnrollmentStoreRemote(sectionKey);
 
   if (!remoteStore) return localStore;
+
+  const remoteHasData = hasMeaningfulEnrollmentData(remoteStore);
+  const localHasData = hasMeaningfulEnrollmentData(localStore);
+
+  if (remoteHasData && !localHasData) {
+    writeEnrollmentStoreLocal(storageKey, remoteStore);
+    return remoteStore;
+  }
 
   if (!localStore || getStoreUpdatedAt(remoteStore) >= getStoreUpdatedAt(localStore)) {
     writeEnrollmentStoreLocal(storageKey, remoteStore);
