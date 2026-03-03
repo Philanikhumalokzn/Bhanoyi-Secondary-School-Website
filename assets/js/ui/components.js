@@ -2284,12 +2284,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <h3>Manage Class</h3>
               <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
               <div class="enrollment-class-modal-actions enrollment-class-modal-actions-top">
-                <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
                 <button type="button" class="btn btn-secondary" data-enrollment-clear-learners data-enrollment-admin-only>Clear class list</button>
-                <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
               </div>
-              <section class="sports-workflow-step is-expanded enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
-                <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="true">Class Details</button>
+              <section class="sports-workflow-step is-collapsed enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
+                <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="false">Class Details</button>
                 <div class="sports-workflow-body enrollment-workflow-body" data-manage-workflow-body>
                   <div class="enrollment-class-manage-grid">
                     <label class="enrollment-class-modal-field">
@@ -4156,6 +4154,11 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.value = 'excel';
     syncImportInputAccept();
     importFileInput.value = '';
+
+    const classDetailsStep = manageModalWorkflowSteps.find(
+      (entry) => entry.stepNode.dataset.manageWorkflowId === 'class-details'
+    );
+    setManageModalWorkflowExpanded(classDetailsStep, false);
 
     renderManageLearners();
     manageModal.classList.remove('is-hidden');
