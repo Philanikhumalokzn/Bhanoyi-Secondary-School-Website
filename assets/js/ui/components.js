@@ -2032,8 +2032,19 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
                 <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
                 <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
-                  <h3>Testing</h3>
-                  <p class="enrollment-class-modal-subtitle">Testing</p>
+                  <h3>Fixture Fairness Rules</h3>
+                  <p class="enrollment-class-modal-subtitle">Reference list (display only).</p>
+                  <div class="fixture-fairness-checklist">
+                    <ul class="fixture-fairness-list">
+                      <li class="fixture-fairness-list-item">Every team plays the same number of matches each season</li>
+                      <li class="fixture-fairness-list-item">Every team plays the same number of matches in each leg</li>
+                      <li class="fixture-fairness-list-item">Each team keeps balanced home/away matches per leg and season</li>
+                      <li class="fixture-fairness-list-item">Each team has balanced round participation within each leg</li>
+                      <li class="fixture-fairness-list-item">No duplicate opponent pairing in the same leg</li>
+                      <li class="fixture-fairness-list-item">No team plays more than once in a single round</li>
+                      <li class="fixture-fairness-list-item">No self-fixtures (team cannot play itself)</li>
+                    </ul>
+                  </div>
                   <div class="enrollment-class-modal-actions">
                     <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
                   </div>
