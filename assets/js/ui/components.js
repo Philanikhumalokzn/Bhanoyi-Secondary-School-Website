@@ -5167,8 +5167,6 @@ const buildSingleRoundRobin = (teamIds = []) => {
 
 const hydrateFixtureCreator = (fixtureNode) => {
   if (!(fixtureNode instanceof HTMLElement)) return;
-  if (fixtureNode.dataset.fixtureHydrated === '1') return;
-  fixtureNode.dataset.fixtureHydrated = '1';
 
   const rawConfig = (fixtureNode.dataset.fixtureConfig || '').trim();
   if (!rawConfig) return;
@@ -5182,6 +5180,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const houseOptions = normalizeMatchTeams(config.houseOptions || []);
   if (houseOptions.length < 2) return;
+
+  if (fixtureNode.dataset.fixtureHydrated === '1') return;
+  fixtureNode.dataset.fixtureHydrated = '1';
 
   const teamPickInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-team]'));
   const autoFillToggle = fixtureNode.querySelector('[data-fixture-auto-fill]');
