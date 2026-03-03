@@ -3264,9 +3264,18 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     (Array.isArray(rows) ? rows : []).forEach((row) => {
       if (!Array.isArray(row) || !row.length) return;
-      const parsedName = parseSimplifiedExcelFullName(row[0]);
+
+      const parsedAdmission = normalizeText(row[0], 40);
+      const parsedNameFromNewLayout = parseSimplifiedExcelFullName(row[1]);
+      const parsedGenderFromNewLayout = normalizeGender(row[2]);
+
+      const parsedName = parsedNameFromNewLayout || parseSimplifiedExcelFullName(row[0]);
       if (!parsedName) return;
-      learners.push({ name: parsedName, admissionNo: '', gender: normalizeGender(row[1]) });
+
+      const parsedGender = parsedGenderFromNewLayout || normalizeGender(row[1]);
+      const admissionNo = parsedNameFromNewLayout ? parsedAdmission : '';
+
+      learners.push({ name: parsedName, admissionNo, gender: parsedGender });
     });
 
     return normalizeLearners(learners);
