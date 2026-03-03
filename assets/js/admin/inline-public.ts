@@ -3541,9 +3541,24 @@ const wireSportsHouseManagerInline = () => {
   };
   type HouseSportsAssignments = Record<string, Record<string, string[]>>;
   type SportsRuleStore = Record<string, SportEligibility>;
+  type HouseRoleAssignments = Record<
+    string,
+    {
+      staffRoles: Record<string, string[]>;
+      learnerCaptaincies: Record<string, string[]>;
+    }
+  >;
 
   const sportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
   const sportsRuleStorageKey = 'bhanoyi.houseSportsCodeRules';
+  const houseRoleStorageKey = 'bhanoyi.houseRoleAssignments';
+  const baseStaffRoleOptions = [
+    { id: 'house_manager', label: 'House Manager' },
+    { id: 'house_secretary', label: 'House Secretary' },
+    { id: 'house_discipline_coordinator', label: 'Discipline Coordinator' },
+    { id: 'house_welfare_coordinator', label: 'Welfare Coordinator' },
+    { id: 'house_activities_coordinator', label: 'Activities Coordinator' }
+  ];
 
   const toSportCodeId = (value: string, index: number) => {
     const normalized = normalizeText(value, 80)
@@ -3655,6 +3670,71 @@ const wireSportsHouseManagerInline = () => {
     localStorage.setItem(sportsAssignmentStorageKey, JSON.stringify(store));
   };
 
+  const loadHouseRoleAssignments = (): HouseRoleAssignments => {
+    try {
+      const raw = localStorage.getItem(houseRoleStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+      const normalized: HouseRoleAssignments = {};
+      Object.entries(parsed as Record<string, unknown>).forEach(([houseId, value]) => {
+        const normalizedHouseId = normalizeHouseId(houseId, '');
+        if (!normalizedHouseId || !value || typeof value !== 'object' || Array.isArray(value)) return;
+
+        const rawEntry = value as Record<string, unknown>;
+        const rawStaff = rawEntry.staffRoles;
+        const rawLearner = rawEntry.learnerCaptaincies;
+        const entry = {
+          staffRoles: {} as Record<string, string[]>,
+          learnerCaptaincies: {} as Record<string, string[]>
+        };
+
+        if (rawStaff && typeof rawStaff === 'object' && !Array.isArray(rawStaff)) {
+          Object.entries(rawStaff as Record<string, unknown>).forEach(([memberKey, roleIds]) => {
+            const normalizedValues = Array.isArray(roleIds)
+              ? Array.from(
+                  new Set(
+                    roleIds
+                      .map((roleId) => normalizeHouseId(roleId, ''))
+                      .filter((roleId) => Boolean(roleId))
+                  )
+                )
+              : [];
+            if (!normalizedValues.length) return;
+            entry.staffRoles[memberKey] = normalizedValues;
+          });
+        }
+
+        if (rawLearner && typeof rawLearner === 'object' && !Array.isArray(rawLearner)) {
+          Object.entries(rawLearner as Record<string, unknown>).forEach(([memberKey, codeIds]) => {
+            const normalizedValues = Array.isArray(codeIds)
+              ? Array.from(
+                  new Set(
+                    codeIds
+                      .map((codeId) => normalizeHouseId(codeId, ''))
+                      .filter((codeId) => Boolean(codeId))
+                  )
+                )
+              : [];
+            if (!normalizedValues.length) return;
+            entry.learnerCaptaincies[memberKey] = normalizedValues;
+          });
+        }
+
+        normalized[normalizedHouseId] = entry;
+      });
+
+      return normalized;
+    } catch {
+      return {};
+    }
+  };
+
+  const persistHouseRoleAssignments = (store: HouseRoleAssignments) => {
+    localStorage.setItem(houseRoleStorageKey, JSON.stringify(store));
+  };
+
   const houseModal = document.createElement('div');
   houseModal.className = 'inline-house-members-modal is-hidden';
   houseModal.innerHTML = `
@@ -3711,6 +3791,25 @@ const wireSportsHouseManagerInline = () => {
 
       <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
+          House Roles and Leadership (Admin)
+        </button>
+        <div class="sports-workflow-body" data-house-members-body>
+          <p class="inline-house-members-meta">Assign staff leadership roles and learner captains by sporting code.</p>
+          <div class="inline-house-role-grid">
+            <div class="inline-house-role-panel">
+              <h4>Staff Roles</h4>
+              <div class="inline-house-role-list" data-house-role-staff-list></div>
+            </div>
+            <div class="inline-house-role-panel">
+              <h4>Learner Captains</h4>
+              <div class="inline-house-role-list" data-house-role-learner-list></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+        <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Current Members
         </button>
         <div class="sports-workflow-body" data-house-members-body>
@@ -3746,6 +3845,8 @@ const wireSportsHouseManagerInline = () => {
   const houseModalGenderFilter = houseModal.querySelector('[data-house-members-gender-filter]');
   const houseModalSportFilter = houseModal.querySelector('[data-house-members-sport-filter]');
   const houseModalRuleList = houseModal.querySelector('[data-house-sport-rules]');
+  const houseRoleStaffList = houseModal.querySelector('[data-house-role-staff-list]');
+  const houseRoleLearnerList = houseModal.querySelector('[data-house-role-learner-list]');
   const houseModalBulkSportSelect = houseModal.querySelector('[data-house-members-bulk-sport]');
   const houseModalAssignSportButton = houseModal.querySelector('[data-house-members-assign-sport]');
   const houseModalRemoveSportButton = houseModal.querySelector('[data-house-members-remove-sport]');
@@ -3762,6 +3863,8 @@ const wireSportsHouseManagerInline = () => {
     !(houseModalGenderFilter instanceof HTMLSelectElement) ||
     !(houseModalSportFilter instanceof HTMLSelectElement) ||
     !(houseModalRuleList instanceof HTMLElement) ||
+    !(houseRoleStaffList instanceof HTMLElement) ||
+    !(houseRoleLearnerList instanceof HTMLElement) ||
     !(houseModalBulkSportSelect instanceof HTMLSelectElement) ||
     !(houseModalAssignSportButton instanceof HTMLButtonElement) ||
     !(houseModalRemoveSportButton instanceof HTMLButtonElement) ||
@@ -4086,6 +4189,7 @@ const wireSportsHouseManagerInline = () => {
 
     const filteredSelected = Array.from(selectedMemberKeys).filter((key) => validMemberKeys.has(key));
     selectedMemberKeys = new Set(filteredSelected);
+    const canManageHouseRoles = document.body.classList.contains('inline-admin-active');
 
     const learnerCount = learnerMembers.length;
     const teacherCount = members.filter((record) => record.memberType === 'teacher').length;
@@ -4156,6 +4260,140 @@ const wireSportsHouseManagerInline = () => {
       houseModalRuleList.appendChild(row);
     });
 
+    const staffRoleOptions = [
+      ...baseStaffRoleOptions,
+      ...sportCodes.map((entry) => ({ id: `coach_${entry.id}`, label: `Coach (${entry.title})` }))
+    ];
+    const roleStore = loadHouseRoleAssignments();
+    const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+
+    houseRoleStaffList.innerHTML = '';
+    const staffMembers = members.filter((record) => record.memberType === 'teacher');
+    if (!staffMembers.length) {
+      const empty = document.createElement('p');
+      empty.className = 'inline-house-members-empty';
+      empty.textContent = 'No staff members assigned to this house yet.';
+      houseRoleStaffList.appendChild(empty);
+    } else {
+      staffMembers.forEach((record) => {
+        const row = document.createElement('div');
+        row.className = 'inline-house-role-item';
+
+        const title = document.createElement('p');
+        title.className = 'inline-house-role-item-title';
+        title.textContent = record.displayName;
+
+        const select = document.createElement('select');
+        select.multiple = true;
+        select.size = Math.min(8, Math.max(4, staffRoleOptions.length));
+        const selectedRoles = new Set(Array.isArray(houseRoleEntry.staffRoles[record.key]) ? houseRoleEntry.staffRoles[record.key] : []);
+        staffRoleOptions.forEach((optionValue) => {
+          const option = document.createElement('option');
+          option.value = optionValue.id;
+          option.textContent = optionValue.label;
+          option.selected = selectedRoles.has(optionValue.id);
+          select.appendChild(option);
+        });
+        select.disabled = !canManageHouseRoles;
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.className = 'btn btn-secondary';
+        saveButton.textContent = 'Save roles';
+        saveButton.disabled = !canManageHouseRoles;
+        saveButton.addEventListener('click', () => {
+          if (!canManageHouseRoles) return;
+          const selected = Array.from(select.selectedOptions)
+            .map((entry) => normalizeHouseId(entry.value, ''))
+            .filter((entry) => Boolean(entry));
+          const nextStore = loadHouseRoleAssignments();
+          const nextEntry = nextStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+          if (selected.length) {
+            nextEntry.staffRoles[record.key] = Array.from(new Set(selected));
+          } else {
+            delete nextEntry.staffRoles[record.key];
+          }
+          nextStore[activeHouse.id] = nextEntry;
+          persistHouseRoleAssignments(nextStore);
+          showStatus(`Updated staff roles for ${record.displayName}.`);
+          renderHouseMembersModal();
+        });
+
+        const actions = document.createElement('div');
+        actions.className = 'inline-house-members-actions';
+        actions.appendChild(saveButton);
+
+        row.appendChild(title);
+        row.appendChild(select);
+        row.appendChild(actions);
+        houseRoleStaffList.appendChild(row);
+      });
+    }
+
+    houseRoleLearnerList.innerHTML = '';
+    if (!learnerMembers.length) {
+      const empty = document.createElement('p');
+      empty.className = 'inline-house-members-empty';
+      empty.textContent = 'No learners assigned to this house yet.';
+      houseRoleLearnerList.appendChild(empty);
+    } else {
+      learnerMembers.forEach((record) => {
+        const row = document.createElement('div');
+        row.className = 'inline-house-role-item';
+
+        const title = document.createElement('p');
+        title.className = 'inline-house-role-item-title';
+        title.textContent = record.displayName;
+
+        const select = document.createElement('select');
+        select.multiple = true;
+        select.size = Math.min(8, Math.max(4, sportCodes.length || 4));
+        const selectedCodes = new Set(
+          Array.isArray(houseRoleEntry.learnerCaptaincies[record.key]) ? houseRoleEntry.learnerCaptaincies[record.key] : []
+        );
+        sportCodes.forEach((entry) => {
+          const option = document.createElement('option');
+          option.value = entry.id;
+          option.textContent = `Captain (${entry.title})`;
+          option.selected = selectedCodes.has(entry.id);
+          select.appendChild(option);
+        });
+        select.disabled = !canManageHouseRoles || !sportCodes.length;
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.className = 'btn btn-secondary';
+        saveButton.textContent = 'Save captaincies';
+        saveButton.disabled = !canManageHouseRoles || !sportCodes.length;
+        saveButton.addEventListener('click', () => {
+          if (!canManageHouseRoles) return;
+          const selected = Array.from(select.selectedOptions)
+            .map((entry) => normalizeHouseId(entry.value, ''))
+            .filter((entry) => Boolean(entry));
+          const nextStore = loadHouseRoleAssignments();
+          const nextEntry = nextStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+          if (selected.length) {
+            nextEntry.learnerCaptaincies[record.key] = Array.from(new Set(selected));
+          } else {
+            delete nextEntry.learnerCaptaincies[record.key];
+          }
+          nextStore[activeHouse.id] = nextEntry;
+          persistHouseRoleAssignments(nextStore);
+          showStatus(`Updated captaincies for ${record.displayName}.`);
+          renderHouseMembersModal();
+        });
+
+        const actions = document.createElement('div');
+        actions.className = 'inline-house-members-actions';
+        actions.appendChild(saveButton);
+
+        row.appendChild(title);
+        row.appendChild(select);
+        row.appendChild(actions);
+        houseRoleLearnerList.appendChild(row);
+      });
+    }
+
     const normalizedSearch = memberSearchValue.trim().toLowerCase();
     const filteredMembers = members
       .map((record) => {
@@ -4219,7 +4457,16 @@ const wireSportsHouseManagerInline = () => {
       empty.textContent = 'No members match the current search/filter criteria.';
       houseModalList.appendChild(empty);
     } else {
+      let lastRenderedMemberType: 'learner' | 'teacher' | '' = '';
       filteredMembers.forEach(({ record, assignedCodes }) => {
+          if (record.memberType !== lastRenderedMemberType) {
+            const sectionLabel = document.createElement('p');
+            sectionLabel.className = 'inline-house-member-group-label';
+            sectionLabel.textContent = record.memberType === 'teacher' ? 'Staff / Teachers' : 'Learners';
+            houseModalList.appendChild(sectionLabel);
+            lastRenderedMemberType = record.memberType;
+          }
+
           const item = document.createElement('div');
           item.className = 'inline-house-member-item';
           item.classList.toggle('inline-house-member-teacher-row', record.memberType === 'teacher');
@@ -4251,6 +4498,10 @@ const wireSportsHouseManagerInline = () => {
           if (record.admissionNo) details.push(`Adm: ${record.admissionNo}`);
           if (record.gender) details.push(record.gender);
           summary.textContent = `${record.displayName} · ${details.join(' · ')}`;
+
+          const typeBadge = document.createElement('span');
+          typeBadge.className = `inline-house-member-type-badge ${record.memberType === 'teacher' ? 'is-teacher' : 'is-learner'}`;
+          typeBadge.textContent = record.memberType === 'teacher' ? 'Staff' : 'Learner';
 
           const assignmentWrap = document.createElement('div');
           assignmentWrap.className = 'inline-house-member-codes';
@@ -4326,6 +4577,7 @@ const wireSportsHouseManagerInline = () => {
 
           const memberMain = document.createElement('div');
           memberMain.className = 'inline-house-member-main';
+          memberMain.appendChild(typeBadge);
           memberMain.appendChild(summary);
           memberMain.appendChild(assignmentWrap);
           memberMain.appendChild(quickAssign);
@@ -4570,7 +4822,7 @@ const wireSportsHouseManagerInline = () => {
         fileName: `${safeHouseName}-house-register.xlsx`,
         sheetName: 'House Register',
         title: 'Official House Register',
-        contextLine: `${activeHouse.name} • Manage Houses`,
+        contextLine: activeHouse.name,
         metaLine: `Members: ${rows.length}`,
         columns: [
           { header: 'Role', key: 'role', width: 12, align: 'center' },
