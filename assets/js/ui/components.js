@@ -2278,7 +2278,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
               <div class="enrollment-class-modal-actions enrollment-class-modal-actions-top">
                 <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
-                <button type="button" class="btn btn-secondary" data-enrollment-clear-learners>Clear class list</button>
+                <button type="button" class="btn btn-secondary" data-enrollment-clear-learners data-enrollment-admin-only>Clear class list</button>
                 <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
               </div>
               <section class="sports-workflow-step is-expanded enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
@@ -2290,7 +2290,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       <select data-enrollment-manage-teacher>
                         <option value="">Select teacher</option>
                       </select>
-                      <button type="button" class="btn btn-secondary" data-enrollment-open-staff-workflow>Add / manage teachers</button>
+                      <button type="button" class="btn btn-secondary" data-enrollment-open-staff-workflow data-enrollment-admin-only>Add / manage teachers</button>
                     </label>
                     <label class="enrollment-class-modal-field">
                       Room
@@ -2312,7 +2312,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                 <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="true">Learners</button>
                 <div class="sports-workflow-body enrollment-workflow-body" data-manage-workflow-body>
                   <section class="enrollment-learner-section">
-                    <div class="enrollment-import-row">
+                    <div class="enrollment-import-row" data-enrollment-admin-only>
                       <label class="enrollment-class-modal-field">
                         Import Format
                         <select data-enrollment-import-format>
@@ -2326,7 +2326,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       </label>
                       <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
                     </div>
-                    <div class="enrollment-learner-form">
+                    <div class="enrollment-learner-form" data-enrollment-admin-only>
                       <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                       <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
                       <select data-enrollment-learner-gender>
@@ -2411,6 +2411,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffListNode = managerNode.querySelector('[data-enrollment-staff-list]');
   const saveManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-save-manage]'));
   const closeManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-close-manage-modal]'));
+  const adminOnlyBlocks = Array.from(managerNode.querySelectorAll('[data-enrollment-admin-only]'));
 
   if (
     !(gradeListNode instanceof HTMLElement) ||
@@ -2618,6 +2619,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffSessionKey = `bhanoyi.staffSession.${sectionKey}`;
   let staffSessionEmail = '';
   let loggedInStaff = null;
+  let hasAutoOpenedAssignedClass = false;
 
   const staffPostLevelRanks = {
     PL1: 'Educator',
@@ -3734,6 +3736,11 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const render = () => {
     addGradeTrigger.disabled = !isAdminMode || getMissingGrades().length === 0;
+    addGradeTrigger.classList.toggle('is-hidden', !isAdminMode);
+    adminOnlyBlocks.forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.classList.toggle('is-hidden', !isAdminMode);
+    });
 
     if (staffWorkflowStep instanceof HTMLElement) {
       staffWorkflowStep.classList.toggle('is-hidden', !isAdminMode);
@@ -3760,9 +3767,29 @@ const hydrateEnrollmentManager = (managerNode) => {
     renderStaffMembers();
     syncStaffSession();
 
-    gradeListNode.innerHTML = activeGrades
+    const staffAssignedGrade = isStaffMode && loggedInStaff ? String(loggedInStaff.assignedGrade || '').trim() : '';
+    const staffAssignedLetter = isStaffMode && loggedInStaff ? normalizeLetter(loggedInStaff.assignedClassLetter || '') : '';
+    const hasAssignedClassInStore =
+      Boolean(staffAssignedGrade && staffAssignedLetter) &&
+      Array.isArray(classesByGrade[staffAssignedGrade]) &&
+      classesByGrade[staffAssignedGrade].some((entry) => normalizeLetter(entry) === staffAssignedLetter);
+
+    const visibleGrades =
+      isStaffMode
+        ? hasAssignedClassInStore
+          ? [staffAssignedGrade]
+          : []
+        : activeGrades;
+
+    gradeListNode.innerHTML = visibleGrades
       .map((grade) => {
-        const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+        const allGradeClasses = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+        const classes =
+          isStaffMode && hasAssignedClassInStore
+            ? allGradeClasses.filter(
+                (letter) => String(grade) === staffAssignedGrade && normalizeLetter(letter) === staffAssignedLetter
+              )
+            : allGradeClasses;
         const chips = classes.length
           ? classes
               .map((letter) => {
@@ -3804,7 +3831,7 @@ const hydrateEnrollmentManager = (managerNode) => {
             <div class="enrollment-grade-head">
               <h3>Grade ${grade}</h3>
               <div class="enrollment-grade-actions">
-                <button type="button" class="btn btn-secondary" data-enrollment-open-add="${grade}"${addDisabled ? ' disabled' : ''}>Add class</button>
+                ${isAdminMode ? `<button type="button" class="btn btn-secondary" data-enrollment-open-add="${grade}"${addDisabled ? ' disabled' : ''}>Add class</button>` : ''}
                 ${isAdminMode ? `<button type="button" class="btn btn-secondary" data-enrollment-remove-grade="${grade}">Remove grade</button>` : ''}
               </div>
             </div>
@@ -3815,10 +3842,12 @@ const hydrateEnrollmentManager = (managerNode) => {
       .join('');
 
     if (statusNode) {
-      if (!activeGrades.length) {
+      if (!visibleGrades.length) {
         statusNode.textContent = isAdminMode
           ? 'No grades currently active. Use Add grade to create one.'
-          : 'No grades currently active.';
+          : isStaffMode
+            ? 'No assigned class found for your profile. Ask admin to assign your class.'
+            : 'No grades currently active.';
       } else {
         statusNode.textContent = isAdminMode
           ? 'Use Add class to create classes and click any class to manage details.'
@@ -3828,6 +3857,11 @@ const hydrateEnrollmentManager = (managerNode) => {
               : 'Sign in at /staff=1 to open My Class.'
             : 'Enrollment classes are visible in read-only mode.';
       }
+    }
+
+    if (isStaffMode && hasAssignedClassInStore && !hasAutoOpenedAssignedClass && !selectedManageGrade && !selectedManageLetter) {
+      hasAutoOpenedAssignedClass = true;
+      openManageModal(staffAssignedGrade, staffAssignedLetter);
     }
 
     refreshEnrollmentWorkflowHeights();
