@@ -2986,6 +2986,28 @@ body.match-log-workspace-open {
   gap: 6px;
 }
 
+.enrollment-learner-inline-fields {
+  grid-template-columns: minmax(130px, 0.75fr) minmax(190px, 1.25fr);
+  align-items: end;
+  gap: 6px 8px;
+}
+
+.enrollment-learner-sporting-select {
+  min-height: 64px;
+  max-height: 64px;
+  padding: 4px 8px;
+}
+
+.enrollment-learner-sporting-summary {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .enrollment-house-row {
   display: flex;
   align-items: center;
@@ -3024,6 +3046,10 @@ body.match-log-workspace-open {
 @media (max-width: 760px) {
   .enrollment-import-row,
   .enrollment-learner-form {
+    grid-template-columns: 1fr;
+  }
+
+  .enrollment-learner-inline-fields {
     grid-template-columns: 1fr;
   }
 }

@@ -2667,6 +2667,44 @@ const hydrateEnrollmentManager = (managerNode) => {
     }));
   };
 
+  const findSportingCodeTitle = (matcher) => {
+    const definitions = getSportingCodeDefinitions();
+    const found = definitions.find((entry) => matcher(normalizeText(entry.title, 80).toLowerCase()));
+    return found ? found.title : '';
+  };
+
+  const getDefaultSportingCodesByGender = (gender) => {
+    const normalizedGender = normalizeText(gender, 20).toLowerCase();
+    if (normalizedGender === 'male') {
+      const football = findSportingCodeTitle((title) => title.includes('football'));
+      return football ? [football] : [];
+    }
+    if (normalizedGender === 'female') {
+      const netball = findSportingCodeTitle((title) => title.includes('netball'));
+      return netball ? [netball] : [];
+    }
+    return [];
+  };
+
+  const withLearnerDefaultSportingCodes = (learner) => {
+    if (!learner || typeof learner !== 'object') return learner;
+    const hasCodes = Array.isArray(learner.sportingCodes) && learner.sportingCodes.length > 0;
+    if (hasCodes) return learner;
+    const defaults = getDefaultSportingCodesByGender(learner.gender || '');
+    if (!defaults.length) return learner;
+    return {
+      ...learner,
+      sportingCodes: defaults
+    };
+  };
+
+  const formatSportingCodesSummary = (codes) => {
+    const normalizedCodes = Array.isArray(codes) ? codes.map((entry) => normalizeText(entry, 80)).filter(Boolean) : [];
+    if (!normalizedCodes.length) return 'No sporting code selected';
+    if (normalizedCodes.length <= 2) return normalizedCodes.join(', ');
+    return `${normalizedCodes.slice(0, 2).join(', ')} +${normalizedCodes.length - 2} more`;
+  };
+
   const houseSportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
 
   const loadHouseSportsAssignments = () => {
@@ -3479,7 +3517,8 @@ const hydrateEnrollmentManager = (managerNode) => {
         const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
         const detail = details ? ` • ${details}` : '';
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
-        const sportingCodesValue = sportingCodes.join(', ');
+        const sportingCodesSummary = formatSportingCodesSummary(sportingCodes);
+        const sportingCodesTitle = sportingCodes.join(', ');
         const houseOptionsMarkup = schoolHouseOptions
           .map(
             (house) => `
@@ -3518,7 +3557,7 @@ const hydrateEnrollmentManager = (managerNode) => {
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
               <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
-              <div class="enrollment-learner-form">
+              <div class="enrollment-learner-form enrollment-learner-inline-fields">
                 <label class="enrollment-class-modal-field">
                   RCL role
                   <select data-enrollment-learner-rcl-index="${index}" ${canEditAssignments ? '' : 'disabled'}>
@@ -3528,10 +3567,11 @@ const hydrateEnrollmentManager = (managerNode) => {
                   </select>
                 </label>
                 <label class="enrollment-class-modal-field">
-                  Sporting codes (auto comma-separated)
+                  Sporting codes
                   <select
                     multiple
-                    size="5"
+                    size="3"
+                    class="enrollment-learner-sporting-select"
                     data-enrollment-learner-sporting-index="${index}"
                     ${canEditAssignments ? '' : 'disabled'}
                   >
@@ -3546,7 +3586,7 @@ const hydrateEnrollmentManager = (managerNode) => {
                       })
                       .join('')}
                   </select>
-                  <span class="enrollment-class-empty">${escapeHtmlText(sportingCodesValue || 'No sporting code selected')}</span>
+                  <span class="enrollment-class-empty enrollment-learner-sporting-summary" title="${escapeHtmlAttribute(sportingCodesTitle || 'No sporting code selected')}">${escapeHtmlText(sportingCodesSummary)}</span>
                 </label>
               </div>
               <div class="enrollment-house-row">
@@ -4403,7 +4443,8 @@ const hydrateEnrollmentManager = (managerNode) => {
       admissionNo: learnerAdmissionInput.value,
       gender: learnerGenderSelect.value
     });
-    if (!learner) {
+    const learnerWithDefaults = withLearnerDefaultSportingCodes(learner);
+    if (!learnerWithDefaults) {
       if (statusNode) {
         statusNode.textContent = 'Enter a learner name before adding.';
       }
@@ -4412,17 +4453,17 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     const duplicate = manageLearners.some(
       (entry) =>
-        entry.name.toLowerCase() === learner.name.toLowerCase() &&
-        String(entry.admissionNo || '').toLowerCase() === String(learner.admissionNo || '').toLowerCase()
+        entry.name.toLowerCase() === learnerWithDefaults.name.toLowerCase() &&
+        String(entry.admissionNo || '').toLowerCase() === String(learnerWithDefaults.admissionNo || '').toLowerCase()
     );
     if (duplicate) {
       if (statusNode) {
-        statusNode.textContent = `${learner.name} is already in this class.`;
+        statusNode.textContent = `${learnerWithDefaults.name} is already in this class.`;
       }
       return;
     }
 
-    manageLearners = [...manageLearners, learner];
+    manageLearners = [...manageLearners, learnerWithDefaults];
     learnerNameInput.value = '';
     learnerAdmissionInput.value = '';
     learnerGenderSelect.value = '';
@@ -4453,7 +4494,8 @@ const hydrateEnrollmentManager = (managerNode) => {
       }
 
       const beforeCount = manageLearners.length;
-      manageLearners = normalizeLearners([...manageLearners, ...importedLearners]);
+      const importedWithDefaults = importedLearners.map((learner) => withLearnerDefaultSportingCodes(learner));
+      manageLearners = normalizeLearners([...manageLearners, ...importedWithDefaults]);
       const addedCount = Math.max(0, manageLearners.length - beforeCount);
       syncCapacityWithLearners();
       renderManageLearners();
