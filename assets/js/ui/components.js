@@ -5223,11 +5223,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const workflowSteps = initSportsWorkflowSteps(fixtureNode);
 
-  portalOverlayToBody(
-    fairnessModal,
-    `fixture-fairness-modal:${String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`
-  );
-
   let lastFixtures = [];
   let lastSportKey = '';
   let lastSportLabel = '';
@@ -5247,6 +5242,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fairnessModalPortalKey = `fixture-fairness-modal:${fixtureSectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
@@ -5268,6 +5264,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSport: '',
     sports: {}
   };
+
+  portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
 
   if (rulesPanel instanceof HTMLElement) {
     rulesPanel.classList.toggle('is-hidden', !isAdminMode);
@@ -7765,16 +7763,36 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   };
 
+  const resolveFairnessModalNode = () => {
+    if (fairnessModal instanceof HTMLElement) {
+      return portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
+    }
+    const existing = document.querySelector(`[data-overlay-portal-key="${fairnessModalPortalKey}"]`);
+    return existing instanceof HTMLElement ? existing : null;
+  };
+
   const closeFairnessModal = () => {
-    if (!(fairnessModal instanceof HTMLElement)) return;
-    fairnessModal.classList.add('is-hidden');
+    const modalNode = resolveFairnessModalNode();
+    if (!(modalNode instanceof HTMLElement)) return;
+    modalNode.classList.add('is-hidden');
   };
 
   const openFairnessModal = () => {
-    if (!isAdminMode) return;
-    if (!(fairnessModal instanceof HTMLElement)) return;
+    if (!isAdminMode) {
+      if (statusNode) {
+        statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
+      }
+      return;
+    }
+    const modalNode = resolveFairnessModalNode();
+    if (!(modalNode instanceof HTMLElement)) {
+      if (statusNode) {
+        statusNode.textContent = 'Could not open fairness rules modal. Please refresh and try again.';
+      }
+      return;
+    }
     renderFairnessModalOptions();
-    fairnessModal.classList.remove('is-hidden');
+    modalNode.classList.remove('is-hidden');
   };
 
   fairnessRulesSelect?.addEventListener('change', () => {
@@ -7792,6 +7810,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
     button.addEventListener('click', () => {
       closeFairnessModal();
     });
+  });
+
+  resolveFairnessModalNode()?.addEventListener('click', (event) => {
+    if (event.target === resolveFairnessModalNode()) {
+      closeFairnessModal();
+    }
   });
 
   fairnessApplyButton?.addEventListener('click', () => {
