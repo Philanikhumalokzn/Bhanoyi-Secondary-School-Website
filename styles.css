@@ -3494,6 +3494,19 @@ body.match-log-workspace-open {
   margin-top: 2px;
 }
 
+.fixture-fairness-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.fixture-fairness-list-item {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
 .fixture-creator-sport-grid input,
 .fixture-creator-sport-grid select {
   border: 1px solid var(--border);
