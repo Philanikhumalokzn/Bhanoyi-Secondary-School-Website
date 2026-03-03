@@ -2739,6 +2739,23 @@ const hydrateEnrollmentManager = (managerNode) => {
     persistHouseSportsAssignments(assignmentStore);
   };
 
+  const persistLiveLearnerAssignments = () => {
+    if (!selectedManageGrade || !selectedManageLetter) return;
+    const existingProfile = getClassProfile(selectedManageGrade, selectedManageLetter);
+    const normalizedLearners = normalizeLearners(manageLearners);
+
+    setClassProfile(selectedManageGrade, selectedManageLetter, {
+      teacher: existingProfile.teacher,
+      room: existingProfile.room,
+      capacity: String(normalizedLearners.length),
+      notes: existingProfile.notes,
+      learners: normalizedLearners
+    });
+
+    syncHouseAssignmentsForClass(selectedManageGrade, selectedManageLetter, normalizedLearners);
+    saveStore();
+  };
+
   const buildDefaultStaffCredentials = (staffLike) => {
     const surnameToken = normalizeLoginToken(staffLike?.surname || '').slice(0, 16) || 'staff';
     const firstToken = normalizeLoginToken(staffLike?.firstName || '');
@@ -4181,6 +4198,7 @@ const hydrateEnrollmentManager = (managerNode) => {
         ...manageLearners[index],
         houseId: normalizedHouseId
       };
+      persistLiveLearnerAssignments();
       return;
     }
 
@@ -4193,6 +4211,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       });
       if (!normalizedLearner) return;
       manageLearners[index] = normalizedLearner;
+      persistLiveLearnerAssignments();
       renderManageLearners();
       return;
     }
@@ -4209,6 +4228,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       });
       if (!normalizedLearner) return;
       manageLearners[index] = normalizedLearner;
+      persistLiveLearnerAssignments();
       renderManageLearners();
       return;
     }
