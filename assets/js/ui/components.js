@@ -2032,12 +2032,10 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
                 <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
                 <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
-                  <h3>Fixture Fairness Rules</h3>
-                  <p class="enrollment-class-modal-subtitle">Check the rules to enforce when auto-generating draft fixtures.</p>
-                  <div class="fixture-fairness-checklist" data-fixture-fairness-options></div>
+                  <h3>Testing</h3>
+                  <p class="enrollment-class-modal-subtitle">Testing</p>
                   <div class="enrollment-class-modal-actions">
                     <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
-                    <button type="button" class="btn btn-primary" data-fixture-apply-fairness-rules>Apply rules</button>
                   </div>
                 </article>
               </div>
@@ -5283,7 +5281,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     fairnessRulesSelect.disabled = !isAdminMode;
   }
   if (fairnessOpenButton instanceof HTMLButtonElement) {
-    fairnessOpenButton.disabled = !isAdminMode;
+    fairnessOpenButton.disabled = false;
   }
   if (fairnessApplyButton instanceof HTMLButtonElement) {
     fairnessApplyButton.disabled = !isAdminMode;
@@ -7791,14 +7789,6 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const openFairnessModal = () => {
-    if (!isAdminMode) {
-      if (statusNode) {
-        statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
-      }
-      showSmartToast('Fairness rules are editable only in admin mode (?admin=1).', { tone: 'info' });
-      return;
-    }
-
     const modalNode = resolveFairnessModalNode();
     if (!(modalNode instanceof HTMLElement)) {
       if (statusNode) {
@@ -7815,6 +7805,22 @@ const hydrateFixtureCreator = (fixtureNode) => {
     modalNode.style.opacity = '1';
     modalNode.style.pointerEvents = 'auto';
   };
+
+  fairnessOpenButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openFairnessModal();
+  });
+
+  fixtureNode.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const trigger = target.closest('[data-fixture-open-fairness-modal]');
+    if (!(trigger instanceof HTMLButtonElement)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openFairnessModal();
+  });
 
   fairnessRulesSelect?.addEventListener('change', () => {
     refreshFairnessSummary();
