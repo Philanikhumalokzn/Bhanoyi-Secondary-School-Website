@@ -5223,6 +5223,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const workflowSteps = initSportsWorkflowSteps(fixtureNode);
 
+  portalOverlayToBody(
+    fairnessModal,
+    `fixture-fairness-modal:${String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`
+  );
+
   let lastFixtures = [];
   let lastSportKey = '';
   let lastSportLabel = '';
