@@ -5159,6 +5159,10 @@ const buildSingleRoundRobin = (teamIds = []) => {
 };
 
 const hydrateFixtureCreator = (fixtureNode) => {
+  if (!(fixtureNode instanceof HTMLElement)) return;
+  if (fixtureNode.dataset.fixtureHydrated === '1') return;
+  fixtureNode.dataset.fixtureHydrated = '1';
+
   const rawConfig = (fixtureNode.dataset.fixtureConfig || '').trim();
   if (!rawConfig) return;
 
@@ -7765,7 +7769,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     applyFairnessRulesSelection();
   });
 
-  fairnessToggleButton?.addEventListener('click', () => {
+  fairnessToggleButton?.addEventListener('click', (event) => {
+    event.stopPropagation();
     if (!isAdminMode) {
       if (statusNode) {
         statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
