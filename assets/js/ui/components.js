@@ -689,9 +689,8 @@ const getExpandedWorkflowBodyMaxHeight = (body) => {
   if (!(body instanceof HTMLElement)) {
     return '0px';
   }
-  const viewportCap = Math.max(280, Math.floor(window.innerHeight * 0.68));
-  const target = Math.min(body.scrollHeight, viewportCap);
-  return `${Math.max(0, target)}px`;
+  const target = Math.max(0, body.scrollHeight);
+  return `${target}px`;
 };
 
 const initSportsWorkflowSteps = (rootNode) => {

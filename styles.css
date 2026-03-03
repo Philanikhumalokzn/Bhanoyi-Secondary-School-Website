@@ -3101,7 +3101,7 @@ body.match-log-workspace-open {
 
 .sports-workflow-step.is-expanded .sports-workflow-body {
   opacity: 1;
-  overflow-y: visible;
+  overflow: visible;
   overscroll-behavior: contain;
   position: relative;
   z-index: 201;
@@ -3557,7 +3557,7 @@ body.match-log-workspace-open {
 
 .calendar-workflow-step.is-expanded .calendar-workflow-body {
   opacity: 1;
-  overflow-y: visible;
+  overflow: visible;
   overscroll-behavior: contain;
   position: relative;
   z-index: 201;
