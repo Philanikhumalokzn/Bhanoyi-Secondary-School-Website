@@ -2987,18 +2987,75 @@ body.match-log-workspace-open {
 }
 
 .enrollment-learner-inline-fields {
-  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 0.9fr) minmax(180px, 1.3fr);
+  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 0.85fr) minmax(180px, 1.35fr);
   align-items: center;
   gap: 4px 8px;
 }
 
-.enrollment-learner-sporting-select {
-  height: 34px !important;
-  min-height: 34px !important;
-  max-height: 34px !important;
-  padding: 2px 8px;
+.enrollment-learner-sporting-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.enrollment-learner-sporting-picker summary {
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 28px 6px 10px;
+  min-height: 34px;
+  background: var(--surface);
+  font: inherit;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+.enrollment-learner-sporting-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.enrollment-learner-sporting-picker summary::after {
+  content: '▾';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.enrollment-learner-sporting-picker[open] summary {
+  border-color: var(--primary);
+}
+
+.enrollment-learner-sporting-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 6px;
+  box-shadow: 0 6px 16px rgba(13, 34, 56, 0.12);
+  max-height: 132px;
   overflow: auto;
-  white-space: nowrap;
+  z-index: 6;
+}
+
+.enrollment-learner-sporting-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.84rem;
+  padding: 3px 2px;
+}
+
+.enrollment-learner-sporting-option input {
+  margin: 0;
 }
 
 .enrollment-learner-sporting-summary {

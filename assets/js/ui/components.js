@@ -3519,6 +3519,25 @@ const hydrateEnrollmentManager = (managerNode) => {
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
         const sportingCodesSummary = formatSportingCodesSummary(sportingCodes);
         const sportingCodesTitle = sportingCodes.join(', ');
+        const sportingCodesMenuMarkup = sportingCodeDefinitions
+          .map((entry) => {
+            const selected = sportingCodes.some(
+              (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+            );
+            return `
+              <label class="enrollment-learner-sporting-option">
+                <input
+                  type="checkbox"
+                  data-enrollment-learner-sporting-option-index="${index}"
+                  value="${escapeHtmlAttribute(entry.title)}"
+                  ${selected ? 'checked' : ''}
+                  ${canEditAssignments ? '' : 'disabled'}
+                />
+                <span>${escapeHtmlText(entry.title)}</span>
+              </label>
+            `;
+          })
+          .join('');
         const houseOptionsMarkup = schoolHouseOptions
           .map(
             (house) => `
@@ -3563,25 +3582,12 @@ const hydrateEnrollmentManager = (managerNode) => {
                     .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
                     .join('')}
                 </select>
-                <select
-                  multiple
-                  size="2"
-                  class="enrollment-learner-sporting-select"
-                  data-enrollment-learner-sporting-index="${index}"
-                  aria-label="Sporting codes"
-                  ${canEditAssignments ? '' : 'disabled'}
-                >
-                  ${sportingCodeDefinitions
-                    .map((entry) => {
-                      const selected = sportingCodes.some(
-                        (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
-                      )
-                        ? 'selected'
-                        : '';
-                      return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
-                    })
-                    .join('')}
-                </select>
+                <details class="enrollment-learner-sporting-picker">
+                  <summary aria-label="Sporting codes">Sporting codes</summary>
+                  <div class="enrollment-learner-sporting-menu" role="group" aria-label="Sporting codes list">
+                    ${sportingCodesMenuMarkup}
+                  </div>
+                </details>
                 <span class="enrollment-class-empty enrollment-learner-sporting-summary" title="${escapeHtmlAttribute(sportingCodesTitle || 'No sporting code selected')}">${escapeHtmlText(sportingCodesSummary)}</span>
               </div>
               <div class="enrollment-house-row">
@@ -4243,6 +4249,27 @@ const hydrateEnrollmentManager = (managerNode) => {
       const normalizedLearner = normalizeLearner({
         ...manageLearners[index],
         rclRole: target.value
+      });
+      if (!normalizedLearner) return;
+      manageLearners[index] = normalizedLearner;
+      persistLiveLearnerAssignments();
+      renderManageLearners();
+      return;
+    }
+
+    if (target instanceof HTMLInputElement && target.type === 'checkbox' && target.dataset.enrollmentLearnerSportingOptionIndex !== undefined) {
+      const index = Number.parseInt(String(target.dataset.enrollmentLearnerSportingOptionIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      const learnerItem = target.closest('.enrollment-learner-item');
+      if (!(learnerItem instanceof HTMLElement)) return;
+      const selectedCodes = Array.from(
+        learnerItem.querySelectorAll(`input[type="checkbox"][data-enrollment-learner-sporting-option-index="${index}"]:checked`)
+      )
+        .map((entry) => normalizeText(entry.value, 80))
+        .filter(Boolean);
+      const normalizedLearner = normalizeLearner({
+        ...manageLearners[index],
+        sportingCodes: selectedCodes
       });
       if (!normalizedLearner) return;
       manageLearners[index] = normalizedLearner;
