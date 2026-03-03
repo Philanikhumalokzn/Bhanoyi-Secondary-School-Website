@@ -2999,8 +2999,11 @@ body.match-log-workspace-open {
 .enrollment-learner-topmeta {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
+  margin-left: auto;
+  text-align: right;
 }
 
 .enrollment-learner-sport-chip {

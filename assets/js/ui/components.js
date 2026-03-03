@@ -3891,10 +3891,7 @@ const hydrateEnrollmentManager = (managerNode) => {
                 ${clearChoice}
               </div>
             </div>
-            <div class="enrollment-learner-actions">
-              <button type="button" class="btn btn-secondary" data-enrollment-open-learner-profile-index="${index}">${canEditAssignments ? 'Edit profile' : 'View profile'}</button>
-              ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
-            </div>
+            ${isAdminMode ? `<div class="enrollment-learner-actions"><button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button></div>` : ''}
           </div>
         `;
       })
