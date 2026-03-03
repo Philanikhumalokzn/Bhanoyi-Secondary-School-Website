@@ -2980,6 +2980,51 @@ body.match-log-workspace-open {
   gap: 6px;
 }
 
+.enrollment-learner-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.enrollment-learner-name {
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.enrollment-learner-topmeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.enrollment-learner-sport-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  max-width: 170px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.enrollment-learner-sport-chip:hover,
+.enrollment-learner-sport-chip:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .enrollment-learner-actions {
   display: inline-flex;
   align-items: center;
@@ -3047,6 +3092,16 @@ body.match-log-workspace-open {
   .enrollment-import-row,
   .enrollment-learner-form {
     grid-template-columns: 1fr;
+  }
+
+  .enrollment-learner-topline {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .enrollment-learner-topmeta {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .enrollment-learner-inline-fields {

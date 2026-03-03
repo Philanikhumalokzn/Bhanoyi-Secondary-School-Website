@@ -3462,6 +3462,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const closeManageModal = () => {
     manageModal.classList.add('is-hidden');
     closeLearnerProfileModal();
+    closeLearnerSportsModal();
     selectedManageGrade = '';
     selectedManageLetter = '';
     manageLearners = [];
@@ -3720,6 +3721,104 @@ const hydrateEnrollmentManager = (managerNode) => {
     closeLearnerProfileModal();
   });
 
+  let activeLearnerSportsIndex = -1;
+  const learnerSportsModal = document.createElement('div');
+  learnerSportsModal.className = 'enrollment-class-modal is-hidden';
+  learnerSportsModal.setAttribute('data-enrollment-learner-sports-modal', 'true');
+  learnerSportsModal.innerHTML = `
+    <div class="enrollment-class-modal-backdrop" data-enrollment-close-learner-sports></div>
+    <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Learner sporting codes">
+      <h3>Sporting Codes</h3>
+      <p class="enrollment-class-modal-subtitle" data-enrollment-learner-sports-title></p>
+      <label class="enrollment-class-modal-field">
+        Assign sporting codes
+        <select multiple size="7" data-enrollment-learner-sports-select></select>
+      </label>
+      <div class="enrollment-class-modal-actions">
+        <button type="button" class="btn btn-secondary" data-enrollment-close-learner-sports>Close</button>
+        <button type="button" class="btn btn-primary" data-enrollment-save-learner-sports>Save sporting codes</button>
+      </div>
+    </article>
+  `;
+  document.body.appendChild(learnerSportsModal);
+
+  const learnerSportsTitleNode = learnerSportsModal.querySelector('[data-enrollment-learner-sports-title]');
+  const learnerSportsSelect = learnerSportsModal.querySelector('[data-enrollment-learner-sports-select]');
+  const learnerSportsSaveButton = learnerSportsModal.querySelector('[data-enrollment-save-learner-sports]');
+  const learnerSportsCloseButtons = Array.from(
+    learnerSportsModal.querySelectorAll('[data-enrollment-close-learner-sports]')
+  );
+
+  const closeLearnerSportsModal = () => {
+    learnerSportsModal.classList.add('is-hidden');
+    activeLearnerSportsIndex = -1;
+  };
+
+  const openLearnerSportsModal = (index) => {
+    if (!(learnerSportsTitleNode instanceof HTMLElement) || !(learnerSportsSelect instanceof HTMLSelectElement)) return;
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const learner = manageLearners[index];
+    const canEditAssignments = canCurrentUserEditLearnerAssignments();
+    const sportingCodeDefinitions = getSportingCodeDefinitions();
+    const assignedCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
+    const defaultCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
+
+    activeLearnerSportsIndex = index;
+    learnerSportsTitleNode.textContent = `${learner.name} • ${learner.gender || 'Unspecified gender'} • Default: ${defaultCode}`;
+    learnerSportsSelect.innerHTML = sportingCodeDefinitions
+      .map((entry) => {
+        const selected = assignedCodes.some(
+          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+        )
+          ? 'selected'
+          : '';
+        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
+      })
+      .join('');
+
+    learnerSportsSelect.disabled = !canEditAssignments;
+    if (learnerSportsSaveButton instanceof HTMLButtonElement) {
+      learnerSportsSaveButton.disabled = !canEditAssignments;
+    }
+
+    learnerSportsModal.classList.remove('is-hidden');
+  };
+
+  learnerSportsCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', closeLearnerSportsModal);
+  });
+
+  learnerSportsModal.addEventListener('click', (event) => {
+    if (event.target === learnerSportsModal) {
+      closeLearnerSportsModal();
+    }
+  });
+
+  learnerSportsSaveButton?.addEventListener('click', () => {
+    if (!canCurrentUserEditLearnerAssignments()) return;
+    if (!(learnerSportsSelect instanceof HTMLSelectElement)) return;
+
+    const index = activeLearnerSportsIndex;
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const selectedCodes = Array.from(learnerSportsSelect.selectedOptions)
+      .map((entry) => normalizeText(entry.value, 80))
+      .filter(Boolean);
+
+    const normalizedLearner = normalizeLearner({
+      ...manageLearners[index],
+      sportingCodes: selectedCodes
+    });
+    if (!normalizedLearner) return;
+
+    manageLearners[index] = normalizedLearner;
+    persistLiveLearnerAssignments();
+    renderManageLearners();
+    closeLearnerSportsModal();
+  });
+
   const renderManageLearners = () => {
     if (!manageLearners.length) {
       learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
@@ -3730,28 +3829,67 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const canEditAssignments = canCurrentUserEditLearnerAssignments();
-    const houseNameById = new Map(schoolHouseOptions.map((house) => [house.id, house.name]));
 
     learnerListNode.innerHTML = manageLearners
       .map((learner, index) => {
-        const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
-        const sportingCodesSummary = formatSportingCodesSummary(sportingCodes);
-        const houseName = learner.houseId ? houseNameById.get(learner.houseId) || 'Unassigned' : 'Unassigned';
-        const summaryParts = [
-          details,
-          learner.rclRole ? `RCL: ${learner.rclRole}` : '',
-          `House: ${houseName}`,
-          `Sports: ${sportingCodesSummary}`
-        ]
-          .filter(Boolean)
-          .join(' • ');
+        const assignedSportsLabel = formatSportingCodesSummary(sportingCodes);
+        const defaultSportCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
+        const topGenderLabel = learner.gender || 'Unspecified';
+
+        const houseOptionsMarkup = schoolHouseOptions
+          .map(
+            (house) => `
+              <label class="enrollment-house-choice">
+                <input
+                  type="radio"
+                  name="enrollment_learner_house_${index}"
+                  value="${escapeHtmlAttribute(house.id)}"
+                  data-enrollment-learner-house-index="${index}"
+                  ${learner.houseId === house.id ? 'checked' : ''}
+                  ${canEditAssignments ? '' : 'disabled'}
+                />
+                <span class="enrollment-house-avatar" style="--house-color:${escapeHtmlAttribute(house.color || '#64748b')};"></span>
+                <span>${escapeHtmlText(house.name)}</span>
+              </label>
+            `
+          )
+          .join('');
+
+        const clearChoice = canEditAssignments
+          ? `
+              <label class="enrollment-house-choice enrollment-house-choice-clear">
+                <input
+                  type="radio"
+                  name="enrollment_learner_house_${index}"
+                  value=""
+                  data-enrollment-learner-house-index="${index}"
+                  ${learner.houseId ? '' : 'checked'}
+                />
+                <span>Unassigned</span>
+              </label>
+            `
+          : '';
 
         return `
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
-              <span>${escapeHtmlText(learner.name)}</span>
-              ${summaryParts ? `<span class="enrollment-class-empty">${escapeHtmlText(summaryParts)}</span>` : ''}
+              <div class="enrollment-learner-topline">
+                <span class="enrollment-learner-name">${escapeHtmlText(learner.name)}${learner.admissionNo ? ` • ${escapeHtmlText(learner.admissionNo)}` : ''}</span>
+                <div class="enrollment-learner-topmeta">
+                  <span class="enrollment-class-empty">${escapeHtmlText(topGenderLabel)}</span>
+                  <button
+                    type="button"
+                    class="enrollment-learner-sport-chip"
+                    data-enrollment-open-learner-sports-index="${index}"
+                    title="Assigned: ${escapeHtmlAttribute(assignedSportsLabel)}"
+                  >${escapeHtmlText(defaultSportCode)}</button>
+                </div>
+              </div>
+              <div class="enrollment-house-row">
+                ${houseOptionsMarkup}
+                ${clearChoice}
+              </div>
             </div>
             <div class="enrollment-learner-actions">
               <button type="button" class="btn btn-secondary" data-enrollment-open-learner-profile-index="${index}">${canEditAssignments ? 'Edit profile' : 'View profile'}</button>
@@ -4411,6 +4549,14 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
+    const sportsButton = target.closest('[data-enrollment-open-learner-sports-index]');
+    if (sportsButton instanceof HTMLButtonElement) {
+      const index = Number.parseInt(String(sportsButton.dataset.enrollmentOpenLearnerSportsIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      openLearnerSportsModal(index);
+      return;
+    }
+
     if (!isAdminMode) return;
     const removeLearnerButton = target.closest('[data-enrollment-remove-learner-index]');
     if (!(removeLearnerButton instanceof HTMLButtonElement)) return;
@@ -4418,6 +4564,28 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
     manageLearners.splice(index, 1);
     syncCapacityWithLearners();
+    renderManageLearners();
+  });
+
+  learnerListNode.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
+    if (target.dataset.enrollmentLearnerHouseIndex === undefined) return;
+    if (!canCurrentUserEditLearnerAssignments()) return;
+
+    const index = Number.parseInt(String(target.dataset.enrollmentLearnerHouseIndex || ''), 10);
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const current = manageLearners[index];
+    const nextHouseId = schoolHouseOptions.some((house) => house.id === target.value) ? target.value : '';
+    const normalizedLearner = normalizeLearner({
+      ...current,
+      houseId: nextHouseId
+    });
+    if (!normalizedLearner) return;
+
+    manageLearners[index] = normalizedLearner;
+    persistLiveLearnerAssignments();
     renderManageLearners();
   });
 
