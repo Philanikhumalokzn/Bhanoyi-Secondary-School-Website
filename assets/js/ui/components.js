@@ -7808,6 +7808,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
     modalNode.style.pointerEvents = 'auto';
   };
 
+  fairnessOpenButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openFairnessModal();
+  });
+
   fixtureNode.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
