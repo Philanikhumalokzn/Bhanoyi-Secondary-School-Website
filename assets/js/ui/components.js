@@ -2834,8 +2834,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     const normalizeGender = (value) => {
       const raw = normalizeText(value, 20).toLowerCase();
       if (!raw) return '';
-      if (raw === 'm' || raw === 'male' || raw === 'boy') return 'Male';
-      if (raw === 'f' || raw === 'female' || raw === 'girl') return 'Female';
+      if (raw === 'm' || raw === 'male' || raw === 'boy' || raw === 'boys') return 'Male';
+      if (raw === 'f' || raw === 'female' || raw === 'girl' || raw === 'girls') return 'Female';
       if (raw === 'o' || raw === 'other') return 'Other';
       return '';
     };
