@@ -2276,6 +2276,7 @@ body.news-read-open {
 .inline-house-members-list {
   display: grid;
   gap: 8px;
+  min-height: 120px;
   max-height: 250px;
   overflow: auto;
 }

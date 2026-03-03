@@ -3790,7 +3790,17 @@ const wireSportsHouseManagerInline = () => {
     entry.sectionNode.classList.toggle('is-expanded', expanded);
     entry.sectionNode.classList.toggle('is-collapsed', !expanded);
     entry.toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    entry.body.style.maxHeight = expanded ? getExpandedHouseSectionMaxHeight(entry.body) : '0px';
+    if (expanded) {
+      entry.body.style.maxHeight = getExpandedHouseSectionMaxHeight(entry.body);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!entry.sectionNode.classList.contains('is-expanded')) return;
+          entry.body.style.maxHeight = 'none';
+        });
+      });
+      return;
+    }
+    entry.body.style.maxHeight = '0px';
   };
 
   const collapseAllHouseSections = () => {
@@ -3802,6 +3812,7 @@ const wireSportsHouseManagerInline = () => {
   const refreshExpandedHouseSectionHeights = () => {
     houseSections.forEach((entry) => {
       if (!entry.sectionNode.classList.contains('is-expanded')) return;
+      if (entry.body.style.maxHeight === 'none') return;
       entry.body.style.maxHeight = getExpandedHouseSectionMaxHeight(entry.body);
     });
   };
@@ -4331,6 +4342,13 @@ const wireSportsHouseManagerInline = () => {
           item.appendChild(actionsWrap);
           houseModalList.appendChild(item);
       });
+
+      if (!houseModalList.childElementCount) {
+        const empty = document.createElement('p');
+        empty.className = 'inline-house-members-empty';
+        empty.textContent = 'Members are available but could not be rendered in this view. Try clearing filters.';
+        houseModalList.appendChild(empty);
+      }
     }
 
     houseModalPullSelect.innerHTML = '';
