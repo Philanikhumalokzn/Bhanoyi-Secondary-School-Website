@@ -3856,21 +3856,6 @@ const hydrateEnrollmentManager = (managerNode) => {
           )
           .join('');
 
-        const clearChoice = canEditAssignments
-          ? `
-              <label class="enrollment-house-choice enrollment-house-choice-clear">
-                <input
-                  type="radio"
-                  name="enrollment_learner_house_${index}"
-                  value=""
-                  data-enrollment-learner-house-index="${index}"
-                  ${learner.houseId ? '' : 'checked'}
-                />
-                <span>Unassigned</span>
-              </label>
-            `
-          : '';
-
         return `
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
@@ -3888,7 +3873,6 @@ const hydrateEnrollmentManager = (managerNode) => {
               </div>
               <div class="enrollment-house-row">
                 ${houseOptionsMarkup}
-                ${clearChoice}
               </div>
             </div>
             ${isAdminMode ? `<div class="enrollment-learner-actions"><button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button></div>` : ''}

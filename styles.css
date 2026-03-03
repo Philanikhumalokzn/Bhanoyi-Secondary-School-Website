@@ -2978,6 +2978,7 @@ body.match-log-workspace-open {
   min-width: 0;
   display: grid;
   gap: 6px;
+  flex: 1;
 }
 
 .enrollment-learner-topline {
@@ -3003,6 +3004,7 @@ body.match-log-workspace-open {
   gap: 6px;
   flex-shrink: 0;
   margin-left: auto;
+  margin-right: 0;
   text-align: right;
 }
 
