@@ -3461,6 +3461,7 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const closeManageModal = () => {
     manageModal.classList.add('is-hidden');
+    closeLearnerProfileModal();
     selectedManageGrade = '';
     selectedManageLetter = '';
     manageLearners = [];
@@ -3534,6 +3535,191 @@ const hydrateEnrollmentManager = (managerNode) => {
     return canCurrentUserManageClass(grade, letter);
   };
 
+  let activeLearnerProfileIndex = -1;
+  const learnerProfileModal = document.createElement('div');
+  learnerProfileModal.className = 'enrollment-class-modal is-hidden';
+  learnerProfileModal.setAttribute('data-enrollment-learner-profile-modal', 'true');
+  learnerProfileModal.innerHTML = `
+    <div class="enrollment-class-modal-backdrop" data-enrollment-close-learner-profile></div>
+    <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Learner profile">
+      <h3>Learner Profile</h3>
+      <p class="enrollment-class-modal-subtitle" data-enrollment-learner-profile-title></p>
+      <div class="enrollment-class-manage-grid">
+        <label class="enrollment-class-modal-field">
+          Full name
+          <input type="text" maxlength="120" data-enrollment-learner-profile-name />
+        </label>
+        <label class="enrollment-class-modal-field">
+          Admission no.
+          <input type="text" maxlength="40" data-enrollment-learner-profile-admission />
+        </label>
+        <label class="enrollment-class-modal-field">
+          Gender
+          <select data-enrollment-learner-profile-gender>
+            <option value="">Unspecified</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Other">Other</option>
+          </select>
+        </label>
+        <label class="enrollment-class-modal-field">
+          RCL role
+          <select data-enrollment-learner-profile-rcl></select>
+        </label>
+        <label class="enrollment-class-modal-field">
+          House
+          <select data-enrollment-learner-profile-house></select>
+        </label>
+      </div>
+      <label class="enrollment-class-modal-field">
+        Sporting codes
+        <select multiple size="6" data-enrollment-learner-profile-sporting></select>
+      </label>
+      <div class="enrollment-class-modal-actions">
+        <button type="button" class="btn btn-secondary" data-enrollment-close-learner-profile>Close</button>
+        <button type="button" class="btn btn-primary" data-enrollment-save-learner-profile>Save profile</button>
+      </div>
+    </article>
+  `;
+  document.body.appendChild(learnerProfileModal);
+
+  const learnerProfileTitleNode = learnerProfileModal.querySelector('[data-enrollment-learner-profile-title]');
+  const learnerProfileNameInput = learnerProfileModal.querySelector('[data-enrollment-learner-profile-name]');
+  const learnerProfileAdmissionInput = learnerProfileModal.querySelector('[data-enrollment-learner-profile-admission]');
+  const learnerProfileGenderSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-gender]');
+  const learnerProfileRclSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-rcl]');
+  const learnerProfileHouseSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-house]');
+  const learnerProfileSportingSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-sporting]');
+  const learnerProfileSaveButton = learnerProfileModal.querySelector('[data-enrollment-save-learner-profile]');
+  const learnerProfileCloseButtons = Array.from(
+    learnerProfileModal.querySelectorAll('[data-enrollment-close-learner-profile]')
+  );
+
+  const closeLearnerProfileModal = () => {
+    learnerProfileModal.classList.add('is-hidden');
+    activeLearnerProfileIndex = -1;
+  };
+
+  const renderLearnerProfileModal = (index) => {
+    if (
+      !(learnerProfileTitleNode instanceof HTMLElement) ||
+      !(learnerProfileNameInput instanceof HTMLInputElement) ||
+      !(learnerProfileAdmissionInput instanceof HTMLInputElement) ||
+      !(learnerProfileGenderSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileRclSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileHouseSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileSportingSelect instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const learner = manageLearners[index];
+    const canEditAssignments = canCurrentUserEditLearnerAssignments();
+    const sportingCodeDefinitions = getSportingCodeDefinitions();
+    const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
+
+    learnerProfileTitleNode.textContent = `Grade ${selectedManageGrade}${selectedManageLetter} • ${learner.name}`;
+    learnerProfileNameInput.value = String(learner.name || '');
+    learnerProfileAdmissionInput.value = String(learner.admissionNo || '');
+    learnerProfileGenderSelect.value = String(learner.gender || '');
+    learnerProfileRclSelect.innerHTML = rclRoleOptions
+      .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
+      .join('');
+
+    learnerProfileHouseSelect.innerHTML = [
+      '<option value="">Unassigned</option>',
+      ...schoolHouseOptions.map(
+        (house) =>
+          `<option value="${escapeHtmlAttribute(house.id)}" ${learner.houseId === house.id ? 'selected' : ''}>${escapeHtmlText(house.name)}</option>`
+      )
+    ].join('');
+
+    const learnerSportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
+    learnerProfileSportingSelect.innerHTML = sportingCodeDefinitions
+      .map((entry) => {
+        const selected = learnerSportingCodes.some(
+          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+        )
+          ? 'selected'
+          : '';
+        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
+      })
+      .join('');
+
+    learnerProfileNameInput.disabled = !canEditAssignments;
+    learnerProfileAdmissionInput.disabled = !canEditAssignments;
+    learnerProfileGenderSelect.disabled = !canEditAssignments;
+    learnerProfileRclSelect.disabled = !canEditAssignments;
+    learnerProfileHouseSelect.disabled = !canEditAssignments;
+    learnerProfileSportingSelect.disabled = !canEditAssignments;
+    if (learnerProfileSaveButton instanceof HTMLButtonElement) {
+      learnerProfileSaveButton.disabled = !canEditAssignments;
+    }
+  };
+
+  const openLearnerProfileModal = (index) => {
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+    activeLearnerProfileIndex = index;
+    renderLearnerProfileModal(index);
+    learnerProfileModal.classList.remove('is-hidden');
+  };
+
+  learnerProfileCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', closeLearnerProfileModal);
+  });
+
+  learnerProfileModal.addEventListener('click', (event) => {
+    if (event.target === learnerProfileModal) {
+      closeLearnerProfileModal();
+    }
+  });
+
+  learnerProfileSaveButton?.addEventListener('click', () => {
+    if (!canCurrentUserEditLearnerAssignments()) return;
+    if (
+      !(learnerProfileNameInput instanceof HTMLInputElement) ||
+      !(learnerProfileAdmissionInput instanceof HTMLInputElement) ||
+      !(learnerProfileGenderSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileRclSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileHouseSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileSportingSelect instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    const index = activeLearnerProfileIndex;
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const sportingCodes = Array.from(learnerProfileSportingSelect.selectedOptions)
+      .map((entry) => normalizeText(entry.value, 80))
+      .filter(Boolean);
+
+    const normalizedLearner = normalizeLearner({
+      ...manageLearners[index],
+      name: learnerProfileNameInput.value,
+      admissionNo: learnerProfileAdmissionInput.value,
+      gender: learnerProfileGenderSelect.value,
+      rclRole: learnerProfileRclSelect.value,
+      houseId: learnerProfileHouseSelect.value,
+      sportingCodes
+    });
+
+    if (!normalizedLearner) {
+      if (statusNode) {
+        statusNode.textContent = 'Learner name is required.';
+      }
+      return;
+    }
+
+    manageLearners[index] = normalizedLearner;
+    persistLiveLearnerAssignments();
+    renderManageLearners();
+    closeLearnerProfileModal();
+  });
+
   const renderManageLearners = () => {
     if (!manageLearners.length) {
       learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
@@ -3544,92 +3730,31 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const canEditAssignments = canCurrentUserEditLearnerAssignments();
-    const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
-    const sportingCodeDefinitions = getSportingCodeDefinitions();
+    const houseNameById = new Map(schoolHouseOptions.map((house) => [house.id, house.name]));
 
     learnerListNode.innerHTML = manageLearners
       .map((learner, index) => {
         const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
-        const detail = details ? ` • ${details}` : '';
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
         const sportingCodesSummary = formatSportingCodesSummary(sportingCodes);
-        const sportingCodesTitle = sportingCodes.join(', ');
-        const houseOptionsMarkup = schoolHouseOptions
-          .map(
-            (house) => `
-              <label class="enrollment-house-choice">
-                <input
-                  type="radio"
-                  name="enrollment_learner_house_${index}"
-                  value="${escapeHtmlAttribute(house.id)}"
-                  data-enrollment-learner-house-index="${index}"
-                  ${learner.houseId === house.id ? 'checked' : ''}
-                  ${canEditAssignments ? '' : 'disabled'}
-                />
-                <span class="enrollment-house-avatar" style="--house-color:${escapeHtmlAttribute(house.color || '#64748b')};"></span>
-                <span>${escapeHtmlText(house.name)}</span>
-              </label>
-            `
-          )
-          .join('');
-
-        const clearChoice = canEditAssignments
-          ? `
-              <label class="enrollment-house-choice enrollment-house-choice-clear">
-                <input
-                  type="radio"
-                  name="enrollment_learner_house_${index}"
-                  value=""
-                  data-enrollment-learner-house-index="${index}"
-                  ${learner.houseId ? '' : 'checked'}
-                />
-                <span>Unassigned</span>
-              </label>
-            `
-          : '';
+        const houseName = learner.houseId ? houseNameById.get(learner.houseId) || 'Unassigned' : 'Unassigned';
+        const summaryParts = [
+          details,
+          learner.rclRole ? `RCL: ${learner.rclRole}` : '',
+          `House: ${houseName}`,
+          `Sports: ${sportingCodesSummary}`
+        ]
+          .filter(Boolean)
+          .join(' • ');
 
         return `
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
-              <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
-              <div class="enrollment-learner-form enrollment-learner-inline-fields">
-                <label class="enrollment-class-modal-field">
-                  RCL role
-                  <select data-enrollment-learner-rcl-index="${index}" ${canEditAssignments ? '' : 'disabled'}>
-                    ${rclRoleOptions
-                      .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
-                      .join('')}
-                  </select>
-                </label>
-                <label class="enrollment-class-modal-field">
-                  Sporting codes
-                  <select
-                    multiple
-                    size="3"
-                    class="enrollment-learner-sporting-select"
-                    data-enrollment-learner-sporting-index="${index}"
-                    ${canEditAssignments ? '' : 'disabled'}
-                  >
-                    ${sportingCodeDefinitions
-                      .map((entry) => {
-                        const selected = sportingCodes.some(
-                          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
-                        )
-                          ? 'selected'
-                          : '';
-                        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
-                      })
-                      .join('')}
-                  </select>
-                  <span class="enrollment-class-empty enrollment-learner-sporting-summary" title="${escapeHtmlAttribute(sportingCodesTitle || 'No sporting code selected')}">${escapeHtmlText(sportingCodesSummary)}</span>
-                </label>
-              </div>
-              <div class="enrollment-house-row">
-                ${houseOptionsMarkup}
-                ${clearChoice}
-              </div>
+              <span>${escapeHtmlText(learner.name)}</span>
+              ${summaryParts ? `<span class="enrollment-class-empty">${escapeHtmlText(summaryParts)}</span>` : ''}
             </div>
             <div class="enrollment-learner-actions">
+              <button type="button" class="btn btn-secondary" data-enrollment-open-learner-profile-index="${index}">${canEditAssignments ? 'Edit profile' : 'View profile'}</button>
               ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
             </div>
           </div>
@@ -4275,9 +4400,18 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 
   learnerListNode.addEventListener('click', (event) => {
-    if (!isAdminMode) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const profileButton = target.closest('[data-enrollment-open-learner-profile-index]');
+    if (profileButton instanceof HTMLButtonElement) {
+      const index = Number.parseInt(String(profileButton.dataset.enrollmentOpenLearnerProfileIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      openLearnerProfileModal(index);
+      return;
+    }
+
+    if (!isAdminMode) return;
     const removeLearnerButton = target.closest('[data-enrollment-remove-learner-index]');
     if (!(removeLearnerButton instanceof HTMLButtonElement)) return;
     const index = Number.parseInt(String(removeLearnerButton.dataset.enrollmentRemoveLearnerIndex || ''), 10);
@@ -4285,58 +4419,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     manageLearners.splice(index, 1);
     syncCapacityWithLearners();
     renderManageLearners();
-  });
-
-  learnerListNode.addEventListener('change', (event) => {
-    if (!canCurrentUserEditLearnerAssignments()) return;
-    const target = event.target;
-
-    if (target instanceof HTMLInputElement && target.type === 'radio') {
-      const rawIndex = target.dataset.enrollmentLearnerHouseIndex;
-      if (rawIndex === undefined) return;
-      const index = Number.parseInt(String(rawIndex), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
-
-      const houseId = String(target.value || '').trim();
-      const normalizedHouseId = schoolHouseOptions.some((house) => house.id === houseId) ? houseId : '';
-      manageLearners[index] = {
-        ...manageLearners[index],
-        houseId: normalizedHouseId
-      };
-      persistLiveLearnerAssignments();
-      return;
-    }
-
-    if (target instanceof HTMLSelectElement && target.dataset.enrollmentLearnerRclIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentLearnerRclIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
-      const normalizedLearner = normalizeLearner({
-        ...manageLearners[index],
-        rclRole: target.value
-      });
-      if (!normalizedLearner) return;
-      manageLearners[index] = normalizedLearner;
-      persistLiveLearnerAssignments();
-      renderManageLearners();
-      return;
-    }
-
-    if (target instanceof HTMLSelectElement && target.dataset.enrollmentLearnerSportingIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentLearnerSportingIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
-      const selectedCodes = Array.from(target.selectedOptions)
-        .map((entry) => normalizeText(entry.value, 80))
-        .filter(Boolean);
-      const normalizedLearner = normalizeLearner({
-        ...manageLearners[index],
-        sportingCodes: selectedCodes
-      });
-      if (!normalizedLearner) return;
-      manageLearners[index] = normalizedLearner;
-      persistLiveLearnerAssignments();
-      renderManageLearners();
-      return;
-    }
   });
 
   staffHouseRowNode.addEventListener('change', (event) => {
