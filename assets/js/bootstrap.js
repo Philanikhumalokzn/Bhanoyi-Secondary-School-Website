@@ -7,6 +7,9 @@ import { renderSite } from './ui/layout.js';
 const bootstrap = async () => {
 	const pageKey = document.body.dataset.page || 'home';
 	const siteContent = await loadSiteContent();
+	if (typeof window !== 'undefined') {
+		window.__BHANOYI_SITE_CONTENT__ = siteContent;
+	}
 	const pageConfig = getPageConfig(siteContent, pageKey);
 
 	renderSite(siteContent, pageConfig);

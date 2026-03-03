@@ -2637,6 +2637,108 @@ const hydrateEnrollmentManager = (managerNode) => {
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '');
 
+  const toSportCodeId = (value, index) => {
+    const normalized = normalizeText(value, 80)
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return normalized || `sport_code_${index + 1}`;
+  };
+
+  const getSportingCodeDefinitions = () => {
+    const fallbackTitles = ['Football', 'Netball', 'Athletics'];
+    const content = typeof window !== 'undefined' ? window.__BHANOYI_SITE_CONTENT__ : null;
+    const sportsSections = Array.isArray(content?.pages?.sports?.sections) ? content.pages.sports.sections : [];
+    const sportingSection = sportsSections.find((entry) => String(entry?.sectionKey || '') === 'sporting_codes');
+    const titles = Array.from(
+      new Set(
+        Array.isArray(sportingSection?.items)
+          ? sportingSection.items
+              .map((item) => normalizeText(item?.title || '', 80))
+              .filter(Boolean)
+          : []
+      )
+    );
+    const effectiveTitles = titles.length ? titles : fallbackTitles;
+    return effectiveTitles.map((title, index) => ({
+      id: toSportCodeId(title, index),
+      title
+    }));
+  };
+
+  const houseSportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
+
+  const loadHouseSportsAssignments = () => {
+    try {
+      const raw = localStorage.getItem(houseSportsAssignmentStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const persistHouseSportsAssignments = (store) => {
+    localStorage.setItem(houseSportsAssignmentStorageKey, JSON.stringify(store));
+  };
+
+  const syncHouseAssignmentsForClass = (grade, letter, learners) => {
+    const normalizedGrade = String(grade || '').trim();
+    const normalizedLetter = normalizeLetter(letter);
+    if (!normalizedGrade || !normalizedLetter) return;
+
+    const normalizedLearners = normalizeLearners(learners);
+    const classKeyPrefix = `${storageKey}|${normalizedGrade}|${normalizedLetter}|`;
+    const codeDefinitions = getSportingCodeDefinitions();
+    const codeIdByTitle = new Map(
+      codeDefinitions.map((entry) => [normalizeText(entry.title, 80).toLowerCase(), entry.id])
+    );
+    const assignmentStore = loadHouseSportsAssignments();
+
+    Object.values(assignmentStore).forEach((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      Object.keys(value).forEach((learnerKey) => {
+        if (learnerKey.startsWith(classKeyPrefix)) {
+          delete value[learnerKey];
+        }
+      });
+    });
+
+    normalizedLearners.forEach((learner, index) => {
+      const houseId = normalizeText(learner.houseId || '', 40).toLowerCase();
+      if (!houseId) return;
+      const learnerKey = `${classKeyPrefix}${index}`;
+      const codeIds = Array.from(
+        new Set(
+          (Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [])
+            .map((entry) => normalizeText(entry, 80).toLowerCase())
+            .map((entry) => codeIdByTitle.get(entry) || '')
+            .filter(Boolean)
+        )
+      );
+      if (!codeIds.length) return;
+      if (!assignmentStore[houseId] || typeof assignmentStore[houseId] !== 'object' || Array.isArray(assignmentStore[houseId])) {
+        assignmentStore[houseId] = {};
+      }
+      assignmentStore[houseId][learnerKey] = codeIds;
+    });
+
+    Object.keys(assignmentStore).forEach((houseId) => {
+      const byLearner = assignmentStore[houseId];
+      if (!byLearner || typeof byLearner !== 'object' || Array.isArray(byLearner)) {
+        delete assignmentStore[houseId];
+        return;
+      }
+      if (Object.keys(byLearner).length === 0) {
+        delete assignmentStore[houseId];
+      }
+    });
+
+    persistHouseSportsAssignments(assignmentStore);
+  };
+
   const buildDefaultStaffCredentials = (staffLike) => {
     const surnameToken = normalizeLoginToken(staffLike?.surname || '').slice(0, 16) || 'staff';
     const firstToken = normalizeLoginToken(staffLike?.firstName || '');
@@ -3353,12 +3455,14 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     const canEditAssignments = canCurrentUserEditLearnerAssignments();
     const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
+    const sportingCodeDefinitions = getSportingCodeDefinitions();
 
     learnerListNode.innerHTML = manageLearners
       .map((learner, index) => {
         const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
         const detail = details ? ` • ${details}` : '';
-        const sportingCodesValue = Array.isArray(learner.sportingCodes) ? learner.sportingCodes.join(', ') : '';
+        const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
+        const sportingCodesValue = sportingCodes.join(', ');
         const houseOptionsMarkup = schoolHouseOptions
           .map(
             (house) => `
@@ -3407,15 +3511,25 @@ const hydrateEnrollmentManager = (managerNode) => {
                   </select>
                 </label>
                 <label class="enrollment-class-modal-field">
-                  Sporting codes (comma separated)
-                  <input
-                    type="text"
-                    maxlength="240"
+                  Sporting codes (auto comma-separated)
+                  <select
+                    multiple
+                    size="5"
                     data-enrollment-learner-sporting-index="${index}"
-                    value="${escapeHtmlAttribute(sportingCodesValue)}"
-                    placeholder="e.g. Football, Netball"
                     ${canEditAssignments ? '' : 'disabled'}
-                  />
+                  >
+                    ${sportingCodeDefinitions
+                      .map((entry) => {
+                        const selected = sportingCodes.some(
+                          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+                        )
+                          ? 'selected'
+                          : '';
+                        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
+                      })
+                      .join('')}
+                  </select>
+                  <span class="enrollment-class-empty">${escapeHtmlText(sportingCodesValue || 'No sporting code selected')}</span>
                 </label>
               </div>
               <div class="enrollment-house-row">
@@ -4083,15 +4197,19 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
-    if (target instanceof HTMLInputElement && target.dataset.enrollmentLearnerSportingIndex !== undefined) {
+    if (target instanceof HTMLSelectElement && target.dataset.enrollmentLearnerSportingIndex !== undefined) {
       const index = Number.parseInt(String(target.dataset.enrollmentLearnerSportingIndex || ''), 10);
       if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      const selectedCodes = Array.from(target.selectedOptions)
+        .map((entry) => normalizeText(entry.value, 80))
+        .filter(Boolean);
       const normalizedLearner = normalizeLearner({
         ...manageLearners[index],
-        sportingCodes: target.value
+        sportingCodes: selectedCodes
       });
       if (!normalizedLearner) return;
       manageLearners[index] = normalizedLearner;
+      renderManageLearners();
       return;
     }
   });
@@ -4366,14 +4484,17 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!canCurrentUserEditLearnerAssignments(selectedManageGrade, selectedManageLetter)) return;
     const normalizedCapacity = String(manageLearners.length);
     const existingProfile = getClassProfile(selectedManageGrade, selectedManageLetter);
+    const normalizedLearners = normalizeLearners(manageLearners);
 
     setClassProfile(selectedManageGrade, selectedManageLetter, {
       teacher: isAdminMode ? normalizeText(manageTeacherSelect.value, 120) : existingProfile.teacher,
       room: isAdminMode ? normalizeText(manageRoomInput.value, 40) : existingProfile.room,
       capacity: normalizedCapacity,
       notes: isAdminMode ? normalizeText(manageNotesInput.value, 600) : existingProfile.notes,
-      learners: normalizeLearners(manageLearners)
+      learners: normalizedLearners
     });
+
+    syncHouseAssignmentsForClass(selectedManageGrade, selectedManageLetter, normalizedLearners);
 
     saveStore();
     if (statusNode) {
