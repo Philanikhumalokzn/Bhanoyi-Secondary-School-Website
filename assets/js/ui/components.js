@@ -3282,19 +3282,48 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const parseLearnersFromExcelFile = async (file) => {
-    const { default: ExcelJS } = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
     const buffer = await file.arrayBuffer();
-    await workbook.xlsx.load(buffer);
-
-    const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
-    if (!worksheet) return [];
-
     const rows = [];
-    worksheet.eachRow({ includeEmpty: false }, (row) => {
-      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
-      rows.push(values.map((entry) => normalizeTabularCell(entry)));
-    });
+
+    try {
+      const { default: ExcelJS } = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer);
+
+      const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
+      if (worksheet) {
+        worksheet.eachRow({ includeEmpty: false }, (row) => {
+          const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+          rows.push(values.map((entry) => normalizeTabularCell(entry)));
+        });
+      }
+    } catch {
+      // Continue to SheetJS fallback for .xls and other workbook variants.
+    }
+
+    if (!rows.length) {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.read(buffer, {
+        type: 'array',
+        cellDates: false,
+        cellText: true
+      });
+      const firstSheetName = Array.isArray(workbook.SheetNames) && workbook.SheetNames.length ? workbook.SheetNames[0] : '';
+      const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+      if (!worksheet) return [];
+
+      const parsedRows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        raw: false,
+        defval: ''
+      });
+
+      (Array.isArray(parsedRows) ? parsedRows : []).forEach((row) => {
+        rows.push(Array.isArray(row) ? row.map((entry) => normalizeTabularCell(entry)) : []);
+      });
+    }
+
+    if (!rows.length) return [];
 
     const firstRow = Array.isArray(rows[0]) ? rows[0] : [];
     const firstRowLower = firstRow.map((entry) => normalizeText(entry, 120).toLowerCase());
@@ -4803,6 +4832,9 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const format = getImportFormat();
+    const originalLabel = importLearnersButton.textContent;
+    importLearnersButton.disabled = true;
+    importLearnersButton.textContent = 'Importing...';
     try {
       const importedLearners =
         format === 'csv' ? await parseLearnersFromCsvFile(file) : await parseLearnersFromExcelFile(file);
@@ -4832,6 +4864,9 @@ const hydrateEnrollmentManager = (managerNode) => {
       if (statusNode) {
         statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
       }
+    } finally {
+      importLearnersButton.disabled = !isAdminMode;
+      importLearnersButton.textContent = originalLabel;
     }
   });
 
