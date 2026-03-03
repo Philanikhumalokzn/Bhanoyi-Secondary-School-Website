@@ -3248,6 +3248,34 @@ const hydrateEnrollmentManager = (managerNode) => {
     classProfilesByGrade[normalizedGrade][normalizedLetter] = normalizeProfile(profile);
   };
 
+  const syncClassTeachersFromStaffAssignments = () => {
+    const assignedByClass = new Map();
+
+    staffMembers.forEach((staff) => {
+      const grade = String(staff?.assignedGrade || '').trim();
+      const letter = normalizeLetter(staff?.assignedClassLetter || '');
+      if (!grade || !letter) return;
+
+      const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+      if (!classes.includes(letter)) return;
+
+      const key = `${grade}|${letter}`;
+      if (assignedByClass.has(key)) return;
+      assignedByClass.set(key, normalizeText(resolveStaffDisplayName(staff), 120));
+    });
+
+    assignedByClass.forEach((teacherName, key) => {
+      const [grade, letter] = key.split('|');
+      if (!grade || !letter) return;
+      const profile = getClassProfile(grade, letter);
+      if (normalizeText(profile.teacher || '', 120) === teacherName) return;
+      setClassProfile(grade, letter, {
+        ...profile,
+        teacher: teacherName
+      });
+    });
+  };
+
   const canCurrentUserManageClass = (grade, letter) => {
     if (isAdminMode) return true;
     if (!isStaffMode) return false;
@@ -3723,6 +3751,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   classesByGrade = loaded.classesByGrade;
   classProfilesByGrade = loaded.classProfilesByGrade;
   staffMembers = normalizeStaffMembers(loaded.staffMembers);
+  syncClassTeachersFromStaffAssignments();
+  saveStore();
   staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
   syncStaffSession();
 
@@ -3948,6 +3978,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const confirmed = window.confirm(`Remove ${staffName} from staff list?`);
     if (!confirmed) return;
     staffMembers.splice(index, 1);
+    syncClassTeachersFromStaffAssignments();
     saveStore();
     renderStaffMembers();
     if (statusNode) {
@@ -3969,6 +4000,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       });
       if (!updated) return;
       staffMembers[index] = updated;
+      syncClassTeachersFromStaffAssignments();
       saveStore();
       renderStaffMembers();
       if (statusNode) {
@@ -3989,6 +4021,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       });
       if (!updated) return;
       staffMembers[index] = updated;
+      syncClassTeachersFromStaffAssignments();
       saveStore();
       syncStaffSession();
       renderStaffMembers();
@@ -4060,6 +4093,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     staffMembers = normalizeStaffMembers([...staffMembers, normalized]);
+    syncClassTeachersFromStaffAssignments();
     saveStore();
     syncStaffSession();
     renderStaffMembers();
@@ -4076,6 +4110,7 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     classesByGrade[selectedGrade] = dedupeLetters([...(classesByGrade[selectedGrade] || []), letter]);
     setClassProfile(selectedGrade, letter, getClassProfile(selectedGrade, letter));
+    syncClassTeachersFromStaffAssignments();
     saveStore();
     render();
     if (statusNode) {
