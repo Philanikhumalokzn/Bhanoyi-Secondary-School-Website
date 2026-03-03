@@ -2344,6 +2344,13 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       </label>
                       <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
                     </div>
+                    <div class="enrollment-import-row" data-enrollment-admin-only>
+                      <label class="enrollment-class-modal-field enrollment-import-file-field">
+                        Bulk Class Files
+                        <input type="file" data-enrollment-import-multi-file accept=".xlsx,.xls,.csv" multiple />
+                      </label>
+                      <button type="button" class="btn btn-secondary" data-enrollment-import-multi-learners>Import all class files</button>
+                    </div>
                     <div class="enrollment-learner-form" data-enrollment-admin-only>
                       <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                       <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
@@ -2408,6 +2415,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
+  const importMultiFileInput = managerNode.querySelector('[data-enrollment-import-multi-file]');
+  const importMultiLearnersButton = managerNode.querySelector('[data-enrollment-import-multi-learners]');
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
@@ -2453,6 +2462,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
     !(importLearnersButton instanceof HTMLButtonElement) ||
+    !(importMultiFileInput instanceof HTMLInputElement) ||
+    !(importMultiLearnersButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
     !(staffTitleSelect instanceof HTMLSelectElement) ||
@@ -2906,13 +2917,23 @@ const hydrateEnrollmentManager = (managerNode) => {
     return { name, admissionNo, gender, houseId, rclRole, sportingCodes };
   };
 
+  const learnerIdentityKey = (learner) => {
+    if (!learner || typeof learner !== 'object') return '';
+    const admissionKey = normalizeText(learner.admissionNo || '', 40).toLowerCase();
+    if (admissionKey) return `adm::${admissionKey}`;
+    const nameKey = normalizeText(learner.name || '', 120).toLowerCase();
+    if (!nameKey) return '';
+    return `name::${nameKey}`;
+  };
+
   const normalizeLearners = (values) => {
     const seen = new Map();
     const learners = [];
     (Array.isArray(values) ? values : []).forEach((entry) => {
       const learner = normalizeLearner(entry);
       if (!learner) return;
-      const key = `${learner.name.toLowerCase()}::${learner.admissionNo.toLowerCase()}`;
+      const key = learnerIdentityKey(learner);
+      if (!key) return;
       if (seen.has(key)) {
         const existingIndex = seen.get(key);
         const existing = learners[existingIndex];
@@ -3301,6 +3322,38 @@ const hydrateEnrollmentManager = (managerNode) => {
     return extractLearnersFromRows(rows);
   };
 
+  const parseClassFromImportFilename = (fileName) => {
+    const baseName = String(fileName || '')
+      .replace(/\.[^.]+$/, '')
+      .trim();
+    const compactName = baseName.replace(/\s+/g, '');
+    const match = compactName.match(/^([89]|1[0-2])([a-z])$/i);
+    if (!match) return null;
+    const grade = String(match[1] || '').trim();
+    const letter = normalizeLetter(match[2] || '');
+    if (!gradeNumbers.includes(grade) || !letter) return null;
+    return { grade, letter };
+  };
+
+  const parseLearnersFromImportFile = async (file) => {
+    const extension = String(file?.name || '')
+      .trim()
+      .toLowerCase()
+      .split('.')
+      .pop();
+
+    if (extension === 'csv') {
+      return parseLearnersFromCsvFile(file);
+    }
+
+    if (extension === 'xls' || extension === 'xlsx') {
+      return parseLearnersFromExcelFile(file);
+    }
+
+    const fallbackFormat = getImportFormat();
+    return fallbackFormat === 'csv' ? parseLearnersFromCsvFile(file) : parseLearnersFromExcelFile(file);
+  };
+
   const getImportFormat = () => {
     const format = String(importFormatSelect.value || '').trim().toLowerCase();
     return format === 'csv' ? 'csv' : 'excel';
@@ -3481,6 +3534,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerAdmissionInput.value = '';
     learnerGenderSelect.value = '';
     importFileInput.value = '';
+    importMultiFileInput.value = '';
     manageCapacityInput.value = '';
   };
 
@@ -4154,6 +4208,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.disabled = !isAdminMode;
     importFileInput.disabled = !isAdminMode;
     importLearnersButton.disabled = !isAdminMode;
+    importMultiFileInput.disabled = !isAdminMode;
+    importMultiLearnersButton.disabled = !isAdminMode;
     clearLearnersButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       button.disabled = !isAdminMode;
@@ -4167,6 +4223,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.value = 'excel';
     syncImportInputAccept();
     importFileInput.value = '';
+    importMultiFileInput.value = '';
 
     const classDetailsStep = manageModalWorkflowSteps.find(
       (entry) => entry.stepNode.dataset.manageWorkflowId === 'class-details'
@@ -4763,11 +4820,8 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
-    const duplicate = manageLearners.some(
-      (entry) =>
-        entry.name.toLowerCase() === learnerWithDefaults.name.toLowerCase() &&
-        String(entry.admissionNo || '').toLowerCase() === String(learnerWithDefaults.admissionNo || '').toLowerCase()
-    );
+    const learnerKey = learnerIdentityKey(learnerWithDefaults);
+    const duplicate = manageLearners.some((entry) => learnerIdentityKey(entry) === learnerKey);
     if (duplicate) {
       if (statusNode) {
         statusNode.textContent = `${learnerWithDefaults.name} is already in this class.`;
@@ -4823,6 +4877,100 @@ const hydrateEnrollmentManager = (managerNode) => {
       if (statusNode) {
         statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
       }
+    }
+  });
+
+  importMultiLearnersButton.addEventListener('click', async () => {
+    if (!isAdminMode) return;
+    const files = Array.from(importMultiFileInput.files || []);
+    if (!files.length) {
+      if (statusNode) {
+        statusNode.textContent = 'Choose class files first.';
+      }
+      return;
+    }
+
+    let changed = false;
+    let importedClassCount = 0;
+    let importedLearnerCount = 0;
+    const invalidNameFiles = [];
+    const emptyFiles = [];
+
+    for (const file of files) {
+      const classFromFile = parseClassFromImportFilename(file.name);
+      if (!classFromFile) {
+        invalidNameFiles.push(file.name);
+        continue;
+      }
+
+      const { grade, letter } = classFromFile;
+      let importedLearners = [];
+      try {
+        importedLearners = await parseLearnersFromImportFile(file);
+      } catch {
+        invalidNameFiles.push(file.name);
+        continue;
+      }
+
+      if (!importedLearners.length) {
+        emptyFiles.push(file.name);
+        continue;
+      }
+
+      if (!activeGrades.includes(grade)) {
+        activeGrades = [...activeGrades, grade].sort((left, right) => Number(left) - Number(right));
+      }
+      classesByGrade[grade] = dedupeLetters([...(classesByGrade[grade] || []), letter]);
+
+      const profile = getClassProfile(grade, letter);
+      const beforeCount = Array.isArray(profile.learners) ? profile.learners.length : 0;
+      const importedWithDefaults = importedLearners.map((learner) => withLearnerDefaultSportingCodes(learner));
+      const mergedLearners = normalizeLearners([...(profile.learners || []), ...importedWithDefaults]);
+      const added = Math.max(0, mergedLearners.length - beforeCount);
+
+      setClassProfile(grade, letter, {
+        ...profile,
+        capacity: String(mergedLearners.length),
+        learners: mergedLearners
+      });
+      syncHouseAssignmentsForClass(grade, letter, mergedLearners);
+
+      if (added > 0) {
+        changed = true;
+        importedClassCount += 1;
+        importedLearnerCount += added;
+      }
+
+      if (selectedManageGrade === grade && selectedManageLetter === letter) {
+        manageLearners = [...mergedLearners];
+        syncCapacityWithLearners();
+        renderManageLearners();
+      }
+    }
+
+    if (changed) {
+      saveStore();
+      render();
+    }
+
+    importMultiFileInput.value = '';
+
+    if (statusNode) {
+      const statusParts = [];
+      if (importedLearnerCount > 0) {
+        statusParts.push(
+          `${importedLearnerCount} learner${importedLearnerCount === 1 ? '' : 's'} imported across ${importedClassCount} class${importedClassCount === 1 ? '' : 'es'}.`
+        );
+      } else {
+        statusParts.push('No new learners were imported.');
+      }
+      if (emptyFiles.length) {
+        statusParts.push(`${emptyFiles.length} file${emptyFiles.length === 1 ? '' : 's'} had no learner rows.`);
+      }
+      if (invalidNameFiles.length) {
+        statusParts.push(`${invalidNameFiles.length} file${invalidNameFiles.length === 1 ? '' : 's'} skipped (use filenames like 10A.xlsx).`);
+      }
+      statusNode.textContent = statusParts.join(' ');
     }
   });
 
