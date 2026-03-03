@@ -2344,13 +2344,6 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       </label>
                       <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
                     </div>
-                    <div class="enrollment-import-row" data-enrollment-admin-only>
-                      <label class="enrollment-class-modal-field enrollment-import-file-field">
-                        Bulk Class Files
-                        <input type="file" data-enrollment-import-multi-file accept=".xlsx,.xls,.csv" multiple />
-                      </label>
-                      <button type="button" class="btn btn-secondary" data-enrollment-import-multi-learners>Import all class files</button>
-                    </div>
                     <div class="enrollment-learner-form" data-enrollment-admin-only>
                       <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                       <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
@@ -2415,8 +2408,6 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
-  const importMultiFileInput = managerNode.querySelector('[data-enrollment-import-multi-file]');
-  const importMultiLearnersButton = managerNode.querySelector('[data-enrollment-import-multi-learners]');
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
@@ -2462,8 +2453,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
     !(importLearnersButton instanceof HTMLButtonElement) ||
-    !(importMultiFileInput instanceof HTMLInputElement) ||
-    !(importMultiLearnersButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
     !(staffTitleSelect instanceof HTMLSelectElement) ||
@@ -2917,23 +2906,13 @@ const hydrateEnrollmentManager = (managerNode) => {
     return { name, admissionNo, gender, houseId, rclRole, sportingCodes };
   };
 
-  const learnerIdentityKey = (learner) => {
-    if (!learner || typeof learner !== 'object') return '';
-    const admissionKey = normalizeText(learner.admissionNo || '', 40).toLowerCase();
-    if (admissionKey) return `adm::${admissionKey}`;
-    const nameKey = normalizeText(learner.name || '', 120).toLowerCase();
-    if (!nameKey) return '';
-    return `name::${nameKey}`;
-  };
-
   const normalizeLearners = (values) => {
     const seen = new Map();
     const learners = [];
     (Array.isArray(values) ? values : []).forEach((entry) => {
       const learner = normalizeLearner(entry);
       if (!learner) return;
-      const key = learnerIdentityKey(learner);
-      if (!key) return;
+      const key = `${learner.name.toLowerCase()}::${learner.admissionNo.toLowerCase()}`;
       if (seen.has(key)) {
         const existingIndex = seen.get(key);
         const existing = learners[existingIndex];
@@ -3293,61 +3272,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     return normalizeLearners(learners);
   };
 
-  const resolveDeterministicExcelColumnIndexes = (worksheet) => {
-    if (!worksheet) return null;
-    const normalizeHeaderCell = (value) => normalizeText(normalizeTabularCell(value), 120).toLowerCase();
-    const headerRowNumber = 9;
-    const headerValues = Array.isArray(worksheet.getRow(headerRowNumber).values)
-      ? worksheet.getRow(headerRowNumber).values.slice(1)
-      : [];
-    const header = headerValues.map((entry) => normalizeHeaderCell(entry));
-
-    const admissionIndex = header.findIndex((entry) => entry === 'acc no');
-    const learnerIndex = header.findIndex((entry) => entry === 'learner');
-    const genderIndex = header.findIndex((entry) => entry === 'gender');
-
-    if (admissionIndex < 0 || learnerIndex < 0 || genderIndex < 0) {
-      return null;
-    }
-
-    return { admissionIndex, learnerIndex, genderIndex };
-  };
-
-  const extractLearnersFromDeterministicExcelSheet = (worksheet) => {
-    const columnIndexes = resolveDeterministicExcelColumnIndexes(worksheet);
-    if (!columnIndexes) return [];
-    const { admissionIndex, learnerIndex, genderIndex } = columnIndexes;
-    const firstLearnerRowNumber = 10;
-
-    const learners = [];
-    const safeLastRow = Math.max(firstLearnerRowNumber, worksheet.actualRowCount || firstLearnerRowNumber);
-
-    for (let rowNumber = firstLearnerRowNumber; rowNumber <= safeLastRow + 20; rowNumber += 1) {
-      const row = worksheet.getRow(rowNumber);
-      const rowValues = Array.isArray(row.values) ? row.values.slice(1) : [];
-      const normalizedRow = rowValues.map((entry) => normalizeTabularCell(entry));
-      const hasAnyCell = normalizedRow.some((entry) => normalizeText(entry, 120));
-      if (!hasAnyCell && rowNumber > safeLastRow) break;
-
-      const hasAverageMarker = normalizedRow.some((entry) => /^average\s*%?$/i.test(normalizeText(entry, 40)));
-      if (hasAverageMarker) {
-        break;
-      }
-
-      const learner = normalizeLearner({
-        admissionNo: normalizedRow[admissionIndex],
-        name: normalizedRow[learnerIndex],
-        gender: normalizedRow[genderIndex]
-      });
-
-      if (learner) {
-        learners.push(learner);
-      }
-    }
-
-    return normalizeLearners(learners);
-  };
-
   const parseLearnersFromExcelFile = async (file) => {
     const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
@@ -3357,44 +3281,24 @@ const hydrateEnrollmentManager = (managerNode) => {
     const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
     if (!worksheet) return [];
 
-    if (!resolveDeterministicExcelColumnIndexes(worksheet)) {
-      throw new Error('INVALID_DETERMINISTIC_EXCEL_TEMPLATE');
+    const rows = [];
+    worksheet.eachRow({ includeEmpty: false }, (row) => {
+      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+      rows.push(values.map((entry) => normalizeTabularCell(entry)));
+    });
+
+    const firstRow = Array.isArray(rows[0]) ? rows[0] : [];
+    const firstRowLower = firstRow.map((entry) => normalizeText(entry, 120).toLowerCase());
+    const hasHeaderKeywords = firstRowLower.some((entry) => /name|learner|student|admission|gender/.test(entry));
+
+    if (!hasHeaderKeywords) {
+      const simplifiedLearners = extractLearnersFromSimplifiedExcelRows(rows);
+      if (simplifiedLearners.length) {
+        return simplifiedLearners;
+      }
     }
 
-    const deterministicLearners = extractLearnersFromDeterministicExcelSheet(worksheet);
-    return deterministicLearners;
-  };
-
-  const parseClassFromImportFilename = (fileName) => {
-    const baseName = String(fileName || '')
-      .replace(/\.[^.]+$/, '')
-      .trim();
-    const compactName = baseName.replace(/\s+/g, '');
-    const match = compactName.match(/^([89]|1[0-2])([a-z])$/i);
-    if (!match) return null;
-    const grade = String(match[1] || '').trim();
-    const letter = normalizeLetter(match[2] || '');
-    if (!gradeNumbers.includes(grade) || !letter) return null;
-    return { grade, letter };
-  };
-
-  const parseLearnersFromImportFile = async (file) => {
-    const extension = String(file?.name || '')
-      .trim()
-      .toLowerCase()
-      .split('.')
-      .pop();
-
-    if (extension === 'csv') {
-      return parseLearnersFromCsvFile(file);
-    }
-
-    if (extension === 'xls' || extension === 'xlsx') {
-      return parseLearnersFromExcelFile(file);
-    }
-
-    const fallbackFormat = getImportFormat();
-    return fallbackFormat === 'csv' ? parseLearnersFromCsvFile(file) : parseLearnersFromExcelFile(file);
+    return extractLearnersFromRows(rows);
   };
 
   const getImportFormat = () => {
@@ -3577,7 +3481,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerAdmissionInput.value = '';
     learnerGenderSelect.value = '';
     importFileInput.value = '';
-    importMultiFileInput.value = '';
     manageCapacityInput.value = '';
   };
 
@@ -4251,8 +4154,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.disabled = !isAdminMode;
     importFileInput.disabled = !isAdminMode;
     importLearnersButton.disabled = !isAdminMode;
-    importMultiFileInput.disabled = !isAdminMode;
-    importMultiLearnersButton.disabled = !isAdminMode;
     clearLearnersButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       button.disabled = !isAdminMode;
@@ -4266,7 +4167,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.value = 'excel';
     syncImportInputAccept();
     importFileInput.value = '';
-    importMultiFileInput.value = '';
 
     const classDetailsStep = manageModalWorkflowSteps.find(
       (entry) => entry.stepNode.dataset.manageWorkflowId === 'class-details'
@@ -4863,8 +4763,11 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
-    const learnerKey = learnerIdentityKey(learnerWithDefaults);
-    const duplicate = manageLearners.some((entry) => learnerIdentityKey(entry) === learnerKey);
+    const duplicate = manageLearners.some(
+      (entry) =>
+        entry.name.toLowerCase() === learnerWithDefaults.name.toLowerCase() &&
+        String(entry.admissionNo || '').toLowerCase() === String(learnerWithDefaults.admissionNo || '').toLowerCase()
+    );
     if (duplicate) {
       if (statusNode) {
         statusNode.textContent = `${learnerWithDefaults.name} is already in this class.`;
@@ -4897,10 +4800,7 @@ const hydrateEnrollmentManager = (managerNode) => {
 
       if (!importedLearners.length) {
         if (statusNode) {
-          statusNode.textContent =
-            format === 'excel'
-              ? 'No learners found. Expected row 10 onward with Acc No, Learner, Gender and an Average% end row.'
-              : `No learners found in the selected ${format.toUpperCase()} file.`;
+          statusNode.textContent = `No learners found in the selected ${format.toUpperCase()} file.`;
         }
         return;
       }
@@ -4911,135 +4811,18 @@ const hydrateEnrollmentManager = (managerNode) => {
       const addedCount = Math.max(0, manageLearners.length - beforeCount);
       syncCapacityWithLearners();
       renderManageLearners();
-      if (addedCount > 0) {
-        importFileInput.value = '';
-      }
+      importFileInput.value = '';
 
       if (statusNode) {
         statusNode.textContent =
           addedCount > 0
             ? `${addedCount} learner${addedCount === 1 ? '' : 's'} imported to Class ${selectedManageGrade}${selectedManageLetter}.`
-            : 'Imported list matched existing learners (no new records added). File kept selected for review.';
+            : 'Imported list matched existing learners (no new records added).';
       }
-    } catch (error) {
+    } catch {
       if (statusNode) {
-        const isDeterministicTemplateError =
-          error instanceof Error && error.message === 'INVALID_DETERMINISTIC_EXCEL_TEMPLATE';
-        statusNode.textContent = isDeterministicTemplateError
-          ? 'Invalid Excel template. Expected row 9 headers: Acc No, Learner, Gender.'
-          : `Could not import the selected ${format.toUpperCase()} file.`;
+        statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
       }
-    }
-  });
-
-  importMultiLearnersButton.addEventListener('click', async () => {
-    if (!isAdminMode) return;
-    const files = Array.from(importMultiFileInput.files || []);
-    if (!files.length) {
-      if (statusNode) {
-        statusNode.textContent = 'Choose class files first.';
-      }
-      return;
-    }
-
-    let changed = false;
-    let importedClassCount = 0;
-    let importedLearnerCount = 0;
-    const invalidNameFiles = [];
-    const invalidTemplateFiles = [];
-    const emptyFiles = [];
-
-    for (const file of files) {
-      const classFromFile = parseClassFromImportFilename(file.name);
-      if (!classFromFile) {
-        invalidNameFiles.push(file.name);
-        continue;
-      }
-
-      const { grade, letter } = classFromFile;
-      let importedLearners = [];
-      try {
-        importedLearners = await parseLearnersFromImportFile(file);
-      } catch (error) {
-        const isDeterministicTemplateError =
-          error instanceof Error && error.message === 'INVALID_DETERMINISTIC_EXCEL_TEMPLATE';
-        if (isDeterministicTemplateError) {
-          invalidTemplateFiles.push(file.name);
-        } else {
-          invalidNameFiles.push(file.name);
-        }
-        continue;
-      }
-
-      if (!importedLearners.length) {
-        emptyFiles.push(file.name);
-        continue;
-      }
-
-      if (!activeGrades.includes(grade)) {
-        activeGrades = [...activeGrades, grade].sort((left, right) => Number(left) - Number(right));
-      }
-      classesByGrade[grade] = dedupeLetters([...(classesByGrade[grade] || []), letter]);
-
-      const profile = getClassProfile(grade, letter);
-      const beforeCount = Array.isArray(profile.learners) ? profile.learners.length : 0;
-      const importedWithDefaults = importedLearners.map((learner) => withLearnerDefaultSportingCodes(learner));
-      const mergedLearners = normalizeLearners([...(profile.learners || []), ...importedWithDefaults]);
-      const added = Math.max(0, mergedLearners.length - beforeCount);
-
-      setClassProfile(grade, letter, {
-        ...profile,
-        capacity: String(mergedLearners.length),
-        learners: mergedLearners
-      });
-      syncHouseAssignmentsForClass(grade, letter, mergedLearners);
-
-      if (added > 0) {
-        changed = true;
-        importedClassCount += 1;
-        importedLearnerCount += added;
-      }
-
-      if (selectedManageGrade === grade && selectedManageLetter === letter) {
-        manageLearners = [...mergedLearners];
-        syncCapacityWithLearners();
-        renderManageLearners();
-      }
-    }
-
-    if (changed) {
-      saveStore();
-      render();
-    }
-
-    if (importedLearnerCount > 0) {
-      importMultiFileInput.value = '';
-    }
-
-    if (statusNode) {
-      const statusParts = [];
-      if (importedLearnerCount > 0) {
-        statusParts.push(
-          `${importedLearnerCount} learner${importedLearnerCount === 1 ? '' : 's'} imported across ${importedClassCount} class${importedClassCount === 1 ? '' : 'es'}.`
-        );
-      } else {
-        statusParts.push('No new learners were imported.');
-      }
-      if (emptyFiles.length) {
-        statusParts.push(`${emptyFiles.length} file${emptyFiles.length === 1 ? '' : 's'} had no learner rows.`);
-      }
-      if (invalidNameFiles.length) {
-        statusParts.push(`${invalidNameFiles.length} file${invalidNameFiles.length === 1 ? '' : 's'} skipped (use filenames like 10A.xlsx).`);
-      }
-      if (invalidTemplateFiles.length) {
-        statusParts.push(
-          `${invalidTemplateFiles.length} file${invalidTemplateFiles.length === 1 ? '' : 's'} skipped (expected row 9 headers: Acc No, Learner, Gender).`
-        );
-      }
-      if (importedLearnerCount === 0) {
-        statusParts.push('Selected files were kept so you can re-check and retry.');
-      }
-      statusNode.textContent = statusParts.join(' ');
     }
   });
 
