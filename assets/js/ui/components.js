@@ -4897,7 +4897,10 @@ const hydrateEnrollmentManager = (managerNode) => {
 
       if (!importedLearners.length) {
         if (statusNode) {
-          statusNode.textContent = `No learners found in the selected ${format.toUpperCase()} file.`;
+          statusNode.textContent =
+            format === 'excel'
+              ? 'No learners found. Expected row 10 onward with Acc No, Learner, Gender and an Average% end row.'
+              : `No learners found in the selected ${format.toUpperCase()} file.`;
         }
         return;
       }
@@ -4908,13 +4911,15 @@ const hydrateEnrollmentManager = (managerNode) => {
       const addedCount = Math.max(0, manageLearners.length - beforeCount);
       syncCapacityWithLearners();
       renderManageLearners();
-      importFileInput.value = '';
+      if (addedCount > 0) {
+        importFileInput.value = '';
+      }
 
       if (statusNode) {
         statusNode.textContent =
           addedCount > 0
             ? `${addedCount} learner${addedCount === 1 ? '' : 's'} imported to Class ${selectedManageGrade}${selectedManageLetter}.`
-            : 'Imported list matched existing learners (no new records added).';
+            : 'Imported list matched existing learners (no new records added). File kept selected for review.';
       }
     } catch (error) {
       if (statusNode) {
@@ -5007,7 +5012,9 @@ const hydrateEnrollmentManager = (managerNode) => {
       render();
     }
 
-    importMultiFileInput.value = '';
+    if (importedLearnerCount > 0) {
+      importMultiFileInput.value = '';
+    }
 
     if (statusNode) {
       const statusParts = [];
@@ -5028,6 +5035,9 @@ const hydrateEnrollmentManager = (managerNode) => {
         statusParts.push(
           `${invalidTemplateFiles.length} file${invalidTemplateFiles.length === 1 ? '' : 's'} skipped (expected row 9 headers: Acc No, Learner, Gender).`
         );
+      }
+      if (importedLearnerCount === 0) {
+        statusParts.push('Selected files were kept so you can re-check and retry.');
       }
       statusNode.textContent = statusParts.join(' ');
     }
