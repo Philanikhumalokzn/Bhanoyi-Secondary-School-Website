@@ -2014,14 +2014,10 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   <button
                     type="button"
                     class="btn btn-secondary fixture-fairness-toggle"
-                    data-fixture-fairness-toggle
-                    aria-expanded="false"
-                    aria-haspopup="true"
-                  >Select fairness rules</button>
+                    data-fixture-open-fairness-modal
+                    aria-haspopup="dialog"
+                  >Add Fairness Rules</button>
                   <p class="fixture-fairness-summary" data-fixture-fairness-summary></p>
-                  <div class="fixture-fairness-dropdown-menu is-hidden" data-fixture-fairness-menu>
-                    <div class="fixture-fairness-checklist" data-fixture-fairness-options></div>
-                  </div>
                   <select data-fixture-fairness-rules multiple class="is-hidden" aria-hidden="true" tabindex="-1">
                     <option value="equal_matches_season" selected>Every team plays the same number of matches each season</option>
                     <option value="equal_matches_leg" selected>Every team plays the same number of matches in each leg</option>
@@ -2032,6 +2028,18 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="fifa_no_self_match" selected>No self-fixtures (team cannot play itself)</option>
                   </select>
                 </div>
+              </div>
+              <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
+                <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
+                <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
+                  <h3>Fixture Fairness Rules</h3>
+                  <p class="enrollment-class-modal-subtitle">Check the rules to enforce when auto-generating draft fixtures.</p>
+                  <div class="fixture-fairness-checklist" data-fixture-fairness-options></div>
+                  <div class="enrollment-class-modal-actions">
+                    <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
+                    <button type="button" class="btn btn-primary" data-fixture-apply-fairness-rules>Apply rules</button>
+                  </div>
+                </article>
               </div>
               <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
                 <h3>Soccer Format</h3>
@@ -5193,12 +5201,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const rulesSaveButton = fixtureNode.querySelector('[data-fixture-rules-save]');
   const rulesPreviewNode = fixtureNode.querySelector('[data-fixture-rules-preview-output]');
   const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
-  const fairnessDropdownNode = fixtureNode.querySelector('[data-fixture-fairness-dropdown]');
-  const fairnessToggleButton = fixtureNode.querySelector('[data-fixture-fairness-toggle]');
+  const fairnessOpenButton = fixtureNode.querySelector('[data-fixture-open-fairness-modal]');
   const fairnessSummaryNode = fixtureNode.querySelector('[data-fixture-fairness-summary]');
-  const fairnessMenuNode = fixtureNode.querySelector('[data-fixture-fairness-menu]');
   const fairnessRulesSelect = fixtureNode.querySelector('[data-fixture-fairness-rules]');
+  const fairnessModal = fixtureNode.querySelector('[data-fixture-fairness-modal]');
   const fairnessOptionsNode = fixtureNode.querySelector('[data-fixture-fairness-options]');
+  const fairnessCloseButtons = Array.from(fixtureNode.querySelectorAll('[data-fixture-close-fairness-modal]'));
+  const fairnessApplyButton = fixtureNode.querySelector('[data-fixture-apply-fairness-rules]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
   const netballPanel = fixtureNode.querySelector('[data-fixture-sport-panel="netball"]');
@@ -5242,6 +5251,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fairnessModalPortalKey = `fixture-fairness-modal:${fixtureSectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
@@ -5264,14 +5274,19 @@ const hydrateFixtureCreator = (fixtureNode) => {
     sports: {}
   };
 
+  portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
+
   if (rulesPanel instanceof HTMLElement) {
     rulesPanel.classList.toggle('is-hidden', !isAdminMode);
   }
   if (fairnessRulesSelect instanceof HTMLSelectElement) {
     fairnessRulesSelect.disabled = !isAdminMode;
   }
-  if (fairnessToggleButton instanceof HTMLButtonElement) {
-    fairnessToggleButton.disabled = !isAdminMode;
+  if (fairnessOpenButton instanceof HTMLButtonElement) {
+    fairnessOpenButton.disabled = !isAdminMode;
+  }
+  if (fairnessApplyButton instanceof HTMLButtonElement) {
+    fairnessApplyButton.disabled = !isAdminMode;
   }
   if (autoFillToggle instanceof HTMLInputElement) {
     autoFillToggle.disabled = !isAdminMode;
@@ -7757,10 +7772,38 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   };
 
-  const setFairnessDropdownExpanded = (expanded) => {
-    if (!(fairnessMenuNode instanceof HTMLElement) || !(fairnessToggleButton instanceof HTMLButtonElement)) return;
-    fairnessMenuNode.classList.toggle('is-hidden', !expanded);
-    fairnessToggleButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  const resolveFairnessModalNode = () => {
+    if (fairnessModal instanceof HTMLElement) {
+      return portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
+    }
+    const existing = document.querySelector(`[data-overlay-portal-key="${fairnessModalPortalKey}"]`);
+    return existing instanceof HTMLElement ? existing : null;
+  };
+
+  const closeFairnessModal = () => {
+    const modalNode = resolveFairnessModalNode();
+    if (!(modalNode instanceof HTMLElement)) return;
+    modalNode.classList.add('is-hidden');
+  };
+
+  const openFairnessModal = () => {
+    if (!isAdminMode) {
+      if (statusNode) {
+        statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
+      }
+      return;
+    }
+
+    const modalNode = resolveFairnessModalNode();
+    if (!(modalNode instanceof HTMLElement)) {
+      if (statusNode) {
+        statusNode.textContent = 'Could not open fairness rules modal. Please refresh and try again.';
+      }
+      return;
+    }
+
+    renderFairnessDropdownOptions();
+    modalNode.classList.remove('is-hidden');
   };
 
   fairnessRulesSelect?.addEventListener('change', () => {
@@ -7769,24 +7812,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     applyFairnessRulesSelection();
   });
 
-  fairnessToggleButton?.addEventListener('click', (event) => {
+  fairnessOpenButton?.addEventListener('click', (event) => {
     event.stopPropagation();
-    event.preventDefault();
-    if (!isAdminMode) {
-      if (statusNode) {
-        statusNode.textContent = 'Open this page with ?admin=1 to edit fixture fairness rules.';
-      }
-      return;
-    }
-    if (!(fairnessMenuNode instanceof HTMLElement)) {
-      if (statusNode) {
-        statusNode.textContent = 'Fairness dropdown menu is unavailable. Refresh and try again.';
-      }
-      return;
-    }
-    renderFairnessDropdownOptions();
-    const isExpanded = fairnessToggleButton.getAttribute('aria-expanded') === 'true';
-    setFairnessDropdownExpanded(!isExpanded);
+    openFairnessModal();
   });
 
   fairnessOptionsNode?.addEventListener('change', (event) => {
@@ -7800,12 +7828,33 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .filter(Boolean);
 
     setSelectedFairnessRuleIds(selectedRuleIds);
+  });
+
+  fairnessCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', () => {
+      closeFairnessModal();
+    });
+  });
+
+  resolveFairnessModalNode()?.addEventListener('click', (event) => {
+    if (event.target === resolveFairnessModalNode()) {
+      closeFairnessModal();
+    }
+  });
+
+  fairnessApplyButton?.addEventListener('click', () => {
+    if (!isAdminMode) {
+      closeFairnessModal();
+      return;
+    }
     applyFairnessRulesSelection();
+    closeFairnessModal();
   });
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    setFairnessDropdownExpanded(false);
+    closeFairnessModal();
   });
 
   rulesSaveButton?.addEventListener('click', () => {

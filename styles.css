@@ -3460,27 +3460,15 @@ body.match-log-workspace-open {
 }
 
 .fixture-fairness-toggle {
-  justify-content: space-between;
-  align-items: center;
+  justify-content: flex-start;
 }
 
-.fixture-fairness-toggle::after {
-  content: '▾';
-  font-size: 0.92rem;
-  line-height: 1;
-  transition: transform 160ms ease;
+.fixture-fairness-modal {
+  z-index: 1600;
 }
 
-.fixture-fairness-toggle[aria-expanded='true']::after {
-  transform: rotate(180deg);
-}
-
-.fixture-fairness-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  width: min(520px, calc(100vw - 48px));
-  z-index: 1200;
+.fixture-fairness-modal-panel {
+  width: min(760px, 100%);
 }
 
 .fixture-fairness-checklist {
@@ -3490,9 +3478,8 @@ body.match-log-workspace-open {
   padding: 10px;
   display: grid;
   gap: 8px;
-  max-height: 280px;
+  max-height: 44vh;
   overflow-y: auto;
-  box-shadow: 0 10px 22px rgba(13, 34, 56, 0.16);
 }
 
 .fixture-fairness-option {
