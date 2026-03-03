@@ -2032,9 +2032,8 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
                 <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
                 <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
-                  <h3>Fixture Fairness Rules</h3>
-                  <p class="enrollment-class-modal-subtitle">Reference rules list (non-interactive).</p>
-                  <div class="fixture-fairness-checklist" data-fixture-fairness-options></div>
+                  <h3>Testing</h3>
+                  <p class="enrollment-class-modal-subtitle">Testing</p>
                   <div class="enrollment-class-modal-actions">
                     <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
                   </div>
