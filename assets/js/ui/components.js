@@ -2631,6 +2631,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const isStaffMode = !isAdminMode && new URLSearchParams(window.location.search).get('staff') === '1';
   const sectionKey = String(config.sectionKey || 'enrollment_manager').trim() || 'enrollment_manager';
   const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
+  const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
+  const learnerSurnameNameMigrationFlag = 'bhanoyi.migrations.learnerSurnameName.v1';
   const gradeNumbers = Array.from({ length: 7 }, (_, index) => String(index + 6));
   const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
   const defaultSchoolHouseOptions = Array.from({ length: 5 }, (_, index) => ({
@@ -3542,6 +3544,38 @@ const hydrateEnrollmentManager = (managerNode) => {
       classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizedClasses),
       staffMembers: normalizeStaffMembers(parsed.staffMembers)
     };
+  };
+
+  const runLearnerSurnameNameMigration = () => {
+    if (localStorage.getItem(learnerSurnameNameMigrationFlag) === 'done') {
+      return { migratedAny: false, migratedCurrentStore: false };
+    }
+
+    let migratedAny = false;
+    let migratedCurrentStore = false;
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(enrollmentStoragePrefix)) continue;
+
+      const existingStore = readEnrollmentStoreLocal(key);
+      if (!existingStore || typeof existingStore !== 'object' || Array.isArray(existingStore)) continue;
+
+      const normalizedStore = normalizeLoadedStore(existingStore);
+      const existingUpdatedAt = Number(existingStore?.updatedAt ?? existingStore?._meta?.updatedAt);
+      const stampedPayload = Number.isFinite(existingUpdatedAt) && existingUpdatedAt > 0
+        ? stampEnrollmentStorePayload(normalizedStore, existingUpdatedAt)
+        : stampEnrollmentStorePayload(normalizedStore);
+
+      localStorage.setItem(key, JSON.stringify(stampedPayload));
+      migratedAny = true;
+      if (key === storageKey) {
+        migratedCurrentStore = true;
+      }
+    }
+
+    localStorage.setItem(learnerSurnameNameMigrationFlag, 'done');
+    return { migratedAny, migratedCurrentStore };
   };
 
   const loadStore = () => normalizeLoadedStore(readEnrollmentStoreLocal(storageKey));
@@ -4499,12 +4533,16 @@ const hydrateEnrollmentManager = (managerNode) => {
     refreshEnrollmentWorkflowHeights();
   };
 
+  const learnerNameMigrationResult = runLearnerSurnameNameMigration();
   const loaded = loadStore();
   activeGrades = loaded.activeGrades;
   classesByGrade = loaded.classesByGrade;
   classProfilesByGrade = loaded.classProfilesByGrade;
   staffMembers = normalizeStaffMembers(loaded.staffMembers);
   syncClassTeachersFromStaffAssignments();
+  if (learnerNameMigrationResult.migratedCurrentStore) {
+    saveStore({ syncRemote: true, preserveTimestamp: true });
+  }
   staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
   syncStaffSession();
 

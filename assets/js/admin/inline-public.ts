@@ -3413,6 +3413,7 @@ const wireSportsHouseManagerInline = () => {
   const enrollmentSectionKey = 'enrollment_manager';
   const enrollmentStorageKey = `bhanoyi.enrollmentClasses.${enrollmentSectionKey}`;
   const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
+  const learnerSurnameNameMigrationFlag = 'bhanoyi.migrations.learnerSurnameName.v1';
 
   const normalizeHouseColor = (value: unknown, fallback = '#64748b') => {
     const raw = String(value || '').trim();
@@ -4034,6 +4035,72 @@ const wireSportsHouseManagerInline = () => {
     const detectedNames = parts.slice(0, -1).join(' ');
     return [detectedSurname, detectedNames].filter(Boolean).join(' ').trim();
   };
+
+  const runLearnerSurnameNameMigration = () => {
+    if (localStorage.getItem(learnerSurnameNameMigrationFlag) === 'done') {
+      return;
+    }
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(enrollmentStoragePrefix)) continue;
+
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+
+        const rootStore = parsed as Record<string, unknown>;
+        const classProfilesByGrade = rootStore.classProfilesByGrade;
+        if (!classProfilesByGrade || typeof classProfilesByGrade !== 'object' || Array.isArray(classProfilesByGrade)) {
+          continue;
+        }
+
+        Object.entries(classProfilesByGrade as Record<string, unknown>).forEach(([, gradeValue]) => {
+          if (!gradeValue || typeof gradeValue !== 'object' || Array.isArray(gradeValue)) return;
+
+          Object.entries(gradeValue as Record<string, unknown>).forEach(([, classProfile]) => {
+            if (!classProfile || typeof classProfile !== 'object' || Array.isArray(classProfile)) return;
+            const profileObject = classProfile as Record<string, unknown>;
+            const learners = Array.isArray(profileObject.learners) ? profileObject.learners : [];
+
+            const normalizedLearners = learners
+              .map((entry) => {
+                if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+                const learnerRef = entry as Record<string, unknown>;
+                const normalizedName = resolveLearnerDisplayName(learnerRef);
+                return {
+                  ...learnerRef,
+                  name: normalizedName || normalizeText(learnerRef.name || '', 120)
+                };
+              })
+              .sort((left, right) => {
+                const leftName =
+                  left && typeof left === 'object' && !Array.isArray(left)
+                    ? resolveLearnerDisplayName(left as Record<string, unknown>)
+                    : '';
+                const rightName =
+                  right && typeof right === 'object' && !Array.isArray(right)
+                    ? resolveLearnerDisplayName(right as Record<string, unknown>)
+                    : '';
+                return leftName.localeCompare(rightName);
+              });
+
+            profileObject.learners = normalizedLearners;
+          });
+        });
+
+        localStorage.setItem(key, JSON.stringify(parsed));
+      } catch {
+        continue;
+      }
+    }
+
+    localStorage.setItem(learnerSurnameNameMigrationFlag, 'done');
+  };
+
+  runLearnerSurnameNameMigration();
 
   const collectEnrollmentLearners = (): EnrollmentLearnerRecord[] => {
     const records: EnrollmentLearnerRecord[] = [];
