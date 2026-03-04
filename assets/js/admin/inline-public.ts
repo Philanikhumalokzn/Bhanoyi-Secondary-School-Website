@@ -3994,6 +3994,56 @@ const wireSportsHouseManagerInline = () => {
     return;
   }
 
+  const allLearnersOverlay = document.createElement('div');
+  allLearnersOverlay.className = 'inline-house-unallocated-modal is-hidden';
+  allLearnersOverlay.innerHTML = `
+    <div class="inline-house-unallocated-backdrop" data-house-total-learners-close="true"></div>
+    <article class="panel inline-house-unallocated-panel" role="dialog" aria-modal="true" aria-label="Manage all learners">
+      <div class="inline-house-unallocated-head">
+        <h3>All Learners</h3>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-total-learners-close="true">Close</button>
+        </div>
+      </div>
+      <p class="inline-house-members-meta" data-house-total-learners-meta></p>
+      <div class="inline-house-unallocated-list" data-house-total-learners-list></div>
+    </article>
+  `;
+  document.body.appendChild(allLearnersOverlay);
+
+  const allTeachersOverlay = document.createElement('div');
+  allTeachersOverlay.className = 'inline-house-unallocated-modal is-hidden';
+  allTeachersOverlay.innerHTML = `
+    <div class="inline-house-unallocated-backdrop" data-house-total-teachers-close="true"></div>
+    <article class="panel inline-house-unallocated-panel" role="dialog" aria-modal="true" aria-label="Manage all teachers">
+      <div class="inline-house-unallocated-head">
+        <h3>All Teachers</h3>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-total-teachers-close="true">Close</button>
+        </div>
+      </div>
+      <p class="inline-house-members-meta" data-house-total-teachers-meta></p>
+      <div class="inline-house-unallocated-list" data-house-total-teachers-list></div>
+    </article>
+  `;
+  document.body.appendChild(allTeachersOverlay);
+
+  const allLearnersMeta = allLearnersOverlay.querySelector('[data-house-total-learners-meta]');
+  const allLearnersList = allLearnersOverlay.querySelector('[data-house-total-learners-list]');
+  const allLearnersCloseButtons = Array.from(allLearnersOverlay.querySelectorAll('[data-house-total-learners-close="true"]'));
+  const allTeachersMeta = allTeachersOverlay.querySelector('[data-house-total-teachers-meta]');
+  const allTeachersList = allTeachersOverlay.querySelector('[data-house-total-teachers-list]');
+  const allTeachersCloseButtons = Array.from(allTeachersOverlay.querySelectorAll('[data-house-total-teachers-close="true"]'));
+
+  if (
+    !(allLearnersMeta instanceof HTMLElement) ||
+    !(allLearnersList instanceof HTMLElement) ||
+    !(allTeachersMeta instanceof HTMLElement) ||
+    !(allTeachersList instanceof HTMLElement)
+  ) {
+    return;
+  }
+
   const getExpandedHouseSectionMaxHeight = (body: HTMLElement) => {
     return `${Math.max(0, body.scrollHeight)}px`;
   };
@@ -4453,8 +4503,8 @@ const wireSportsHouseManagerInline = () => {
     overallStatsNode.innerHTML = `
       <span class="inline-house-stat-chip">Allocated learners: <strong>${snapshot.allocatedLearners}</strong></span>
       <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-unallocated="true">Unallocated learners: <strong>${snapshot.unallocatedLearners}</strong></button>
-      <span class="inline-house-stat-chip">Total learners: <strong>${snapshot.totalLearners}</strong></span>
-      <span class="inline-house-stat-chip">Total teachers: <strong>${snapshot.totalTeachers}</strong></span>
+      <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-total-learners="true">Total learners: <strong>${snapshot.totalLearners}</strong></button>
+      <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-total-teachers="true">Total teachers: <strong>${snapshot.totalTeachers}</strong></button>
     `;
 
     const openUnallocatedButton = overallStatsNode.querySelector('[data-house-open-unallocated="true"]');
@@ -4464,10 +4514,112 @@ const wireSportsHouseManagerInline = () => {
         unallocatedOverlay.classList.remove('is-hidden');
       });
     }
+
+    const openTotalLearnersButton = overallStatsNode.querySelector('[data-house-open-total-learners="true"]');
+    if (openTotalLearnersButton instanceof HTMLButtonElement) {
+      openTotalLearnersButton.addEventListener('click', () => {
+        renderAllLearnersOverlay();
+        allLearnersOverlay.classList.remove('is-hidden');
+      });
+    }
+
+    const openTotalTeachersButton = overallStatsNode.querySelector('[data-house-open-total-teachers="true"]');
+    if (openTotalTeachersButton instanceof HTMLButtonElement) {
+      openTotalTeachersButton.addEventListener('click', () => {
+        renderAllTeachersOverlay();
+        allTeachersOverlay.classList.remove('is-hidden');
+      });
+    }
   };
 
   const closeUnallocatedOverlay = () => {
     unallocatedOverlay.classList.add('is-hidden');
+  };
+
+  const closeAllLearnersOverlay = () => {
+    allLearnersOverlay.classList.add('is-hidden');
+  };
+
+  const closeAllTeachersOverlay = () => {
+    allTeachersOverlay.classList.add('is-hidden');
+  };
+
+  const resolveHouseLabelById = (houseId: string) => {
+    if (!houseId) return 'Unassigned';
+    return readState.options.find((entry) => entry.id === houseId)?.name || 'Unassigned';
+  };
+
+  const renderAllLearnersOverlay = () => {
+    const learners = collectEnrollmentLearners()
+      .filter((record) => record.memberType === 'learner')
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName));
+
+    allLearnersMeta.textContent = `${learners.length} learner${learners.length === 1 ? '' : 's'} available for house assignment management.`;
+
+    if (!learners.length) {
+      allLearnersList.innerHTML = '<p class="inline-house-members-empty">No learners found.</p>';
+      return;
+    }
+
+    allLearnersList.innerHTML = learners
+      .map((record) => {
+        const classLabel = resolveClassLabel(record);
+        const currentHouse = resolveHouseLabelById(record.houseId);
+        return `
+          <div class="inline-house-unallocated-item" data-house-total-learner-key="${escapeHtmlAttribute(record.key)}">
+            <div class="inline-house-unallocated-main">
+              <p class="inline-house-unallocated-name">${escapeHtmlText(record.displayName)}</p>
+              <p class="inline-house-unallocated-meta">${escapeHtmlText(classLabel)}${record.admissionNo ? ` · Adm: ${escapeHtmlText(record.admissionNo)}` : ''} · House: ${escapeHtmlText(currentHouse)}</p>
+            </div>
+            <div class="inline-house-unallocated-actions">
+              <select data-house-total-learner-target="${escapeHtmlAttribute(record.key)}">
+                ${readState.options
+                  .map((house) => `<option value="${escapeHtmlAttribute(house.id)}" ${record.houseId === house.id ? 'selected' : ''}>${escapeHtmlText(house.name)}</option>`)
+                  .join('')}
+              </select>
+              <button type="button" class="btn btn-primary" data-house-total-learner-assign="${escapeHtmlAttribute(record.key)}">Save</button>
+              <button type="button" class="btn btn-secondary" data-house-total-learner-clear="${escapeHtmlAttribute(record.key)}">Remove house</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const renderAllTeachersOverlay = () => {
+    const teachers = collectEnrollmentLearners()
+      .filter((record) => record.memberType === 'teacher')
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName, { staffLeft: true, staffRight: true }));
+
+    allTeachersMeta.textContent = `${teachers.length} teacher${teachers.length === 1 ? '' : 's'} available for house assignment management.`;
+
+    if (!teachers.length) {
+      allTeachersList.innerHTML = '<p class="inline-house-members-empty">No teachers found.</p>';
+      return;
+    }
+
+    allTeachersList.innerHTML = teachers
+      .map((record) => {
+        const currentHouse = resolveHouseLabelById(record.houseId);
+        return `
+          <div class="inline-house-unallocated-item" data-house-total-teacher-key="${escapeHtmlAttribute(record.key)}">
+            <div class="inline-house-unallocated-main">
+              <p class="inline-house-unallocated-name">${escapeHtmlText(record.displayName)}</p>
+              <p class="inline-house-unallocated-meta">${escapeHtmlText(record.roleLabel || 'Teacher')}${record.admissionNo ? ` · Staff No: ${escapeHtmlText(record.admissionNo)}` : ''}${record.gender ? ` · ${escapeHtmlText(record.gender)}` : ''} · House: ${escapeHtmlText(currentHouse)}</p>
+            </div>
+            <div class="inline-house-unallocated-actions">
+              <select data-house-total-teacher-target="${escapeHtmlAttribute(record.key)}">
+                ${readState.options
+                  .map((house) => `<option value="${escapeHtmlAttribute(house.id)}" ${record.houseId === house.id ? 'selected' : ''}>${escapeHtmlText(house.name)}</option>`)
+                  .join('')}
+              </select>
+              <button type="button" class="btn btn-primary" data-house-total-teacher-assign="${escapeHtmlAttribute(record.key)}">Save</button>
+              <button type="button" class="btn btn-secondary" data-house-total-teacher-clear="${escapeHtmlAttribute(record.key)}">Remove house</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
   };
 
   const resolveClassLabel = (record: EnrollmentLearnerRecord) =>
@@ -4577,6 +4729,14 @@ const wireSportsHouseManagerInline = () => {
     button.addEventListener('click', closeUnallocatedOverlay);
   });
 
+  allLearnersCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeAllLearnersOverlay);
+  });
+
+  allTeachersCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeAllTeachersOverlay);
+  });
+
   unallocatedSearchInput.addEventListener('input', () => {
     unallocatedSearchValue = unallocatedSearchInput.value;
     renderUnallocatedOverlay();
@@ -4643,6 +4803,92 @@ const wireSportsHouseManagerInline = () => {
     renderHouseMembersModal();
     const houseName = readState.options.find((entry) => entry.id === houseId)?.name || 'selected house';
     showStatus(`${targetRecord.displayName} allocated to ${houseName}.`);
+  });
+
+  allLearnersList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const assignButton = target.closest('[data-house-total-learner-assign]') as HTMLButtonElement | null;
+    if (assignButton) {
+      const memberKey = String(assignButton.dataset.houseTotalLearnerAssign || '').trim();
+      if (!memberKey) return;
+      const row = assignButton.closest('[data-house-total-learner-key]') as HTMLElement | null;
+      if (!row) return;
+      const selector = row.querySelector('[data-house-total-learner-target]') as HTMLSelectElement | null;
+      if (!(selector instanceof HTMLSelectElement)) return;
+      const houseId = normalizeHouseId(selector.value, '');
+      if (!houseId) return;
+
+      const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'learner');
+      if (!targetRecord) return;
+      targetRecord.learnerRef.houseId = houseId;
+      persistEnrollmentRecords([targetRecord]);
+      renderAllLearnersOverlay();
+      renderUnallocatedOverlay();
+      renderHouseEditorSummaries();
+      renderOverallAllocationStats();
+      renderHouseMembersModal();
+      showStatus(`${targetRecord.displayName} moved to ${resolveHouseLabelById(houseId)}.`);
+      return;
+    }
+
+    const clearButton = target.closest('[data-house-total-learner-clear]') as HTMLButtonElement | null;
+    if (!clearButton) return;
+    const memberKey = String(clearButton.dataset.houseTotalLearnerClear || '').trim();
+    if (!memberKey) return;
+    const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'learner');
+    if (!targetRecord) return;
+    targetRecord.learnerRef.houseId = '';
+    persistEnrollmentRecords([targetRecord]);
+    renderAllLearnersOverlay();
+    renderUnallocatedOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    showStatus(`${targetRecord.displayName} is now unassigned from houses.`);
+  });
+
+  allTeachersList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const assignButton = target.closest('[data-house-total-teacher-assign]') as HTMLButtonElement | null;
+    if (assignButton) {
+      const memberKey = String(assignButton.dataset.houseTotalTeacherAssign || '').trim();
+      if (!memberKey) return;
+      const row = assignButton.closest('[data-house-total-teacher-key]') as HTMLElement | null;
+      if (!row) return;
+      const selector = row.querySelector('[data-house-total-teacher-target]') as HTMLSelectElement | null;
+      if (!(selector instanceof HTMLSelectElement)) return;
+      const houseId = normalizeHouseId(selector.value, '');
+      if (!houseId) return;
+
+      const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'teacher');
+      if (!targetRecord) return;
+      targetRecord.learnerRef.houseId = houseId;
+      persistEnrollmentRecords([targetRecord]);
+      renderAllTeachersOverlay();
+      renderHouseEditorSummaries();
+      renderOverallAllocationStats();
+      renderHouseMembersModal();
+      showStatus(`${targetRecord.displayName} assigned to ${resolveHouseLabelById(houseId)}.`);
+      return;
+    }
+
+    const clearButton = target.closest('[data-house-total-teacher-clear]') as HTMLButtonElement | null;
+    if (!clearButton) return;
+    const memberKey = String(clearButton.dataset.houseTotalTeacherClear || '').trim();
+    if (!memberKey) return;
+    const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'teacher');
+    if (!targetRecord) return;
+    targetRecord.learnerRef.houseId = '';
+    persistEnrollmentRecords([targetRecord]);
+    renderAllTeachersOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    showStatus(`${targetRecord.displayName} is now unassigned from houses.`);
   });
 
   const closeHouseModal = () => {
