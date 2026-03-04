@@ -2305,6 +2305,19 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   <button type="button" class="btn btn-secondary" data-enrollment-add-staff>Add staff member</button>
                 </div>
                 <div class="enrollment-house-row" data-enrollment-staff-house-row></div>
+                <div class="enrollment-people-controls">
+                  <label class="enrollment-class-modal-field">
+                    Search people
+                    <input type="search" maxlength="140" data-enrollment-staff-search placeholder="Search by surname, initials, staff no., subject" />
+                  </label>
+                  <label class="enrollment-class-modal-field">
+                    Sort by
+                    <select data-enrollment-staff-sort>
+                      <option value="surname_asc">Surname (A–Z)</option>
+                      <option value="surname_desc">Surname (Z–A)</option>
+                    </select>
+                  </label>
+                </div>
                 <div class="enrollment-staff-list" data-enrollment-staff-list></div>
               </section>
             </div>
@@ -2422,6 +2435,19 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       </select>
                       <button type="button" class="btn btn-secondary" data-enrollment-add-learner>Add learner</button>
                     </div>
+                    <div class="enrollment-people-controls">
+                      <label class="enrollment-class-modal-field">
+                        Search learners
+                        <input type="search" maxlength="140" data-enrollment-learner-search placeholder="Search by surname, admission, gender" />
+                      </label>
+                      <label class="enrollment-class-modal-field">
+                        Sort by
+                        <select data-enrollment-learner-sort>
+                          <option value="surname_asc">Surname (A–Z)</option>
+                          <option value="surname_desc">Surname (Z–A)</option>
+                        </select>
+                      </label>
+                    </div>
                     <div class="enrollment-learner-list" data-enrollment-learner-list></div>
                   </section>
                 </div>
@@ -2471,6 +2497,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const learnerNameInput = managerNode.querySelector('[data-enrollment-learner-name]');
   const learnerAdmissionInput = managerNode.querySelector('[data-enrollment-learner-admission]');
   const learnerGenderSelect = managerNode.querySelector('[data-enrollment-learner-gender]');
+  const learnerSearchInput = managerNode.querySelector('[data-enrollment-learner-search]');
+  const learnerSortSelect = managerNode.querySelector('[data-enrollment-learner-sort]');
   const addLearnerButton = managerNode.querySelector('[data-enrollment-add-learner]');
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
@@ -2494,6 +2522,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffDisplayOverrideInput = managerNode.querySelector('[data-enrollment-staff-display-override]');
   const staffNotesInput = managerNode.querySelector('[data-enrollment-staff-notes]');
   const addStaffButton = managerNode.querySelector('[data-enrollment-add-staff]');
+  const staffSearchInput = managerNode.querySelector('[data-enrollment-staff-search]');
+  const staffSortSelect = managerNode.querySelector('[data-enrollment-staff-sort]');
   const staffHouseRowNode = managerNode.querySelector('[data-enrollment-staff-house-row]');
   const staffListNode = managerNode.querySelector('[data-enrollment-staff-list]');
   const saveManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-save-manage]'));
@@ -2518,6 +2548,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(learnerNameInput instanceof HTMLInputElement) ||
     !(learnerAdmissionInput instanceof HTMLInputElement) ||
     !(learnerGenderSelect instanceof HTMLSelectElement) ||
+    !(learnerSearchInput instanceof HTMLInputElement) ||
+    !(learnerSortSelect instanceof HTMLSelectElement) ||
     !(addLearnerButton instanceof HTMLButtonElement) ||
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
@@ -2540,6 +2572,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(staffDisplayOverrideInput instanceof HTMLInputElement) ||
     !(staffNotesInput instanceof HTMLTextAreaElement) ||
     !(addStaffButton instanceof HTMLButtonElement) ||
+    !(staffSearchInput instanceof HTMLInputElement) ||
+    !(staffSortSelect instanceof HTMLSelectElement) ||
     !(staffHouseRowNode instanceof HTMLElement) ||
     !(staffListNode instanceof HTMLElement) ||
     !saveManageButtons.length
@@ -2706,6 +2740,10 @@ const hydrateEnrollmentManager = (managerNode) => {
   let selectedManageGrade = '';
   let selectedManageLetter = '';
   let manageLearners = [];
+  let learnerSearchValue = '';
+  let learnerSortValue = 'surname_asc';
+  let staffSearchValue = '';
+  let staffSortValue = 'surname_asc';
   let selectedStaffHouseId = '';
   const staffSessionKey = `bhanoyi.staffSession.${sectionKey}`;
   const staffSessionPasswordKey = `bhanoyi.staffSessionPassword.${sectionKey}`;
@@ -2724,6 +2762,24 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const normalizeLetter = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
   const normalizeText = (value, maxLength = 300) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
+  const staffTitleTokens = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'coach', 'mx']);
+
+  const normalizeToken = (value) => String(value || '').trim().toLowerCase().replace(/\./g, '');
+  const resolveSurnameSortKey = (value, options = {}) => {
+    const normalizedValue = normalizeText(value, 160).toLowerCase();
+    if (!normalizedValue) return '';
+    const parts = normalizedValue.split(/\s+/).filter(Boolean);
+    if (!parts.length) return '';
+
+    if (options.staffLike && staffTitleTokens.has(normalizeToken(parts[0]))) {
+      parts.shift();
+    }
+
+    if (!parts.length) return normalizedValue;
+    const surname = parts[0];
+    const rest = parts.slice(1).join(' ');
+    return `${surname} ${rest}`.trim();
+  };
 
   const normalizeLoginToken = (value) =>
     String(value || '')
@@ -2940,10 +2996,18 @@ const hydrateEnrollmentManager = (managerNode) => {
           .split(',')
           .map((part) => normalizeText(part, 120))
           .filter(Boolean);
-        return [surnamePart, rest.join(' ')].filter(Boolean).join(' ').trim();
+        const cleanRest = rest
+          .join(' ')
+          .split(/\s+/)
+          .filter((token) => !staffTitleTokens.has(normalizeToken(token)))
+          .join(' ');
+        return [surnamePart, cleanRest].filter(Boolean).join(' ').trim();
       }
 
-      const tokens = normalizedRawName.split(/\s+/).filter(Boolean);
+      const tokens = normalizedRawName
+        .split(/\s+/)
+        .filter(Boolean)
+        .filter((token) => !staffTitleTokens.has(normalizeToken(token)));
       if (tokens.length <= 1) return normalizedRawName;
       const detectedSurname = tokens[tokens.length - 1];
       const detectedGivenNames = tokens.slice(0, -1).join(' ');
@@ -3110,14 +3174,11 @@ const hydrateEnrollmentManager = (managerNode) => {
     const title = normalizeText(staff?.title, 20);
     const initials = normalizeStaffInitials(staff?.initials || inferInitialsFromFirstName(staff?.firstName || ''));
     const surname = normalizeText(staff?.surname, 80);
-    const fallback = [normalizeText(staff?.firstName, 80), surname].filter(Boolean).join(' ');
-    const formatted = [title, initials, surname].filter(Boolean).join(' ').trim();
-    return formatted || fallback || normalizeText(staff?.name, 120);
+    const formatted = [title, surname, initials].filter(Boolean).join(' ').trim();
+    return formatted || surname || normalizeText(staff?.name, 120);
   };
 
   const resolveStaffDisplayName = (staff) => {
-    const custom = normalizeText(staff?.displayNameOverride, 120);
-    if (custom) return custom;
     return formatStaffDefaultDisplayName(staff);
   };
 
@@ -4027,6 +4088,28 @@ const hydrateEnrollmentManager = (managerNode) => {
     closeLearnerSportsModal();
   });
 
+  learnerSearchInput.addEventListener('input', () => {
+    learnerSearchValue = learnerSearchInput.value;
+    renderManageLearners();
+  });
+
+  learnerSortSelect.addEventListener('change', () => {
+    learnerSortValue = learnerSortSelect.value === 'surname_desc' ? 'surname_desc' : 'surname_asc';
+    learnerSortSelect.value = learnerSortValue;
+    renderManageLearners();
+  });
+
+  staffSearchInput.addEventListener('input', () => {
+    staffSearchValue = staffSearchInput.value;
+    renderStaffMembers();
+  });
+
+  staffSortSelect.addEventListener('change', () => {
+    staffSortValue = staffSortSelect.value === 'surname_desc' ? 'surname_desc' : 'surname_asc';
+    staffSortSelect.value = staffSortValue;
+    renderStaffMembers();
+  });
+
   const renderManageLearners = () => {
     if (!manageLearners.length) {
       learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
@@ -4037,9 +4120,34 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const canEditAssignments = canCurrentUserEditLearnerAssignments();
+    const normalizedSearch = normalizeText(learnerSearchValue, 140).toLowerCase();
+    const filteredLearners = manageLearners
+      .map((learner, index) => ({ learner, index }))
+      .filter(({ learner }) => {
+        if (!normalizedSearch) return true;
+        const haystack = [learner.name, learner.admissionNo, learner.gender]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+      .sort((left, right) => {
+        const leftKey = resolveSurnameSortKey(left.learner.name);
+        const rightKey = resolveSurnameSortKey(right.learner.name);
+        const comparison = leftKey.localeCompare(rightKey);
+        return learnerSortValue === 'surname_desc' ? -comparison : comparison;
+      });
 
-    learnerListNode.innerHTML = manageLearners
-      .map((learner, index) => {
+    if (!filteredLearners.length) {
+      learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners match the current search.</p>';
+      requestAnimationFrame(() => {
+        refreshManageModalWorkflowHeights();
+      });
+      return;
+    }
+
+    learnerListNode.innerHTML = filteredLearners
+      .map(({ learner, index }) => {
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
         const assignedSportsLabel = formatSportingCodesSummary(sportingCodes);
         const defaultSportCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
@@ -4174,7 +4282,7 @@ const hydrateEnrollmentManager = (managerNode) => {
           .map((staff) => normalizeText(resolveStaffDisplayName(staff), 120))
           .filter(Boolean)
       )
-    ).sort((left, right) => left.localeCompare(right));
+    ).sort((left, right) => resolveSurnameSortKey(left, { staffLike: true }).localeCompare(resolveSurnameSortKey(right, { staffLike: true })));
 
     const hasSelectedInStaff = selected && teacherNames.includes(selected);
     manageTeacherSelect.innerHTML = [
@@ -4194,8 +4302,39 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
-    staffListNode.innerHTML = staffMembers
-      .map((staff, index) => {
+    const normalizedSearch = normalizeText(staffSearchValue, 140).toLowerCase();
+    const filteredStaff = staffMembers
+      .map((staff, index) => ({ staff, index }))
+      .filter(({ staff }) => {
+        if (!normalizedSearch) return true;
+        const assignedClass = staff.assignedGrade && staff.assignedClassLetter ? `${staff.assignedGrade}${staff.assignedClassLetter}` : '';
+        const haystack = [
+          resolveStaffDisplayName(staff),
+          staff.staffNumber,
+          staff.subject,
+          staff.email,
+          assignedClass,
+          staff.gender
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+      .sort((left, right) => {
+        const leftKey = resolveSurnameSortKey(left.staff.surname || resolveStaffDisplayName(left.staff), { staffLike: true });
+        const rightKey = resolveSurnameSortKey(right.staff.surname || resolveStaffDisplayName(right.staff), { staffLike: true });
+        const comparison = leftKey.localeCompare(rightKey);
+        return staffSortValue === 'surname_desc' ? -comparison : comparison;
+      });
+
+    if (!filteredStaff.length) {
+      staffListNode.innerHTML = '<p class="enrollment-class-empty">No staff members match the current search.</p>';
+      return;
+    }
+
+    staffListNode.innerHTML = filteredStaff
+      .map(({ staff, index }) => {
         const displayName = resolveStaffDisplayName(staff);
         const details = [
           staff.postLevel ? `${staff.postLevel} · ${staff.rank || staffPostLevelRanks[staff.postLevel] || ''}` : '',
@@ -4323,6 +4462,10 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     selectedManageGrade = normalizedGrade;
     selectedManageLetter = normalizedLetter;
+    learnerSearchValue = '';
+    learnerSortValue = 'surname_asc';
+    learnerSearchInput.value = '';
+    learnerSortSelect.value = learnerSortValue;
     const classLabel = `Grade ${normalizedGrade}${normalizedLetter}`;
     if (manageTitleNode instanceof HTMLElement) {
       manageTitleNode.textContent = classLabel;

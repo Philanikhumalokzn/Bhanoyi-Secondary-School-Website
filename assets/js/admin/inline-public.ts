@@ -3771,8 +3771,15 @@ const wireSportsHouseManagerInline = () => {
         <div class="sports-workflow-body" data-house-members-body>
           <div class="inline-house-members-filter-grid">
             <label>
-              Search learner
+              Search people
               <input type="search" placeholder="Name, admission, class" data-house-members-search />
+            </label>
+            <label>
+              Sort by
+              <select data-house-members-sort>
+                <option value="surname_asc">Surname (A–Z)</option>
+                <option value="surname_desc">Surname (Z–A)</option>
+              </select>
             </label>
             <label>
               Gender
@@ -3858,6 +3865,7 @@ const wireSportsHouseManagerInline = () => {
   const houseModalMeta = houseModal.querySelector('[data-house-members-meta]');
   const houseModalList = houseModal.querySelector('[data-house-members-list]');
   const houseModalSearch = houseModal.querySelector('[data-house-members-search]');
+  const houseModalSort = houseModal.querySelector('[data-house-members-sort]');
   const houseModalGenderFilter = houseModal.querySelector('[data-house-members-gender-filter]');
   const houseModalSportFilter = houseModal.querySelector('[data-house-members-sport-filter]');
   const houseModalRuleList = houseModal.querySelector('[data-house-sport-rules]');
@@ -3876,6 +3884,7 @@ const wireSportsHouseManagerInline = () => {
     !(houseModalMeta instanceof HTMLElement) ||
     !(houseModalList instanceof HTMLElement) ||
     !(houseModalSearch instanceof HTMLInputElement) ||
+    !(houseModalSort instanceof HTMLSelectElement) ||
     !(houseModalGenderFilter instanceof HTMLSelectElement) ||
     !(houseModalSportFilter instanceof HTMLSelectElement) ||
     !(houseModalRuleList instanceof HTMLElement) ||
@@ -3893,6 +3902,7 @@ const wireSportsHouseManagerInline = () => {
 
   let activeHouseId = '';
   let memberSearchValue = '';
+  let memberSortValue = 'surname_asc';
   let memberGenderFilterValue = 'all';
   let memberSportFilterValue = 'all';
   let selectedMemberKeys = new Set<string>();
@@ -3996,19 +4006,48 @@ const wireSportsHouseManagerInline = () => {
   };
 
   const resolveStaffDisplayName = (staffRef: Record<string, unknown>) => {
-    const override = normalizeText(staffRef.displayNameOverride || staffRef.displayName || '', 120);
-    if (override) return override;
-
     const title = normalizeText(staffRef.title || '', 20);
     const initials = normalizeStaffInitials(staffRef.initials || inferInitialsFromFirstName(staffRef.firstName || ''));
     const surname = normalizeText(staffRef.surname || '', 80);
-    const formatted = [title, initials, surname].filter(Boolean).join(' ').trim();
+    const formatted = [title, surname, initials].filter(Boolean).join(' ').trim();
     if (formatted) return formatted;
 
     const fallbackName = normalizeText(staffRef.name || '', 120);
-    if (fallbackName) return fallbackName;
+    if (fallbackName) {
+      const parts = fallbackName.split(/\s+/).filter(Boolean);
+      const legacySurname = parts.length ? parts[parts.length - 1] : fallbackName;
+      const legacyInitials = normalizeStaffInitials(staffRef.initials || inferInitialsFromFirstName(parts.slice(0, -1).join(' ')));
+      return [title || 'Mr.', legacySurname, legacyInitials].filter(Boolean).join(' ').trim();
+    }
 
-    return normalizeText(staffRef.firstName || '', 80);
+    return [title || 'Mr.', 'Staff'].join(' ');
+  };
+
+  const staffTitleTokens = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'coach', 'mx']);
+  const normalizeToken = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\./g, '');
+  const resolveSurnameSortKey = (displayName: unknown, options?: { staffLike?: boolean }) => {
+    const normalizedName = normalizeText(displayName, 160).toLowerCase();
+    if (!normalizedName) return '';
+    const parts = normalizedName.split(/\s+/).filter(Boolean);
+    if (!parts.length) return '';
+    if (options?.staffLike && staffTitleTokens.has(normalizeToken(parts[0]))) {
+      parts.shift();
+    }
+    if (!parts.length) return normalizedName;
+    const surname = parts[0];
+    const rest = parts.slice(1).join(' ');
+    return `${surname} ${rest}`.trim();
+  };
+
+  const comparePeopleBySurname = (
+    leftName: unknown,
+    rightName: unknown,
+    options?: { staffLeft?: boolean; staffRight?: boolean; descending?: boolean }
+  ) => {
+    const leftKey = resolveSurnameSortKey(leftName, { staffLike: Boolean(options?.staffLeft) });
+    const rightKey = resolveSurnameSortKey(rightName, { staffLike: Boolean(options?.staffRight) });
+    const comparison = leftKey.localeCompare(rightKey);
+    return options?.descending ? -comparison : comparison;
   };
 
   const resolveLearnerDisplayName = (learnerRef: Record<string, unknown>) => {
@@ -4026,10 +4065,18 @@ const wireSportsHouseManagerInline = () => {
         .split(',')
         .map((entry) => normalizeText(entry, 120))
         .filter(Boolean);
-      return [surnamePart, rest.join(' ')].filter(Boolean).join(' ').trim();
+      const cleanRest = rest
+        .join(' ')
+        .split(/\s+/)
+        .filter((token) => !staffTitleTokens.has(normalizeToken(token)))
+        .join(' ');
+      return [surnamePart, cleanRest].filter(Boolean).join(' ').trim();
     }
 
-    const parts = rawName.split(/\s+/).filter(Boolean);
+    const parts = rawName
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((token) => !staffTitleTokens.has(normalizeToken(token)));
     if (parts.length <= 1) return rawName;
     const detectedSurname = parts[parts.length - 1];
     const detectedNames = parts.slice(0, -1).join(' ');
@@ -4305,6 +4352,7 @@ const wireSportsHouseManagerInline = () => {
     houseModalMeta.textContent = `${learnerCount} learner${learnerCount === 1 ? '' : 's'}, ${teacherCount} teacher${teacherCount === 1 ? '' : 's'} in this house. ${selectedMemberKeys.size} selected.`;
 
     houseModalSearch.value = memberSearchValue;
+    houseModalSort.value = memberSortValue;
     houseModalGenderFilter.value = memberGenderFilterValue;
 
     const selectedSportFilter = memberSportFilterValue;
@@ -4374,8 +4422,28 @@ const wireSportsHouseManagerInline = () => {
     const roleStore = loadHouseRoleAssignments();
     const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
 
+    const normalizedSearch = memberSearchValue.trim().toLowerCase();
+    const descendingSort = memberSortValue === 'surname_desc';
+    const matchesSearch = (record: EnrollmentLearnerRecord) => {
+      if (!normalizedSearch) return true;
+      const classLabel = record.grade ? `grade ${record.grade}${record.classLetter || ''}` : '';
+      const haystack = [record.displayName, record.admissionNo, record.gender, classLabel]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(normalizedSearch);
+    };
+
     houseRoleStaffList.innerHTML = '';
-    const staffMembers = members.filter((record) => record.memberType === 'teacher');
+    const staffMembers = members
+      .filter((record) => record.memberType === 'teacher')
+      .filter(matchesSearch)
+      .sort((left, right) =>
+        comparePeopleBySurname(left.displayName, right.displayName, {
+          staffLeft: true,
+          staffRight: true,
+          descending: descendingSort
+        })
+      );
     if (!staffMembers.length) {
       const empty = document.createElement('p');
       empty.className = 'inline-house-members-empty';
@@ -4438,13 +4506,16 @@ const wireSportsHouseManagerInline = () => {
     }
 
     houseRoleLearnerList.innerHTML = '';
-    if (!learnerMembers.length) {
+    const searchableLearnerMembers = learnerMembers
+      .filter(matchesSearch)
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName, { descending: descendingSort }));
+    if (!searchableLearnerMembers.length) {
       const empty = document.createElement('p');
       empty.className = 'inline-house-members-empty';
       empty.textContent = 'No learners assigned to this house yet.';
       houseRoleLearnerList.appendChild(empty);
     } else {
-      learnerMembers.forEach((record) => {
+      searchableLearnerMembers.forEach((record) => {
         const row = document.createElement('div');
         row.className = 'inline-house-role-item';
 
@@ -4501,7 +4572,6 @@ const wireSportsHouseManagerInline = () => {
       });
     }
 
-    const normalizedSearch = memberSearchValue.trim().toLowerCase();
     const filteredMembers = members
       .map((record) => {
         const assignedCodeIds = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
@@ -4546,10 +4616,11 @@ const wireSportsHouseManagerInline = () => {
         return true;
       })
       .sort((left, right) => {
-        if (left.record.memberType !== right.record.memberType) {
-          return left.record.memberType === 'teacher' ? -1 : 1;
-        }
-        return left.record.displayName.localeCompare(right.record.displayName);
+        return comparePeopleBySurname(left.record.displayName, right.record.displayName, {
+          staffLeft: left.record.memberType === 'teacher',
+          staffRight: right.record.memberType === 'teacher',
+          descending: descendingSort
+        });
       });
 
     houseModalList.innerHTML = '';
@@ -4564,16 +4635,7 @@ const wireSportsHouseManagerInline = () => {
       empty.textContent = 'No members match the current search/filter criteria.';
       houseModalList.appendChild(empty);
     } else {
-      let lastRenderedMemberType: 'learner' | 'teacher' | '' = '';
       filteredMembers.forEach(({ record, assignedCodes }) => {
-          if (record.memberType !== lastRenderedMemberType) {
-            const sectionLabel = document.createElement('p');
-            sectionLabel.className = 'inline-house-member-group-label';
-            sectionLabel.textContent = record.memberType === 'teacher' ? 'Staff / Teachers' : 'Learners';
-            houseModalList.appendChild(sectionLabel);
-            lastRenderedMemberType = record.memberType;
-          }
-
           const item = document.createElement('div');
           item.className = 'inline-house-member-item';
           item.classList.toggle('inline-house-member-teacher-row', record.memberType === 'teacher');
@@ -4724,7 +4786,8 @@ const wireSportsHouseManagerInline = () => {
 
     houseModalPullSelect.innerHTML = '';
     available
-      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      .filter(matchesSearch)
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName, { descending: descendingSort }))
       .forEach((record) => {
         const option = document.createElement('option');
         option.value = record.key;
@@ -4755,10 +4818,10 @@ const wireSportsHouseManagerInline = () => {
     const members = collectEnrollmentLearners()
       .filter((record) => record.houseId === activeHouse.id)
       .sort((left, right) => {
-        if (left.memberType !== right.memberType) {
-          return left.memberType === 'teacher' ? -1 : 1;
-        }
-        return left.displayName.localeCompare(right.displayName);
+        return comparePeopleBySurname(left.displayName, right.displayName, {
+          staffLeft: left.memberType === 'teacher',
+          staffRight: right.memberType === 'teacher'
+        });
       });
 
     const rows = members.map((record) => {
@@ -4782,6 +4845,12 @@ const wireSportsHouseManagerInline = () => {
 
   houseModalSearch.addEventListener('input', () => {
     memberSearchValue = houseModalSearch.value;
+    renderHouseMembersModal();
+  });
+
+  houseModalSort.addEventListener('change', () => {
+    memberSortValue = houseModalSort.value === 'surname_desc' ? 'surname_desc' : 'surname_asc';
+    houseModalSort.value = memberSortValue;
     renderHouseMembersModal();
   });
 
@@ -4993,6 +5062,7 @@ const wireSportsHouseManagerInline = () => {
     await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
     activeHouseId = houseId;
     memberSearchValue = '';
+    memberSortValue = 'surname_asc';
     memberGenderFilterValue = 'all';
     memberSportFilterValue = 'all';
     selectedMemberKeys = new Set();

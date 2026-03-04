@@ -3012,6 +3012,16 @@ body.match-log-workspace-open {
   gap: 8px;
 }
 
+.enrollment-people-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.enrollment-people-controls .enrollment-class-modal-field {
+  font-size: 0.82rem;
+}
+
 .enrollment-import-row {
   display: grid;
   gap: 8px;
