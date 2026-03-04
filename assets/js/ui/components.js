@@ -2300,7 +2300,6 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   <input type="text" maxlength="80" data-enrollment-staff-subject placeholder="Subject / Department (optional)" />
                   <input type="email" maxlength="120" data-enrollment-staff-email placeholder="Email (optional)" />
                   <input type="text" maxlength="30" data-enrollment-staff-phone placeholder="Phone (optional)" />
-                  <input type="text" maxlength="120" data-enrollment-staff-display-override placeholder="Custom display format override (optional)" />
                   <textarea rows="2" maxlength="280" data-enrollment-staff-notes placeholder="Notes (optional)"></textarea>
                   <button type="button" class="btn btn-secondary" data-enrollment-add-staff>Add staff member</button>
                 </div>
@@ -2519,7 +2518,6 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffSubjectInput = managerNode.querySelector('[data-enrollment-staff-subject]');
   const staffEmailInput = managerNode.querySelector('[data-enrollment-staff-email]');
   const staffPhoneInput = managerNode.querySelector('[data-enrollment-staff-phone]');
-  const staffDisplayOverrideInput = managerNode.querySelector('[data-enrollment-staff-display-override]');
   const staffNotesInput = managerNode.querySelector('[data-enrollment-staff-notes]');
   const addStaffButton = managerNode.querySelector('[data-enrollment-add-staff]');
   const staffSearchInput = managerNode.querySelector('[data-enrollment-staff-search]');
@@ -2569,7 +2567,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(staffSubjectInput instanceof HTMLInputElement) ||
     !(staffEmailInput instanceof HTMLInputElement) ||
     !(staffPhoneInput instanceof HTMLInputElement) ||
-    !(staffDisplayOverrideInput instanceof HTMLInputElement) ||
     !(staffNotesInput instanceof HTMLTextAreaElement) ||
     !(addStaffButton instanceof HTMLButtonElement) ||
     !(staffSearchInput instanceof HTMLInputElement) ||
@@ -4390,16 +4387,6 @@ const hydrateEnrollmentManager = (managerNode) => {
               <span>${escapeHtmlText(displayName)}${details ? ` • ${escapeHtmlText(details)}` : ''}</span>
               ${isAdminMode ? `
                 <label class="enrollment-class-modal-field enrollment-staff-display-override-field">
-                  Custom display format (optional)
-                  <input
-                    type="text"
-                    maxlength="120"
-                    value="${escapeHtmlAttribute(staff.displayNameOverride || '')}"
-                    placeholder="Default: ${escapeHtmlAttribute(formatStaffDefaultDisplayName(staff))}"
-                    data-enrollment-staff-display-override-index="${index}"
-                  />
-                </label>
-                <label class="enrollment-class-modal-field enrollment-staff-display-override-field">
                   Assigned class
                   <select data-enrollment-staff-assigned-class-index="${index}">
                     <option value="">No class assigned</option>
@@ -4446,7 +4433,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffSubjectInput.value = '';
     staffEmailInput.value = '';
     staffPhoneInput.value = '';
-    staffDisplayOverrideInput.value = '';
     staffNotesInput.value = '';
     selectedStaffHouseId = '';
     renderStaffHouseSelector();
@@ -4567,7 +4553,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffSubjectInput.disabled = staffReadOnly;
     staffEmailInput.disabled = staffReadOnly;
     staffPhoneInput.disabled = staffReadOnly;
-    staffDisplayOverrideInput.disabled = staffReadOnly;
     staffNotesInput.disabled = staffReadOnly;
     addStaffButton.disabled = staffReadOnly;
     openStaffWorkflowButton.disabled = staffReadOnly;
@@ -4966,25 +4951,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!isAdminMode) return;
     const target = event.target;
 
-    if (target instanceof HTMLInputElement && target.dataset.enrollmentStaffDisplayOverrideIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentStaffDisplayOverrideIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
-      const current = staffMembers[index];
-      const updated = normalizeStaffMember({
-        ...current,
-        displayNameOverride: target.value
-      });
-      if (!updated) return;
-      staffMembers[index] = updated;
-      syncClassTeachersFromStaffAssignments();
-      saveStore();
-      renderStaffMembers();
-      if (statusNode) {
-        statusNode.textContent = `Display format updated for ${resolveStaffDisplayName(updated)}.`;
-      }
-      return;
-    }
-
     if (target instanceof HTMLSelectElement && target.dataset.enrollmentStaffAssignedClassIndex !== undefined) {
       const index = Number.parseInt(String(target.dataset.enrollmentStaffAssignedClassIndex || ''), 10);
       if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
@@ -5043,7 +5009,6 @@ const hydrateEnrollmentManager = (managerNode) => {
       subject: staffSubjectInput.value,
       email: staffEmailInput.value,
       phone: staffPhoneInput.value,
-      displayNameOverride: staffDisplayOverrideInput.value,
       notes: staffNotesInput.value,
       houseId: selectedStaffHouseId
     });
