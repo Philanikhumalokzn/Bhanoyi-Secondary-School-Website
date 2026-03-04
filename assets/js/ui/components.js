@@ -7651,6 +7651,105 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return true;
   };
 
+  const inferSportFromCatalog = () => {
+    try {
+      const raw = localStorage.getItem(fixtureCatalogStorageKey);
+      if (!raw) return '';
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return '';
+      const sportKeys = Array.from(
+        new Set(
+          Object.keys(parsed)
+            .map((fixtureId) => String(fixtureId || '').split(':')[1] || '')
+            .map((entry) => String(entry || '').trim())
+            .filter((entry) => entry === 'soccer' || entry === 'netball')
+        )
+      );
+      return sportKeys[0] || '';
+    } catch {
+      return '';
+    }
+  };
+
+  const restorePublishedCatalogForSport = (sportKey) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return false;
+
+    let parsedCatalog = {};
+    try {
+      const raw = localStorage.getItem(fixtureCatalogStorageKey);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return false;
+      parsedCatalog = parsed;
+    } catch {
+      return false;
+    }
+
+    const reconstructedFixtures = Object.entries(parsedCatalog)
+      .map(([fixtureId, entry]) => {
+        const parts = String(fixtureId || '').split(':');
+        const fixtureSportKey = String(parts[1] || '').trim();
+        if (fixtureSportKey !== key) return null;
+        if (!entry || typeof entry !== 'object') return null;
+        return {
+          slotKey: String(parts.slice(2).join(':') || `R${entry.round}M${entry.match}`).trim(),
+          round: parsePositiveInt(entry.round, 1),
+          leg: String(entry.leg || '').trim() || 'First',
+          match: parsePositiveInt(entry.match, 1),
+          homeId: String(entry.homeId || '').trim(),
+          awayId: String(entry.awayId || '').trim(),
+          sportKey: fixtureSportKey,
+          sportLabel: String(entry.sport || '').trim(),
+          formatLabel: String(entry.format || '').trim()
+        };
+      })
+      .filter(Boolean)
+      .filter((entry) => entry.homeId && entry.awayId && entry.homeId !== entry.awayId)
+      .sort((left, right) => {
+        if (left.round !== right.round) return left.round - right.round;
+        if (left.match !== right.match) return left.match - right.match;
+        return left.slotKey.localeCompare(right.slotKey);
+      });
+
+    if (!reconstructedFixtures.length) return false;
+
+    const fixtureTeamIds = Array.from(
+      new Set(reconstructedFixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))
+    );
+    const integrity = validateNoDuplicatePairingsPerLeg(reconstructedFixtures, fixtureTeamIds);
+    if (!integrity.ok) return false;
+
+    if (fixtureTeamIds.length) {
+      setSelectedTeamIds(fixtureTeamIds);
+    }
+
+    const profile = selectedSportProfile();
+    if (!profile) return false;
+    const setup = profile.readSetup();
+
+    lastSportKey = key;
+    lastSportLabel = profile.label;
+    lastFormatLabel = String(setup.formatLabel || reconstructedFixtures[0]?.formatLabel || '').trim();
+    pendingFixtureApproval = false;
+    approvedWithUnfairness = false;
+    pinnedFixtureSlotKeys = new Set();
+    lastFixtures = reconstructedFixtures.map((entry) => ({
+      ...entry,
+      sportLabel: profile.label,
+      formatLabel: String(entry.formatLabel || lastFormatLabel || '').trim()
+    }));
+
+    refreshCurrentUnfairnessReport(lastFixtures);
+    loadFixtureDates();
+    renderFixtures(lastFixtures);
+
+    if (statusNode) {
+      statusNode.textContent = `${profile.label}: restored ${lastFixtures.length} saved fixture(s) from published catalog.`;
+    }
+    return true;
+  };
+
   const escapeCsvValue = (value) => {
     const normalized = String(value ?? '').replace(/"/g, '""');
     return `"${normalized}"`;
@@ -8386,8 +8485,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     loadFixtureCreatorState();
     if (sportSelect instanceof HTMLSelectElement) {
       const savedSport = String(fixtureCreatorState.lastSport || '').trim();
-      if (savedSport === 'soccer' || savedSport === 'netball') {
-        sportSelect.value = savedSport;
+      const fallbackSport = inferSportFromCatalog();
+      const bootSport = savedSport === 'soccer' || savedSport === 'netball' ? savedSport : fallbackSport;
+      if (bootSport === 'soccer' || bootSport === 'netball') {
+        sportSelect.value = bootSport;
       }
     }
     hydrateDateRules(activeRulesBucket());
@@ -8395,7 +8496,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     refreshFairnessSummary();
     renderFairnessDropdownOptions();
     const bootSport = selectedSportKey();
-    if (!restoreSavedStateForSport(bootSport)) {
+    if (!restoreSavedStateForSport(bootSport) && !restorePublishedCatalogForSport(bootSport)) {
       generateFixtures();
     }
   };
