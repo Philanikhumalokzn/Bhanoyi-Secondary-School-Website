@@ -3565,6 +3565,23 @@ const wireSportsHouseManagerInline = () => {
     }
   >;
 
+  type HouseSummarySnapshot = {
+    learners: number;
+    teachers: number;
+    sportingAssigned: number;
+    houseManagers: number;
+    captaincies: number;
+  };
+
+  type AllocationSnapshot = {
+    totalLearners: number;
+    allocatedLearners: number;
+    unallocatedLearners: number;
+    totalTeachers: number;
+    unallocatedRecords: EnrollmentLearnerRecord[];
+    byHouse: Record<string, HouseSummarySnapshot>;
+  };
+
   const sportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
   const sportsRuleStorageKey = 'bhanoyi.houseSportsCodeRules';
   const houseRoleStorageKey = 'bhanoyi.houseRoleAssignments';
@@ -3906,6 +3923,37 @@ const wireSportsHouseManagerInline = () => {
   let memberGenderFilterValue = 'all';
   let memberSportFilterValue = 'all';
   let selectedMemberKeys = new Set<string>();
+
+  const unallocatedOverlay = document.createElement('div');
+  unallocatedOverlay.className = 'inline-house-unallocated-modal is-hidden';
+  unallocatedOverlay.innerHTML = `
+    <div class="inline-house-unallocated-backdrop" data-house-unallocated-close="true"></div>
+    <article class="panel inline-house-unallocated-panel" role="dialog" aria-modal="true" aria-label="Manage unallocated learners">
+      <div class="inline-house-unallocated-head">
+        <h3>Unallocated Learners</h3>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-unallocated-auto="true">Auto-allocate randomly</button>
+          <button type="button" class="btn btn-secondary" data-house-unallocated-close="true">Close</button>
+        </div>
+      </div>
+      <p class="inline-house-members-meta" data-house-unallocated-meta></p>
+      <div class="inline-house-unallocated-list" data-house-unallocated-list></div>
+    </article>
+  `;
+  document.body.appendChild(unallocatedOverlay);
+
+  const unallocatedMeta = unallocatedOverlay.querySelector('[data-house-unallocated-meta]');
+  const unallocatedList = unallocatedOverlay.querySelector('[data-house-unallocated-list]');
+  const unallocatedAutoButton = unallocatedOverlay.querySelector('[data-house-unallocated-auto="true"]');
+  const unallocatedCloseButtons = Array.from(unallocatedOverlay.querySelectorAll('[data-house-unallocated-close="true"]'));
+
+  if (
+    !(unallocatedMeta instanceof HTMLElement) ||
+    !(unallocatedList instanceof HTMLElement) ||
+    !(unallocatedAutoButton instanceof HTMLButtonElement)
+  ) {
+    return;
+  }
 
   const getExpandedHouseSectionMaxHeight = (body: HTMLElement) => {
     return `${Math.max(0, body.scrollHeight)}px`;
@@ -4256,6 +4304,187 @@ const wireSportsHouseManagerInline = () => {
       }
     });
   };
+
+  const buildAllocationSnapshot = (): AllocationSnapshot => {
+    const records = collectEnrollmentLearners();
+    const learners = records.filter((record) => record.memberType === 'learner');
+    const teachers = records.filter((record) => record.memberType === 'teacher');
+    const allowedHouseIds = new Set(readState.options.map((entry) => entry.id));
+    const unallocatedRecords = learners.filter((record) => !record.houseId || !allowedHouseIds.has(record.houseId));
+    const assignmentStore = loadHouseSportsAssignments();
+    const roleStore = loadHouseRoleAssignments();
+
+    const byHouse = readState.options.reduce<Record<string, HouseSummarySnapshot>>((accumulator, house) => {
+      const houseLearners = learners.filter((record) => record.houseId === house.id);
+      const houseTeachers = teachers.filter((record) => record.houseId === house.id);
+      const houseAssignments = assignmentStore[house.id] || {};
+      const roleEntry = roleStore[house.id] || { staffRoles: {}, learnerCaptaincies: {} };
+      const sportingAssigned = houseLearners.filter((record) => Array.isArray(houseAssignments[record.key]) && houseAssignments[record.key].length).length;
+      const houseManagers = Object.values(roleEntry.staffRoles).filter((roles) => Array.isArray(roles) && roles.includes('house_manager')).length;
+      const captaincies = Object.keys(roleEntry.learnerCaptaincies).length;
+
+      accumulator[house.id] = {
+        learners: houseLearners.length,
+        teachers: houseTeachers.length,
+        sportingAssigned,
+        houseManagers,
+        captaincies
+      };
+      return accumulator;
+    }, {});
+
+    return {
+      totalLearners: learners.length,
+      allocatedLearners: learners.length - unallocatedRecords.length,
+      unallocatedLearners: unallocatedRecords.length,
+      totalTeachers: teachers.length,
+      unallocatedRecords,
+      byHouse
+    };
+  };
+
+  const renderHouseEditorSummaries = () => {
+    if (!editors.length) return;
+    const snapshot = buildAllocationSnapshot();
+
+    editors.forEach((entry) => {
+      const house = readState.options.find((option) => option.id === entry.id);
+      const metrics = snapshot.byHouse[entry.id] || {
+        learners: 0,
+        teachers: 0,
+        sportingAssigned: 0,
+        houseManagers: 0,
+        captaincies: 0
+      };
+      const color = normalizeHouseColor(entry.colorInput.value || house?.color || '', '#64748b');
+      const colorLabel = resolveHouseColorLabel(color);
+      entry.summaryNode.innerHTML = `
+        <p class="inline-house-summary-title">
+          <span class="enrollment-house-avatar" style="--house-color:${color};"></span>
+          <strong>${escapeHtmlText(normalizeText(entry.nameInput.value || house?.name || '', 80) || 'House')}</strong>
+        </p>
+        <p class="inline-house-summary-meta">Colour: ${escapeHtmlText(colorLabel)}</p>
+        <p class="inline-house-summary-meta">Learners: ${metrics.learners} · Teachers: ${metrics.teachers}</p>
+        <p class="inline-house-summary-meta">Sporting assigned: ${metrics.sportingAssigned} · Captains: ${metrics.captaincies}</p>
+        <p class="inline-house-summary-meta">House managers: ${metrics.houseManagers}</p>
+      `;
+    });
+  };
+
+  const renderOverallAllocationStats = () => {
+    if (!overallStatsNode) return;
+    const snapshot = buildAllocationSnapshot();
+    overallStatsNode.innerHTML = `
+      <span class="inline-house-stat-chip">Allocated learners: <strong>${snapshot.allocatedLearners}</strong></span>
+      <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-unallocated="true">Unallocated learners: <strong>${snapshot.unallocatedLearners}</strong></button>
+      <span class="inline-house-stat-chip">Total learners: <strong>${snapshot.totalLearners}</strong></span>
+      <span class="inline-house-stat-chip">Total teachers: <strong>${snapshot.totalTeachers}</strong></span>
+    `;
+
+    const openUnallocatedButton = overallStatsNode.querySelector('[data-house-open-unallocated="true"]');
+    if (openUnallocatedButton instanceof HTMLButtonElement) {
+      openUnallocatedButton.addEventListener('click', () => {
+        renderUnallocatedOverlay();
+        unallocatedOverlay.classList.remove('is-hidden');
+      });
+    }
+  };
+
+  const closeUnallocatedOverlay = () => {
+    unallocatedOverlay.classList.add('is-hidden');
+  };
+
+  const renderUnallocatedOverlay = () => {
+    const snapshot = buildAllocationSnapshot();
+    unallocatedMeta.textContent = `${snapshot.unallocatedLearners} learner${snapshot.unallocatedLearners === 1 ? '' : 's'} currently have no house allocation.`;
+
+    if (!snapshot.unallocatedRecords.length) {
+      unallocatedList.innerHTML = '<p class="inline-house-members-empty">All learners are already allocated to houses.</p>';
+      return;
+    }
+
+    const rows = snapshot.unallocatedRecords
+      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      .map((record) => {
+        const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'Class not set';
+        return `
+          <div class="inline-house-unallocated-item" data-house-unallocated-key="${escapeHtmlAttribute(record.key)}">
+            <div class="inline-house-unallocated-main">
+              <p class="inline-house-unallocated-name">${escapeHtmlText(record.displayName)}</p>
+              <p class="inline-house-unallocated-meta">${escapeHtmlText(classLabel)}${record.admissionNo ? ` · Adm: ${escapeHtmlText(record.admissionNo)}` : ''}${record.gender ? ` · ${escapeHtmlText(record.gender)}` : ''}</p>
+            </div>
+            <div class="inline-house-unallocated-actions">
+              <select data-house-unallocated-target="${escapeHtmlAttribute(record.key)}">
+                ${readState.options
+                  .map((house) => `<option value="${escapeHtmlAttribute(house.id)}">${escapeHtmlText(house.name)}</option>`)
+                  .join('')}
+              </select>
+              <button type="button" class="btn btn-primary" data-house-unallocated-assign="${escapeHtmlAttribute(record.key)}">Allocate</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    unallocatedList.innerHTML = rows;
+  };
+
+  unallocatedCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeUnallocatedOverlay);
+  });
+
+  unallocatedAutoButton.addEventListener('click', () => {
+    const snapshot = buildAllocationSnapshot();
+    if (!snapshot.unallocatedRecords.length) {
+      showStatus('All learners are already allocated.');
+      return;
+    }
+
+    const candidateHouses = readState.options.map((entry) => entry.id).filter(Boolean);
+    if (!candidateHouses.length) {
+      showStatus('No house options available for allocation.');
+      return;
+    }
+
+    snapshot.unallocatedRecords.forEach((record) => {
+      const randomHouseId = candidateHouses[Math.floor(Math.random() * candidateHouses.length)];
+      record.learnerRef.houseId = randomHouseId;
+    });
+    persistEnrollmentRecords(snapshot.unallocatedRecords);
+    renderUnallocatedOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    showStatus(`Randomly allocated ${snapshot.unallocatedRecords.length} learner${snapshot.unallocatedRecords.length === 1 ? '' : 's'}.`);
+  });
+
+  unallocatedList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const assignButton = target.closest('[data-house-unallocated-assign]') as HTMLButtonElement | null;
+    if (!assignButton) return;
+
+    const memberKey = String(assignButton.dataset.houseUnallocatedAssign || '').trim();
+    if (!memberKey) return;
+
+    const row = assignButton.closest('[data-house-unallocated-key]') as HTMLElement | null;
+    if (!row) return;
+    const selector = row.querySelector('[data-house-unallocated-target]') as HTMLSelectElement | null;
+    if (!(selector instanceof HTMLSelectElement)) return;
+    const houseId = normalizeHouseId(selector.value, '');
+    if (!houseId) return;
+
+    const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'learner');
+    if (!targetRecord) return;
+    targetRecord.learnerRef.houseId = houseId;
+    persistEnrollmentRecords([targetRecord]);
+    renderUnallocatedOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    const houseName = readState.options.find((entry) => entry.id === houseId)?.name || 'selected house';
+    showStatus(`${targetRecord.displayName} allocated to ${houseName}.`);
+  });
 
   const closeHouseModal = () => {
     houseModal.classList.add('is-hidden');
@@ -4799,6 +5028,9 @@ const wireSportsHouseManagerInline = () => {
 
     houseModalPullButton.disabled = !available.length;
 
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+
     requestAnimationFrame(() => {
       refreshExpandedHouseSectionHeights();
     });
@@ -5112,11 +5344,16 @@ const wireSportsHouseManagerInline = () => {
       editorWrap.remove();
       editorWrap = null;
     }
+    overallStatsNode = null;
+    closeUnallocatedOverlay();
     editors = [];
   };
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'inline-house-edit-actions';
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
@@ -5154,6 +5391,8 @@ const wireSportsHouseManagerInline = () => {
 
         localStorage.setItem('bhanoyi.sportsHouseOptions', JSON.stringify(houseOptions));
         readState.options = [...houseOptions];
+        renderHouseEditorSummaries();
+        renderOverallAllocationStats();
         showStatus('House names saved. Refreshing...');
         window.location.reload();
       } catch (error) {
@@ -5169,8 +5408,14 @@ const wireSportsHouseManagerInline = () => {
       renderReadControls();
     });
 
-    controls.appendChild(saveBtn);
-    controls.appendChild(cancelBtn);
+    actionsWrap.appendChild(saveBtn);
+    actionsWrap.appendChild(cancelBtn);
+    controls.appendChild(actionsWrap);
+
+    overallStatsNode = document.createElement('div');
+    overallStatsNode.className = 'inline-house-overall-stats';
+    controls.appendChild(overallStatsNode);
+    renderOverallAllocationStats();
   };
 
   const enterEdit = () => {
@@ -5183,7 +5428,7 @@ const wireSportsHouseManagerInline = () => {
     editors = [];
 
     readState.options.forEach((house, index) => {
-      const { wrapper, input } = createTextEditor(`House ${index + 1} Name`, house.name);
+      const { wrapper, input } = createTextEditor('House Name', house.name);
       wrapper.classList.add('inline-match-house-editor');
 
       const openMembersButton = document.createElement('button');
@@ -5216,12 +5461,25 @@ const wireSportsHouseManagerInline = () => {
       colorField.appendChild(colorInput);
       wrapper.appendChild(colorField);
 
-      editors.push({ id: house.id, nameInput: input, colorInput });
+      const summaryNode = document.createElement('div');
+      summaryNode.className = 'inline-house-summary';
+      wrapper.appendChild(summaryNode);
+
+      input.addEventListener('input', () => {
+        renderHouseEditorSummaries();
+        renderOverallAllocationStats();
+      });
+      colorInput.addEventListener('change', () => {
+        renderHouseEditorSummaries();
+      });
+
+      editors.push({ id: house.id, nameInput: input, colorInput, summaryNode });
       editorWrap?.appendChild(wrapper);
     });
 
     controls.after(editorWrap);
     renderEditControls();
+    renderHouseEditorSummaries();
   };
 
   renderReadControls();
@@ -5275,7 +5533,8 @@ const wireFixtureCreatorInline = (section: Element) => {
   }
 
   let editorWrap: HTMLElement | null = null;
-  let sportInput: HTMLInputElement | null = null;
+  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement; summaryNode: HTMLElement }> = [];
+  let overallStatsNode: HTMLElement | null = null;
   let competitionInput: HTMLInputElement | null = null;
   let venueInput: HTMLInputElement | null = null;
   let houseEditors: Array<{ id: string; input: HTMLInputElement }> = [];
