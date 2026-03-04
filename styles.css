@@ -3561,6 +3561,12 @@ body.match-log-workspace-open {
   background: var(--surface);
 }
 
+.fixture-table-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .fixture-creator-shell .sports-workflow-step.is-expanded {
   overflow: visible;
 }

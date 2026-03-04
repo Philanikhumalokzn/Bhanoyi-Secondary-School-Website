@@ -2229,6 +2229,9 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   </tbody>
                 </table>
               </div>
+              <div class="fixture-table-actions">
+                <button type="button" class="btn btn-secondary" data-fixture-save-draft>Save fixture draft</button>
+              </div>
             </div>
           </section>
         </article>
@@ -5299,6 +5302,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const approvalStatusNode = fixtureNode.querySelector('[data-fixture-approval-status]');
   const approveResolvedButton = fixtureNode.querySelector('[data-fixture-approve-resolved]');
   const approveAnywayButton = fixtureNode.querySelector('[data-fixture-approve-anyway]');
+  const saveDraftButton = fixtureNode.querySelector('[data-fixture-save-draft]');
 
   if (!bodyNode || !generateButton || !exportButton) return;
 
@@ -8300,6 +8304,22 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   approveAnywayButton?.addEventListener('click', () => {
     approveFixturePreview({ allowUnfairness: true });
+  });
+
+  saveDraftButton?.addEventListener('click', () => {
+    if (!lastFixtures.length) {
+      if (statusNode) {
+        statusNode.textContent = 'No fixtures to save yet. Generate fixtures first.';
+      }
+      showSmartToast('No fixtures to save yet. Generate fixtures first.', { tone: 'error' });
+      return;
+    }
+
+    persistActiveSportState();
+    if (statusNode) {
+      statusNode.textContent = 'Fixture draft saved. Use Finalize & sync when you are ready to publish to calendar.';
+    }
+    showSmartToast('Fixture draft saved.', { tone: 'success' });
   });
 
   sportSelect?.addEventListener('change', () => {
