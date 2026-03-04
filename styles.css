@@ -3561,6 +3561,26 @@ body.match-log-workspace-open {
   background: var(--surface);
 }
 
+.fixture-template-row {
+  margin-bottom: 8px;
+}
+
+.fixture-template-row label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.fixture-template-row select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+}
+
 .fixture-table-actions {
   margin-top: 8px;
   display: flex;

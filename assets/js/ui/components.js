@@ -2207,6 +2207,14 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>4) Finalize & sync (approve with unfairnesses)</button>
                 </div>
               </div>
+              <div class="fixture-template-row">
+                <label>
+                  Use previous generated fixture as template
+                  <select data-fixture-template-select>
+                    <option value="">No template selected</option>
+                  </select>
+                </label>
+              </div>
               <div class="fixture-table-wrap">
                 <table class="fixture-table">
                   <thead>
@@ -5303,6 +5311,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const approveResolvedButton = fixtureNode.querySelector('[data-fixture-approve-resolved]');
   const approveAnywayButton = fixtureNode.querySelector('[data-fixture-approve-anyway]');
   const saveDraftButton = fixtureNode.querySelector('[data-fixture-save-draft]');
+  const fixtureTemplateSelect = fixtureNode.querySelector('[data-fixture-template-select]');
 
   if (!bodyNode || !generateButton || !exportButton) return;
 
@@ -5333,6 +5342,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
   const fixtureRulesStorageKey = `bhanoyi.fixtureDateRules.${fixtureSectionKey}`;
   const fixtureCreatorStateStorageKey = `bhanoyi.fixtureCreatorState.${fixtureSectionKey}`;
+  const fixtureHistoryStorageKey = `bhanoyi.fixtureHistory.${fixtureSectionKey}`;
   const defaultRulesBucket = 'default';
   const defaultFairnessRuleIds = [
     'equal_matches_season',
@@ -5349,6 +5359,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSport: '',
     sports: {}
   };
+  let fixtureTemplateHistory = [];
+  let selectedFixtureTemplateId = '';
 
   window.addEventListener('bhanoyi:remote-persist-status', (event) => {
     const key = String(event?.detail?.storageKey || '').trim();
@@ -5356,7 +5368,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       key !== fixtureCatalogStorageKey &&
       key !== fixtureDateStorageKey &&
       key !== fixtureRulesStorageKey &&
-      key !== fixtureCreatorStateStorageKey
+      key !== fixtureCreatorStateStorageKey &&
+      key !== fixtureHistoryStorageKey
     ) {
       return;
     }
@@ -5423,6 +5436,113 @@ const hydrateFixtureCreator = (fixtureNode) => {
     } catch {
       return;
     }
+  };
+
+  const loadFixtureTemplateHistory = () => {
+    try {
+      const raw = localStorage.getItem(fixtureHistoryStorageKey);
+      if (!raw) {
+        fixtureTemplateHistory = [];
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        fixtureTemplateHistory = [];
+        return;
+      }
+
+      fixtureTemplateHistory = parsed
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+          id: String(entry.id || '').trim(),
+          sportKey: String(entry.sportKey || '').trim(),
+          createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+          fixtures: Array.isArray(entry.fixtures) ? entry.fixtures : []
+        }))
+        .filter((entry) => entry.id && (entry.sportKey === 'soccer' || entry.sportKey === 'netball'))
+        .sort((left, right) => right.createdAt - left.createdAt);
+    } catch {
+      fixtureTemplateHistory = [];
+    }
+  };
+
+  const saveFixtureTemplateHistory = () => {
+    const payload = fixtureTemplateHistory.slice(0, 60);
+    localStorage.setItem(fixtureHistoryStorageKey, JSON.stringify(payload));
+    void persistLocalStore(fixtureHistoryStorageKey, payload);
+  };
+
+  const fixtureTemplateSignature = (fixtures) =>
+    (Array.isArray(fixtures) ? fixtures : [])
+      .map((entry) => {
+        const round = parsePositiveInt(entry?.round, 1);
+        const leg = String(entry?.leg || '').trim();
+        const match = parsePositiveInt(entry?.match, 1);
+        const homeId = String(entry?.homeId || '').trim();
+        const awayId = String(entry?.awayId || '').trim();
+        return `${round}:${leg}:${match}:${homeId}:${awayId}`;
+      })
+      .join('|');
+
+  const renderFixtureTemplateOptions = () => {
+    if (!(fixtureTemplateSelect instanceof HTMLSelectElement)) return;
+    const activeSport = selectedSportKey();
+    const options = fixtureTemplateHistory
+      .filter((entry) => !activeSport || entry.sportKey === activeSport)
+      .map((entry) => {
+        const dateLabel = new Date(entry.createdAt).toLocaleString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        const sportLabel = entry.sportKey === 'netball' ? 'Netball' : 'Soccer';
+        const fixtureCount = Array.isArray(entry.fixtures) ? entry.fixtures.length : 0;
+        return `<option value="${escapeHtmlAttribute(entry.id)}">${escapeHtmlText(`${sportLabel} • ${dateLabel} • ${fixtureCount} fixtures`)}</option>`;
+      });
+
+    fixtureTemplateSelect.innerHTML = [
+      '<option value="">No template selected</option>',
+      ...options
+    ].join('');
+
+    const hasSelectedTemplateOption = Array.from(fixtureTemplateSelect.options).some(
+      (option) => String(option.value || '').trim() === selectedFixtureTemplateId
+    );
+
+    if (selectedFixtureTemplateId && hasSelectedTemplateOption) {
+      fixtureTemplateSelect.value = selectedFixtureTemplateId;
+    } else {
+      selectedFixtureTemplateId = '';
+      fixtureTemplateSelect.value = '';
+    }
+  };
+
+  const addFixtureHistorySnapshot = (sportKey, fixtures) => {
+    const normalizedSport = String(sportKey || '').trim();
+    if ((normalizedSport !== 'soccer' && normalizedSport !== 'netball') || !Array.isArray(fixtures) || !fixtures.length) {
+      return;
+    }
+
+    const sanitized = sanitizeStoredFixturesForSport(normalizedSport, fixtures);
+    if (!sanitized.length) return;
+
+    const nextSignature = fixtureTemplateSignature(sanitized);
+    const latestSameSport = fixtureTemplateHistory.find((entry) => entry.sportKey === normalizedSport);
+    if (latestSameSport && fixtureTemplateSignature(latestSameSport.fixtures) === nextSignature) {
+      return;
+    }
+
+    fixtureTemplateHistory.unshift({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sportKey: normalizedSport,
+      createdAt: Date.now(),
+      fixtures: sanitized
+    });
+    fixtureTemplateHistory = fixtureTemplateHistory.slice(0, 60);
+    saveFixtureTemplateHistory();
+    renderFixtureTemplateOptions();
   };
 
   const dispatchFixtureSyncEvent = () => {
@@ -7471,16 +7591,49 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teams);
     const selectedRules = selectedFairnessRuleIds();
     const generationOrders = buildGenerationTeamOrders(teams, 120);
-    let successfulGeneration = null;
-    let generationFailureReason = 'Unable to generate fixtures that satisfy selected fairness rules.';
+    const selectedTemplateEntry = fixtureTemplateHistory.find((entry) => entry.id === selectedFixtureTemplateId) || null;
 
-    generationOrders.some((teamOrder) => {
-      const nextFixtures = buildSingleRoundRobin(teamOrder).map((fixture) => ({
+    let templateCandidate = null;
+    if (selectedTemplateEntry && selectedTemplateEntry.sportKey === profile.key) {
+      const templateFixtures = sanitizeStoredFixturesForSport(profile.key, selectedTemplateEntry.fixtures || []).map((fixture) => ({
         ...fixture,
         sportKey: profile.key,
         sportLabel: profile.label,
         formatLabel: lastFormatLabel
       }));
+      const templateTeamIds = Array.from(
+        new Set(templateFixtures.flatMap((fixture) => [fixture.homeId, fixture.awayId]).filter(Boolean))
+      ).sort();
+      const selectedTeamSet = Array.from(new Set(teams)).sort();
+      if (
+        templateFixtures.length &&
+        templateTeamIds.length === selectedTeamSet.length &&
+        templateTeamIds.every((teamId, index) => teamId === selectedTeamSet[index])
+      ) {
+        templateCandidate = {
+          fixtures: templateFixtures,
+          teamOrder: teams
+        };
+      }
+    }
+
+    let successfulGeneration = null;
+    let generationFailureReason = 'Unable to generate fixtures that satisfy selected fairness rules.';
+
+    const generationCandidates = templateCandidate
+      ? [{ teamOrder: templateCandidate.teamOrder, fixtures: templateCandidate.fixtures }, ...generationOrders.map((teamOrder) => ({ teamOrder }))]
+      : generationOrders.map((teamOrder) => ({ teamOrder }));
+
+    generationCandidates.some((candidate) => {
+      const teamOrder = Array.isArray(candidate.teamOrder) ? candidate.teamOrder : teams;
+      const nextFixtures = Array.isArray(candidate.fixtures)
+        ? candidate.fixtures.map((fixture) => ({ ...fixture }))
+        : buildSingleRoundRobin(teamOrder).map((fixture) => ({
+            ...fixture,
+            sportKey: profile.key,
+            sportLabel: profile.label,
+            formatLabel: lastFormatLabel
+          }));
 
       const pinnedIndexes = [];
       const constrainedFixtures = nextFixtures.map((fixture, index) => {
@@ -7548,6 +7701,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     );
 
     refreshCurrentUnfairnessReport(lastFixtures);
+    addFixtureHistorySnapshot(profile.key, lastFixtures);
     if (isAdminMode) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
@@ -8434,6 +8588,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
     showSmartToast('Fixture draft saved.', { tone: 'success' });
   });
 
+  fixtureTemplateSelect?.addEventListener('change', () => {
+    selectedFixtureTemplateId = String(fixtureTemplateSelect.value || '').trim();
+    if (statusNode instanceof HTMLElement && selectedFixtureTemplateId) {
+      statusNode.textContent = 'Template selected. Next Generate will use it as starting layout if teams match.';
+    }
+  });
+
   sportSelect?.addEventListener('change', () => {
     hydrateDateRules(activeRulesBucket());
     const activeSport = selectedSportKey();
@@ -8442,6 +8603,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       saveFixtureCreatorState();
     }
     refreshSportPanelState();
+    renderFixtureTemplateOptions();
     if (!restoreSavedStateForSport(activeSport)) {
       setSelectedFairnessRuleIds(defaultFairnessRuleIds);
       pinnedFixtureSlotKeys = new Set();
@@ -8491,11 +8653,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       syncLocalStoreFromRemote(fixtureCatalogStorageKey),
       syncLocalStoreFromRemote(fixtureDateStorageKey),
       syncLocalStoreFromRemote(fixtureRulesStorageKey),
-      syncLocalStoreFromRemote(fixtureCreatorStateStorageKey)
+      syncLocalStoreFromRemote(fixtureCreatorStateStorageKey),
+      syncLocalStoreFromRemote(fixtureHistoryStorageKey)
     ]).catch(() => null);
 
     loadFixtureDates();
     loadFixtureCreatorState();
+    loadFixtureTemplateHistory();
     if (sportSelect instanceof HTMLSelectElement) {
       const savedSport = String(fixtureCreatorState.lastSport || '').trim();
       const fallbackSport = inferSportFromCatalog();
@@ -8506,6 +8670,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
     hydrateDateRules(activeRulesBucket());
     refreshSportPanelState();
+    renderFixtureTemplateOptions();
     refreshFairnessSummary();
     renderFairnessDropdownOptions();
     const bootSport = selectedSportKey();
