@@ -61,6 +61,7 @@ export const exportProfessionalWorkbook = async ({
   title,
   subtitle,
   contextLine,
+  contextLineRich,
   metaLine,
   columns,
   rows,
@@ -117,7 +118,30 @@ export const exportProfessionalWorkbook = async ({
   sheet.mergeCells(`A5:${endColumnLabel}5`);
   sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
   sheet.getCell('A2').value = title || 'Official Export';
-  sheet.getCell('A3').value = contextLine || '';
+  if (Array.isArray(contextLineRich) && contextLineRich.length) {
+    sheet.getCell('A3').value = {
+      richText: contextLineRich
+        .filter((entry) => entry && typeof entry === 'object' && String(entry.text || '').length)
+        .map((entry) => {
+          const normalizedColor = String(entry.color || '')
+            .trim()
+            .replace('#', '')
+            .toUpperCase();
+          const isValidColor = /^[0-9A-F]{6}$/.test(normalizedColor) || /^[0-9A-F]{8}$/.test(normalizedColor);
+          return {
+            text: String(entry.text || ''),
+            font: {
+              name: 'Calibri',
+              bold: true,
+              size: 10.5,
+              color: { argb: isValidColor ? `FF${normalizedColor.slice(-6)}` : `FF${theme.white}` }
+            }
+          };
+        })
+    };
+  } else {
+    sheet.getCell('A3').value = contextLine || '';
+  }
   sheet.getCell('A4').value = metaLine || '';
   sheet.getCell('A5').value = `Generated on: ${new Date().toLocaleString('en-GB')}`;
 

@@ -3422,6 +3422,21 @@ const wireSportsHouseManagerInline = () => {
     return fallback;
   };
 
+  const resolveHouseColorLabel = (value: unknown) => {
+    const normalizedColor = normalizeHouseColor(value, '#64748b');
+    const exactClassicColor = CLASSIC_HOUSE_COLOR_OPTIONS.find((entry) => normalizeHouseColor(entry.value, '') === normalizedColor);
+    if (exactClassicColor) {
+      return exactClassicColor.label;
+    }
+
+    const shortHex = /^#([0-9a-f]{3})$/i;
+    const shortMatch = normalizedColor.match(shortHex);
+    if (shortMatch) {
+      return `#${shortMatch[1].toUpperCase()}`;
+    }
+    return normalizedColor.toUpperCase();
+  };
+
   const normalizeHouseId = (value: unknown, fallback: string) => {
     const raw = String(value || '')
       .trim()
@@ -4835,7 +4850,21 @@ const wireSportsHouseManagerInline = () => {
         fileName: `${safeHouseName}-house-register.xlsx`,
         sheetName: 'House Register',
         title: 'Official House Register',
-        contextLine: activeHouse.name,
+        contextLine: `${activeHouse.name} • ${resolveHouseColorLabel(activeHouse.color)}`,
+        contextLineRich: [
+          {
+            text: `${activeHouse.name} `,
+            color: 'FFFFFF'
+          },
+          {
+            text: '• ',
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          },
+          {
+            text: resolveHouseColorLabel(activeHouse.color),
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          }
+        ],
         metaLine: `Members: ${rows.length}`,
         columns: [
           { header: 'Role', key: 'role', width: 12, align: 'center' },
