@@ -7651,20 +7651,27 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return true;
   };
 
+  const normalizeCatalogSportKey = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'soccer') return 'soccer';
+    if (raw === 'netball') return 'netball';
+    return '';
+  };
+
   const inferSportFromCatalog = () => {
     try {
       const raw = localStorage.getItem(fixtureCatalogStorageKey);
       if (!raw) return '';
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return '';
-      const sportKeys = Array.from(
-        new Set(
-          Object.keys(parsed)
-            .map((fixtureId) => String(fixtureId || '').split(':')[1] || '')
-            .map((entry) => String(entry || '').trim())
-            .filter((entry) => entry === 'soccer' || entry === 'netball')
-        )
-      );
+      const sportKeys = Array.from(new Set(
+        Object.entries(parsed)
+          .flatMap(([fixtureId, entry]) => {
+            const idSport = normalizeCatalogSportKey(String(fixtureId || '').split(':')[1] || '');
+            const valueSport = normalizeCatalogSportKey(entry?.sportKey || entry?.sport || '');
+            return [idSport, valueSport].filter(Boolean);
+          })
+      ));
       return sportKeys[0] || '';
     } catch {
       return '';
@@ -7672,7 +7679,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const restorePublishedCatalogForSport = (sportKey) => {
-    const key = String(sportKey || '').trim();
+    let key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') {
+      key = inferSportFromCatalog();
+    }
     if (key !== 'soccer' && key !== 'netball') return false;
 
     let parsedCatalog = {};
@@ -7689,11 +7699,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const reconstructedFixtures = Object.entries(parsedCatalog)
       .map(([fixtureId, entry]) => {
         const parts = String(fixtureId || '').split(':');
-        const fixtureSportKey = String(parts[1] || '').trim();
+        const fixtureSportKey =
+          normalizeCatalogSportKey(parts[1]) ||
+          normalizeCatalogSportKey(entry?.sportKey || entry?.sport || '');
         if (fixtureSportKey !== key) return null;
         if (!entry || typeof entry !== 'object') return null;
+        const fallbackSlot = `${String(entry.leg || 'First')}::R${parsePositiveInt(entry.round, 1)}M${parsePositiveInt(entry.match, 1)}`;
         return {
-          slotKey: String(parts.slice(2).join(':') || `R${entry.round}M${entry.match}`).trim(),
+          slotKey: String(parts.slice(2).join(':') || entry.slotKey || fallbackSlot).trim(),
           round: parsePositiveInt(entry.round, 1),
           leg: String(entry.leg || '').trim() || 'First',
           match: parsePositiveInt(entry.match, 1),
@@ -8496,7 +8509,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     refreshFairnessSummary();
     renderFairnessDropdownOptions();
     const bootSport = selectedSportKey();
-    if (!restoreSavedStateForSport(bootSport) && !restorePublishedCatalogForSport(bootSport)) {
+    if (!restoreSavedStateForSport(bootSport) && !restorePublishedCatalogForSport(bootSport || inferSportFromCatalog())) {
       generateFixtures();
     }
   };
