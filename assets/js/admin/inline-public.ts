@@ -3541,7 +3541,8 @@ const wireSportsHouseManagerInline = () => {
   };
 
   let editorWrap: HTMLElement | null = null;
-  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement }> = [];
+  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement; summaryNode: HTMLElement }> = [];
+  let overallStatsNode: HTMLElement | null = null;
 
   type EnrollmentStoreRoot = Record<string, unknown>;
   type EnrollmentLearnerRecord = {
@@ -5738,8 +5739,7 @@ const wireFixtureCreatorInline = (section: Element) => {
   }
 
   let editorWrap: HTMLElement | null = null;
-  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement; summaryNode: HTMLElement }> = [];
-  let overallStatsNode: HTMLElement | null = null;
+  let editors: Array<{ id: string; input: HTMLInputElement }> = [];
   let competitionInput: HTMLInputElement | null = null;
   let venueInput: HTMLInputElement | null = null;
   let houseEditors: Array<{ id: string; input: HTMLInputElement }> = [];
