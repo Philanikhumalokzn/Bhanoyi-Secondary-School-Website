@@ -8590,8 +8590,66 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   fixtureTemplateSelect?.addEventListener('change', () => {
     selectedFixtureTemplateId = String(fixtureTemplateSelect.value || '').trim();
-    if (statusNode instanceof HTMLElement && selectedFixtureTemplateId) {
-      statusNode.textContent = 'Template selected. Next Generate will use it as starting layout if teams match.';
+    if (!selectedFixtureTemplateId) {
+      if (statusNode instanceof HTMLElement) {
+        statusNode.textContent = 'No template selected.';
+      }
+      return;
+    }
+
+    const templateEntry = fixtureTemplateHistory.find((entry) => entry.id === selectedFixtureTemplateId);
+    if (!templateEntry) {
+      if (statusNode instanceof HTMLElement) {
+        statusNode.textContent = 'Selected template was not found.';
+      }
+      return;
+    }
+
+    if (sportSelect instanceof HTMLSelectElement && sportSelect.value !== templateEntry.sportKey) {
+      sportSelect.value = templateEntry.sportKey;
+      refreshSportPanelState();
+    }
+
+    const profile = selectedSportProfile();
+    const targetSportKey = profile?.key || templateEntry.sportKey;
+    const targetSportLabel = profile?.label || (templateEntry.sportKey === 'netball' ? 'Netball' : 'Soccer');
+    const setup = profile?.readSetup?.() || {};
+    const normalizedFormatLabel = String(setup.formatLabel || '').trim();
+
+    const templateFixtures = sanitizeStoredFixturesForSport(targetSportKey, templateEntry.fixtures || []).map((entry) => ({
+      ...entry,
+      sportKey: targetSportKey,
+      sportLabel: targetSportLabel,
+      formatLabel: String(entry.formatLabel || normalizedFormatLabel || '').trim()
+    }));
+
+    if (!templateFixtures.length) {
+      if (statusNode instanceof HTMLElement) {
+        statusNode.textContent = 'Selected template has no valid fixtures to load.';
+      }
+      return;
+    }
+
+    const templateTeamIds = Array.from(
+      new Set(templateFixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))
+    );
+    if (templateTeamIds.length) {
+      setSelectedTeamIds(templateTeamIds);
+    }
+
+    lastSportKey = targetSportKey;
+    lastSportLabel = targetSportLabel;
+    lastFormatLabel = normalizedFormatLabel || String(templateFixtures[0]?.formatLabel || '').trim();
+    lastFixtures = templateFixtures;
+    pinnedFixtureSlotKeys = new Set();
+    pendingFixtureApproval = true;
+    approvedWithUnfairness = false;
+    refreshCurrentUnfairnessReport(lastFixtures);
+    persistActiveSportState();
+    renderFixtures(lastFixtures);
+
+    if (statusNode instanceof HTMLElement) {
+      statusNode.textContent = `Template loaded (${lastFixtures.length} fixtures). Review/edit then finalize & sync when ready.`;
     }
   });
 
