@@ -3772,7 +3772,7 @@ const wireSportsHouseManagerInline = () => {
   houseModal.className = 'inline-house-members-modal is-hidden';
   houseModal.innerHTML = `
     <div class="inline-house-members-backdrop" data-house-members-close="true"></div>
-    <article class="panel inline-house-members-panel" role="dialog" aria-modal="true" aria-label="Manage house members">
+    <article class="panel inline-house-members-panel" data-house-members-panel role="dialog" aria-modal="true" aria-label="Manage house members">
       <div class="inline-house-members-head">
         <h3 data-house-members-title>Manage House</h3>
         <div class="inline-house-members-head-actions">
@@ -3781,7 +3781,9 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </div>
       <p class="inline-house-members-meta" data-house-members-meta></p>
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <div class="inline-house-members-overview" data-house-members-overview></div>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="search_filter">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Search and Filter Members
         </button>
@@ -3819,7 +3821,7 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </section>
 
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="sport_rules">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Sporting Code Rules
         </button>
@@ -3829,7 +3831,7 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </section>
 
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="roles_leadership">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           House Roles and Leadership (Admin)
         </button>
@@ -3848,7 +3850,7 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </section>
 
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="current_members">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Current Members
         </button>
@@ -3880,6 +3882,8 @@ const wireSportsHouseManagerInline = () => {
 
   const houseModalTitle = houseModal.querySelector('[data-house-members-title]');
   const houseModalMeta = houseModal.querySelector('[data-house-members-meta]');
+  const houseModalPanel = houseModal.querySelector('[data-house-members-panel]');
+  const houseModalOverview = houseModal.querySelector('[data-house-members-overview]');
   const houseModalList = houseModal.querySelector('[data-house-members-list]');
   const houseModalSearch = houseModal.querySelector('[data-house-members-search]');
   const houseModalSort = houseModal.querySelector('[data-house-members-sort]');
@@ -3899,6 +3903,8 @@ const wireSportsHouseManagerInline = () => {
   if (
     !(houseModalTitle instanceof HTMLElement) ||
     !(houseModalMeta instanceof HTMLElement) ||
+    !(houseModalPanel instanceof HTMLElement) ||
+    !(houseModalOverview instanceof HTMLElement) ||
     !(houseModalList instanceof HTMLElement) ||
     !(houseModalSearch instanceof HTMLInputElement) ||
     !(houseModalSort instanceof HTMLSelectElement) ||
@@ -3986,12 +3992,16 @@ const wireSportsHouseManagerInline = () => {
       const toggle = sectionNode.querySelector('[data-house-members-toggle]');
       const body = sectionNode.querySelector('[data-house-members-body]');
       if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
-      return { sectionNode, toggle, body };
+      const sectionKey = normalizeHouseId(sectionNode.dataset.houseMembersSectionKey || '', '');
+      return { sectionNode, toggle, body, sectionKey };
     })
-    .filter((entry): entry is { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement } => Boolean(entry));
+    .filter(
+      (entry): entry is { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement; sectionKey: string } =>
+        Boolean(entry)
+    );
 
   const setHouseSectionExpanded = (
-    entry: { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement },
+    entry: { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement; sectionKey: string },
     expanded: boolean
   ) => {
     entry.sectionNode.classList.toggle('is-expanded', expanded);
@@ -4014,6 +4024,13 @@ const wireSportsHouseManagerInline = () => {
     houseSections.forEach((entry) => {
       setHouseSectionExpanded(entry, false);
     });
+  };
+
+  const expandHouseSection = (sectionKey: string) => {
+    if (!sectionKey) return;
+    const target = houseSections.find((entry) => entry.sectionKey === sectionKey);
+    if (!target) return;
+    setHouseSectionExpanded(target, true);
   };
 
   const refreshExpandedHouseSectionHeights = () => {
@@ -4680,9 +4697,49 @@ const wireSportsHouseManagerInline = () => {
 
     const learnerCount = learnerMembers.length;
     const teacherCount = members.filter((record) => record.memberType === 'teacher').length;
+    const allocatedLearnerCount = learnerMembers.filter((record) => {
+      const assigned = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
+      return assigned.length > 0;
+    }).length;
+    const unassignedLearnerCount = Math.max(0, learnerCount - allocatedLearnerCount);
+    const staffLeadershipAssignments = Object.values(houseRoleEntry.staffRoles).reduce(
+      (count, roleIds) => count + (Array.isArray(roleIds) ? roleIds.length : 0),
+      0
+    );
+    const learnerCaptaincyAssignments = Object.values(houseRoleEntry.learnerCaptaincies).reduce(
+      (count, codeIds) => count + (Array.isArray(codeIds) ? codeIds.length : 0),
+      0
+    );
+    const houseColor = normalizeHouseColor(activeHouse.color, '#64748b');
 
-    houseModalTitle.textContent = `Manage ${activeHouse.name}`;
+    houseModalPanel.style.setProperty('--house-color', houseColor);
+    houseModalTitle.innerHTML = `
+      <span class="enrollment-house-avatar" style="--house-color:${houseColor};"></span>
+      <span>${escapeHtmlText(activeHouse.name)} House Members</span>
+    `;
     houseModalMeta.textContent = `${learnerCount} learner${learnerCount === 1 ? '' : 's'}, ${teacherCount} teacher${teacherCount === 1 ? '' : 's'} in this house. ${selectedMemberKeys.size} selected.`;
+    houseModalOverview.innerHTML = `
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Total Members</p>
+        <p class="inline-house-members-kpi-value">${members.length}</p>
+        <p class="inline-house-members-kpi-meta">${learnerCount} learners · ${teacherCount} teachers</p>
+      </article>
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Sporting Allocation</p>
+        <p class="inline-house-members-kpi-value">${allocatedLearnerCount}</p>
+        <p class="inline-house-members-kpi-meta">Assigned learners · ${unassignedLearnerCount} unassigned</p>
+      </article>
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Leadership</p>
+        <p class="inline-house-members-kpi-value">${staffLeadershipAssignments + learnerCaptaincyAssignments}</p>
+        <p class="inline-house-members-kpi-meta">${staffLeadershipAssignments} staff roles · ${learnerCaptaincyAssignments} captaincies</p>
+      </article>
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Selection</p>
+        <p class="inline-house-members-kpi-value">${selectedMemberKeys.size}</p>
+        <p class="inline-house-members-kpi-meta">Learners selected for bulk actions</p>
+      </article>
+    `;
 
     houseModalSearch.value = memberSearchValue;
     houseModalSort.value = memberSortValue;
@@ -5403,6 +5460,7 @@ const wireSportsHouseManagerInline = () => {
     memberSportFilterValue = 'all';
     selectedMemberKeys = new Set();
     collapseAllHouseSections();
+    expandHouseSection('current_members');
     renderHouseMembersModal();
     houseModal.classList.remove('is-hidden');
     document.body.classList.add('inline-house-members-open');
