@@ -7023,9 +7023,19 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const activeSport = selectedSportKey();
     if (!activeSport) return;
 
+    const selectedIds = selectedTeamIds();
+    const fallbackIds = Array.from(
+      new Set(
+        lastFixtures
+          .flatMap((entry) => [String(entry.homeId || '').trim(), String(entry.awayId || '').trim()])
+          .filter(Boolean)
+      )
+    );
+    const persistedTeamIds = selectedIds.length ? selectedIds : fallbackIds;
+
     fixtureCreatorState.lastSport = activeSport;
     fixtureCreatorState.sports[activeSport] = {
-      selectedTeamIds: selectedTeamIds(),
+      selectedTeamIds: persistedTeamIds,
       fairnessRuleIds: selectedFairnessRuleIds(),
       fixtures: lastFixtures.map((entry) => ({ ...entry })),
       pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
@@ -7573,11 +7583,23 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const saved = fixtureCreatorState.sports?.[key];
     if (!saved || typeof saved !== 'object') return false;
 
+    const sanitizedFixtures = sanitizeStoredFixturesForSport(key, saved.fixtures || []);
+    if (!sanitizedFixtures.length) return false;
+
+    const fixtureTeamIds = Array.from(
+      new Set(
+        sanitizedFixtures
+          .flatMap((entry) => [String(entry.homeId || '').trim(), String(entry.awayId || '').trim()])
+          .filter(Boolean)
+      )
+    );
+
     const selectedIds = Array.isArray(saved.selectedTeamIds)
       ? saved.selectedTeamIds.map((entry) => String(entry || '').trim()).filter(Boolean)
       : [];
-    if (selectedIds.length) {
-      setSelectedTeamIds(selectedIds);
+    const restoredTeamIds = selectedIds.length ? selectedIds : fixtureTeamIds;
+    if (restoredTeamIds.length) {
+      setSelectedTeamIds(restoredTeamIds);
     }
 
     setSelectedFairnessRuleIds(saved.fairnessRuleIds);
@@ -7589,10 +7611,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!profile) return false;
 
     const teams = selectedTeamIds();
-    const sanitizedFixtures = sanitizeStoredFixturesForSport(key, saved.fixtures || []);
-    if (!sanitizedFixtures.length) return false;
+    const effectiveTeams = teams.length ? teams : fixtureTeamIds;
 
-    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, teams);
+    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, effectiveTeams);
     if (!integrity.ok) return false;
     const setup = profile.readSetup();
     lastSportKey = key;
