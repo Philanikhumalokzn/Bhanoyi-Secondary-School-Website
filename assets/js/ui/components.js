@@ -1567,8 +1567,6 @@ const hydrateMatchLog = (matchLogNode) => {
     });
 
     syncModalTeamState();
-
-    persistCurrentFixtureLog();
   };
 
   const resetModal = () => {
