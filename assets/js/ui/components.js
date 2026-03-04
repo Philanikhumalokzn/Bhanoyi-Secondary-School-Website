@@ -5502,6 +5502,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   if (!bodyNode || !generateButton || !exportButton) return;
 
   const workflowSteps = initSportsWorkflowSteps(fixtureNode);
+  const normalizeText = (value, maxLength = 300) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
 
   let lastFixtures = [];
   let lastSportKey = '';
