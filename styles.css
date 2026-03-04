@@ -2237,6 +2237,29 @@ body.news-read-open {
   flex-wrap: wrap;
 }
 
+.inline-house-unallocated-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.inline-house-unallocated-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.inline-house-unallocated-controls input,
+.inline-house-unallocated-controls select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+}
+
 .inline-house-unallocated-list {
   display: grid;
   gap: 8px;

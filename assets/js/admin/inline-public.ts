@@ -3922,6 +3922,8 @@ const wireSportsHouseManagerInline = () => {
   let memberSortValue = 'surname_asc';
   let memberGenderFilterValue = 'all';
   let memberSportFilterValue = 'all';
+  let unallocatedSearchValue = '';
+  let unallocatedSortValue: 'surname_asc' | 'surname_desc' | 'class_asc' | 'class_desc' = 'surname_asc';
   let selectedMemberKeys = new Set<string>();
 
   const unallocatedOverlay = document.createElement('div');
@@ -3937,18 +3939,37 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </div>
       <p class="inline-house-members-meta" data-house-unallocated-meta></p>
+      <div class="inline-house-unallocated-controls">
+        <label>
+          Search
+          <input type="search" data-house-unallocated-search placeholder="Search by surname, name, class, or admission no." autocomplete="off" />
+        </label>
+        <label>
+          Sort
+          <select data-house-unallocated-sort>
+            <option value="surname_asc">Surname (A–Z)</option>
+            <option value="surname_desc">Surname (Z–A)</option>
+            <option value="class_asc">Class (Low–High)</option>
+            <option value="class_desc">Class (High–Low)</option>
+          </select>
+        </label>
+      </div>
       <div class="inline-house-unallocated-list" data-house-unallocated-list></div>
     </article>
   `;
   document.body.appendChild(unallocatedOverlay);
 
   const unallocatedMeta = unallocatedOverlay.querySelector('[data-house-unallocated-meta]');
+  const unallocatedSearchInput = unallocatedOverlay.querySelector('[data-house-unallocated-search]');
+  const unallocatedSortSelect = unallocatedOverlay.querySelector('[data-house-unallocated-sort]');
   const unallocatedList = unallocatedOverlay.querySelector('[data-house-unallocated-list]');
   const unallocatedAutoButton = unallocatedOverlay.querySelector('[data-house-unallocated-auto="true"]');
   const unallocatedCloseButtons = Array.from(unallocatedOverlay.querySelectorAll('[data-house-unallocated-close="true"]'));
 
   if (
     !(unallocatedMeta instanceof HTMLElement) ||
+    !(unallocatedSearchInput instanceof HTMLInputElement) ||
+    !(unallocatedSortSelect instanceof HTMLSelectElement) ||
     !(unallocatedList instanceof HTMLElement) ||
     !(unallocatedAutoButton instanceof HTMLButtonElement)
   ) {
@@ -4394,19 +4415,87 @@ const wireSportsHouseManagerInline = () => {
     unallocatedOverlay.classList.add('is-hidden');
   };
 
+  const resolveClassLabel = (record: EnrollmentLearnerRecord) =>
+    record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'Class not set';
+
+  const resolveGradeRank = (record: EnrollmentLearnerRecord) => {
+    const normalized = normalizeText(record.grade, 20);
+    const numeric = Number.parseInt(normalized.replace(/[^0-9]/g, ''), 10);
+    return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+  };
+
+  const resolveClassRank = (record: EnrollmentLearnerRecord) => {
+    const gradeRank = resolveGradeRank(record);
+    const letterRank = normalizeText(record.classLetter, 20)
+      .toUpperCase()
+      .charCodeAt(0);
+    const safeLetterRank = Number.isFinite(letterRank) ? letterRank : Number.POSITIVE_INFINITY;
+    return { gradeRank, letterRank: safeLetterRank };
+  };
+
+  const getFilteredAndSortedUnallocatedRecords = (records: EnrollmentLearnerRecord[]) => {
+    const normalizedSearch = unallocatedSearchValue.trim().toLowerCase();
+    const filtered = records.filter((record) => {
+      if (!normalizedSearch) return true;
+      const classLabel = resolveClassLabel(record);
+      const haystack = [record.displayName, record.admissionNo, classLabel, record.gender]
+        .map((value) => normalizeText(value, 160).toLowerCase())
+        .join(' ');
+      return haystack.includes(normalizedSearch);
+    });
+
+    filtered.sort((left, right) => {
+      if (unallocatedSortValue === 'surname_desc') {
+        return comparePeopleBySurname(left.displayName, right.displayName, { descending: true });
+      }
+      if (unallocatedSortValue === 'class_asc' || unallocatedSortValue === 'class_desc') {
+        const leftRank = resolveClassRank(left);
+        const rightRank = resolveClassRank(right);
+        const gradeDiff = leftRank.gradeRank - rightRank.gradeRank;
+        if (gradeDiff !== 0) {
+          return unallocatedSortValue === 'class_desc' ? -gradeDiff : gradeDiff;
+        }
+        const letterDiff = leftRank.letterRank - rightRank.letterRank;
+        if (letterDiff !== 0) {
+          return unallocatedSortValue === 'class_desc' ? -letterDiff : letterDiff;
+        }
+      }
+      return comparePeopleBySurname(left.displayName, right.displayName, {
+        descending: unallocatedSortValue === 'class_desc' ? false : unallocatedSortValue === 'surname_desc'
+      });
+    });
+
+    return filtered;
+  };
+
   const renderUnallocatedOverlay = () => {
     const snapshot = buildAllocationSnapshot();
-    unallocatedMeta.textContent = `${snapshot.unallocatedLearners} learner${snapshot.unallocatedLearners === 1 ? '' : 's'} currently have no house allocation.`;
+    if (unallocatedSearchInput.value !== unallocatedSearchValue) {
+      unallocatedSearchInput.value = unallocatedSearchValue;
+    }
+    if (unallocatedSortSelect.value !== unallocatedSortValue) {
+      unallocatedSortSelect.value = unallocatedSortValue;
+    }
+    const visibleRecords = getFilteredAndSortedUnallocatedRecords(snapshot.unallocatedRecords);
+    unallocatedMeta.textContent = `${snapshot.unallocatedLearners} learner${snapshot.unallocatedLearners === 1 ? '' : 's'} currently have no house allocation.${
+      visibleRecords.length !== snapshot.unallocatedRecords.length
+        ? ` Showing ${visibleRecords.length} result${visibleRecords.length === 1 ? '' : 's'}.`
+        : ''
+    }`;
 
     if (!snapshot.unallocatedRecords.length) {
       unallocatedList.innerHTML = '<p class="inline-house-members-empty">All learners are already allocated to houses.</p>';
       return;
     }
 
-    const rows = snapshot.unallocatedRecords
-      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+    if (!visibleRecords.length) {
+      unallocatedList.innerHTML = '<p class="inline-house-members-empty">No unallocated learners match your search.</p>';
+      return;
+    }
+
+    const rows = visibleRecords
       .map((record) => {
-        const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'Class not set';
+        const classLabel = resolveClassLabel(record);
         return `
           <div class="inline-house-unallocated-item" data-house-unallocated-key="${escapeHtmlAttribute(record.key)}">
             <div class="inline-house-unallocated-main">
@@ -4431,6 +4520,21 @@ const wireSportsHouseManagerInline = () => {
 
   unallocatedCloseButtons.forEach((button) => {
     button.addEventListener('click', closeUnallocatedOverlay);
+  });
+
+  unallocatedSearchInput.addEventListener('input', () => {
+    unallocatedSearchValue = unallocatedSearchInput.value;
+    renderUnallocatedOverlay();
+  });
+
+  unallocatedSortSelect.addEventListener('change', () => {
+    const nextValue = unallocatedSortSelect.value;
+    if (nextValue === 'surname_desc' || nextValue === 'class_asc' || nextValue === 'class_desc') {
+      unallocatedSortValue = nextValue;
+    } else {
+      unallocatedSortValue = 'surname_asc';
+    }
+    renderUnallocatedOverlay();
   });
 
   unallocatedAutoButton.addEventListener('click', () => {
