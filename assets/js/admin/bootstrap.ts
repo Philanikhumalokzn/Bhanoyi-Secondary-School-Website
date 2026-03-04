@@ -1,4 +1,5 @@
 import { getSession, signIn, signOut } from './api';
+import { initGlobalLocalStorageRemotePersistence } from '../content/localstore.remote.js';
 
 const configuredAdmins = (import.meta.env.VITE_ADMIN_EMAILS ?? '')
   .split(',')
@@ -52,6 +53,7 @@ const bindForms = () => {
 };
 
 const init = async () => {
+  await initGlobalLocalStorageRemotePersistence();
   bindForms();
 
   try {

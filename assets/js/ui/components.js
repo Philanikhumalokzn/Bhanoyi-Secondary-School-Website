@@ -5346,6 +5346,25 @@ const hydrateFixtureCreator = (fixtureNode) => {
     sports: {}
   };
 
+  window.addEventListener('bhanoyi:remote-persist-status', (event) => {
+    const key = String(event?.detail?.storageKey || '').trim();
+    if (
+      key !== fixtureCatalogStorageKey &&
+      key !== fixtureDateStorageKey &&
+      key !== fixtureRulesStorageKey &&
+      key !== fixtureCreatorStateStorageKey
+    ) {
+      return;
+    }
+
+    const savedRemote = event?.detail?.savedRemote === true;
+    if (statusNode instanceof HTMLElement) {
+      statusNode.textContent = savedRemote
+        ? 'Saved remotely.'
+        : 'Saved on this device only. Remote sync unavailable right now.';
+    }
+  });
+
   portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
 
   if (rulesPanel instanceof HTMLElement) {
@@ -8657,6 +8676,26 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const eventTypesStorageKey = `bhanoyi.schoolCalendarEventTypes.${sectionKey}`;
   const termsStorageKey = `bhanoyi.schoolTerms.${sectionKey}`;
+
+  window.addEventListener('bhanoyi:remote-persist-status', (event) => {
+    const key = String(event?.detail?.storageKey || '').trim();
+    if (
+      key !== eventsStorageKey &&
+      key !== eventTypesStorageKey &&
+      key !== termsStorageKey &&
+      key !== fixtureDateStorageKey &&
+      key !== fixtureCatalogStorageKey
+    ) {
+      return;
+    }
+
+    const savedRemote = event?.detail?.savedRemote === true;
+    if (statusNode instanceof HTMLElement) {
+      statusNode.textContent = savedRemote
+        ? 'Saved remotely.'
+        : 'Saved on this device only. Remote sync unavailable right now.';
+    }
+  });
 
   const params = new URLSearchParams(window.location.search);
   const incomingFixtureId = (params.get('fixtureId') || '').trim();
