@@ -4006,21 +4006,21 @@ const wireSportsHouseManagerInline = () => {
   };
 
   const resolveStaffDisplayName = (staffRef: Record<string, unknown>) => {
-    const title = normalizeText(staffRef.title || '', 20);
-    const initials = normalizeStaffInitials(staffRef.initials || inferInitialsFromFirstName(staffRef.firstName || ''));
     const surname = normalizeText(staffRef.surname || '', 80);
-    const formatted = [title, surname, initials].filter(Boolean).join(' ').trim();
+    const firstName = normalizeText(staffRef.firstName || '', 80);
+    const formatted = [surname, firstName].filter(Boolean).join(' ').trim();
     if (formatted) return formatted;
 
     const fallbackName = normalizeText(staffRef.name || '', 120);
     if (fallbackName) {
       const parts = fallbackName.split(/\s+/).filter(Boolean);
-      const legacySurname = parts.length ? parts[parts.length - 1] : fallbackName;
-      const legacyInitials = normalizeStaffInitials(staffRef.initials || inferInitialsFromFirstName(parts.slice(0, -1).join(' ')));
-      return [title || 'Mr.', legacySurname, legacyInitials].filter(Boolean).join(' ').trim();
+      if (parts.length <= 1) return fallbackName;
+      const legacySurname = parts[parts.length - 1];
+      const legacyNames = parts.slice(0, -1).join(' ');
+      return [legacySurname, legacyNames].filter(Boolean).join(' ').trim();
     }
 
-    return [title || 'Mr.', 'Staff'].join(' ');
+    return 'Staff';
   };
 
   const staffTitleTokens = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'coach', 'mx']);

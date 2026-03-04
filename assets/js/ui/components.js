@@ -3168,11 +3168,18 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const formatStaffDefaultDisplayName = (staff) => {
-    const title = normalizeText(staff?.title, 20);
-    const initials = normalizeStaffInitials(staff?.initials || inferInitialsFromFirstName(staff?.firstName || ''));
     const surname = normalizeText(staff?.surname, 80);
-    const formatted = [title, surname, initials].filter(Boolean).join(' ').trim();
-    return formatted || surname || normalizeText(staff?.name, 120);
+    const firstName = normalizeText(staff?.firstName, 80);
+    const formatted = [surname, firstName].filter(Boolean).join(' ').trim();
+    if (formatted) return formatted;
+
+    const fallbackName = normalizeText(staff?.name, 120);
+    if (!fallbackName) return '';
+    const parts = fallbackName.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return fallbackName;
+    const detectedSurname = parts[parts.length - 1];
+    const detectedGivenNames = parts.slice(0, -1).join(' ');
+    return [detectedSurname, detectedGivenNames].filter(Boolean).join(' ').trim();
   };
 
   const resolveStaffDisplayName = (staff) => {
