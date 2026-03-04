@@ -7,6 +7,7 @@ import {
   stampEnrollmentStorePayload,
   syncEnrollmentStoreFromRemote
 } from '../content/enrollment.persistence.js';
+import { persistLocalStore, syncLocalStoreFromRemote } from '../content/localstore.remote.js';
 import { exportProfessionalWorkbook } from '../content/professional-export.js';
 
 const escapeHtmlAttribute = (value = '') =>
@@ -5395,6 +5396,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const saveFixtureCreatorState = () => {
     try {
       localStorage.setItem(fixtureCreatorStateStorageKey, JSON.stringify(fixtureCreatorState));
+      void persistLocalStore(fixtureCreatorStateStorageKey, fixtureCreatorState);
     } catch {
       return;
     }
@@ -5412,6 +5414,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const persistFixtureDatesToStorage = () => {
     localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+    void persistLocalStore(fixtureDateStorageKey, fixtureDates);
     dispatchFixtureSyncEvent();
   };
 
@@ -5486,6 +5489,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const saveRulesBundle = (bundle) => {
     const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
     localStorage.setItem(fixtureRulesStorageKey, JSON.stringify(safeBundle));
+    void persistLocalStore(fixtureRulesStorageKey, safeBundle);
   };
 
   const buildDateRulesPayload = (rules) => ({
@@ -6409,6 +6413,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     try {
       localStorage.setItem(fixtureCatalogStorageKey, JSON.stringify(catalog));
+      void persistLocalStore(fixtureCatalogStorageKey, catalog);
 
       const rawDates = localStorage.getItem(fixtureDateStorageKey);
       const parsedDates = rawDates ? JSON.parse(rawDates) : {};
@@ -6426,6 +6431,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       if (datesChanged) {
         localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDatesMap));
+        void persistLocalStore(fixtureDateStorageKey, fixtureDatesMap);
       }
     } catch {
       return;
@@ -8308,22 +8314,33 @@ const hydrateFixtureCreator = (fixtureNode) => {
     renderFixtures(lastFixtures);
   });
 
-  loadFixtureDates();
-  loadFixtureCreatorState();
-  if (sportSelect instanceof HTMLSelectElement) {
-    const savedSport = String(fixtureCreatorState.lastSport || '').trim();
-    if (savedSport === 'soccer' || savedSport === 'netball') {
-      sportSelect.value = savedSport;
+  const bootstrapFixtureCreatorState = async () => {
+    await Promise.all([
+      syncLocalStoreFromRemote(fixtureCatalogStorageKey),
+      syncLocalStoreFromRemote(fixtureDateStorageKey),
+      syncLocalStoreFromRemote(fixtureRulesStorageKey),
+      syncLocalStoreFromRemote(fixtureCreatorStateStorageKey)
+    ]).catch(() => null);
+
+    loadFixtureDates();
+    loadFixtureCreatorState();
+    if (sportSelect instanceof HTMLSelectElement) {
+      const savedSport = String(fixtureCreatorState.lastSport || '').trim();
+      if (savedSport === 'soccer' || savedSport === 'netball') {
+        sportSelect.value = savedSport;
+      }
     }
-  }
-  hydrateDateRules(activeRulesBucket());
-  refreshSportPanelState();
-  refreshFairnessSummary();
-  renderFairnessDropdownOptions();
-  const bootSport = selectedSportKey();
-  if (!restoreSavedStateForSport(bootSport)) {
-    generateFixtures();
-  }
+    hydrateDateRules(activeRulesBucket());
+    refreshSportPanelState();
+    refreshFairnessSummary();
+    renderFairnessDropdownOptions();
+    const bootSport = selectedSportKey();
+    if (!restoreSavedStateForSport(bootSport)) {
+      generateFixtures();
+    }
+  };
+
+  void bootstrapFixtureCreatorState();
 };
 
 const renderSchoolCalendarSection = (section, sectionIndex) => {
@@ -8787,6 +8804,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       new Set((types || []).map((entry) => normalizeEventTypeLabel(entry)).filter(Boolean))
     );
     localStorage.setItem(eventTypesStorageKey, JSON.stringify(normalized));
+    void persistLocalStore(eventTypesStorageKey, normalized);
     return normalized;
   };
 
@@ -8903,6 +8921,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       end: normalizeDateString(term.end)
     }));
     localStorage.setItem(termsStorageKey, JSON.stringify(payload));
+    void persistLocalStore(termsStorageKey, payload);
   };
 
   let terms = loadTerms();
@@ -9047,6 +9066,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       };
     });
     localStorage.setItem(eventsStorageKey, JSON.stringify(serialized));
+    void persistLocalStore(eventsStorageKey, serialized);
 
     try {
       const rawMap = localStorage.getItem(fixtureDateStorageKey);
@@ -9070,6 +9090,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       });
 
       localStorage.setItem(fixtureDateStorageKey, JSON.stringify(nextMap));
+      void persistLocalStore(fixtureDateStorageKey, nextMap);
       window.dispatchEvent(
         new CustomEvent('bhanoyi:fixtures-updated', {
           detail: {
@@ -9225,7 +9246,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
   };
 
-  const events = loadEvents();
+  let events = loadEvents();
   let activeOverlayDate = '';
   let isReconcilingFixtures = false;
   let sportsOverlayHandledForCurrentSelection = false;
@@ -9813,7 +9834,14 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   window.addEventListener('storage', (event) => {
     if (!event.key) return;
-    if (event.key === fixtureDateStorageKey || event.key === fixtureCatalogStorageKey) {
+    if (event.key === eventsStorageKey || event.key === eventTypesStorageKey || event.key === termsStorageKey) {
+      refreshCalendarStateFromStorage();
+      return;
+    }
+    if (
+      event.key === fixtureDateStorageKey ||
+      event.key === fixtureCatalogStorageKey
+    ) {
       reconcileFixtureEvents();
     }
   });
@@ -10244,6 +10272,50 @@ const hydrateSchoolCalendar = (calendarShell) => {
       showSmartToast('School terms saved.', { tone: 'success' });
     });
   }
+
+  const refreshCalendarStateFromStorage = () => {
+    eventTypes = loadEventTypes();
+    terms = loadTerms();
+
+    if (isAdminMode && form instanceof HTMLFormElement) {
+      renderEventTypeOptions();
+      renderEventTypesEditor();
+      clearForm();
+    }
+
+    if (isAdminMode && termsForm instanceof HTMLFormElement) {
+      hydrateTermsForm();
+    }
+
+    calendar
+      .getEvents()
+      .filter((entry) => entry.display !== 'background')
+      .forEach((entry) => entry.remove());
+
+    events = loadEvents();
+    events.forEach((entry) => {
+      calendar.addEvent(entry);
+    });
+
+    renderTermBackgroundEvents(calendar);
+    reconcileFixtureEvents();
+    refreshDayOverlay();
+    renderDayEventCountBadges();
+  };
+
+  const bootstrapCalendarRemoteSync = async () => {
+    await Promise.all([
+      syncLocalStoreFromRemote(eventsStorageKey),
+      syncLocalStoreFromRemote(eventTypesStorageKey),
+      syncLocalStoreFromRemote(termsStorageKey),
+      syncLocalStoreFromRemote(fixtureDateStorageKey),
+      syncLocalStoreFromRemote(fixtureCatalogStorageKey)
+    ]).catch(() => null);
+
+    refreshCalendarStateFromStorage();
+  };
+
+  void bootstrapCalendarRemoteSync();
 
   const targetDate = normalizeDateString(incomingDate);
   if (targetDate) {
