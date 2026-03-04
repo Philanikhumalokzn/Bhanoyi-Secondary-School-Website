@@ -2923,6 +2923,31 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!entry || typeof entry !== 'object') return null;
     const allowedRclRoles = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
 
+    const formatLearnerName = (rawName, surnameValue, firstNameValue) => {
+      const surname = normalizeText(surnameValue, 80);
+      const firstName = normalizeText(firstNameValue, 80);
+      if (surname || firstName) {
+        return [surname, firstName].filter(Boolean).join(' ').trim();
+      }
+
+      const normalizedRawName = normalizeText(rawName, 120);
+      if (!normalizedRawName) return '';
+
+      if (normalizedRawName.includes(',')) {
+        const [surnamePart, ...rest] = normalizedRawName
+          .split(',')
+          .map((part) => normalizeText(part, 120))
+          .filter(Boolean);
+        return [surnamePart, rest.join(' ')].filter(Boolean).join(' ').trim();
+      }
+
+      const tokens = normalizedRawName.split(/\s+/).filter(Boolean);
+      if (tokens.length <= 1) return normalizedRawName;
+      const detectedSurname = tokens[tokens.length - 1];
+      const detectedGivenNames = tokens.slice(0, -1).join(' ');
+      return [detectedSurname, detectedGivenNames].filter(Boolean).join(' ').trim();
+    };
+
     const normalizeGender = (value) => {
       const raw = normalizeText(value, 20).toLowerCase();
       if (!raw) return '';
@@ -2967,7 +2992,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       ).slice(0, 8);
     };
 
-    const name = normalizeText(entry.name, 120);
+    const name = formatLearnerName(entry.name, entry.surname, entry.firstName || entry.givenName);
     const admissionNo = normalizeText(entry.admissionNo || entry.admission || '', 40);
     const gender = normalizeGender(entry.gender || entry.sex || '');
     const houseId = normalizeHouseId(entry.houseId || entry.house || '');
@@ -3003,7 +3028,15 @@ const hydrateEnrollmentManager = (managerNode) => {
       seen.set(key, learners.length);
       learners.push(learner);
     });
-    return learners;
+
+    const resolveLearnerSortKey = (nameValue) => {
+      const normalizedName = normalizeText(nameValue, 120).toLowerCase();
+      if (!normalizedName) return '';
+      const [surname = '', ...rest] = normalizedName.split(/\s+/).filter(Boolean);
+      return `${surname} ${rest.join(' ')}`.trim();
+    };
+
+    return learners.sort((left, right) => resolveLearnerSortKey(left.name).localeCompare(resolveLearnerSortKey(right.name)));
   };
 
   const normalizeStaffPostLevel = (value) => {

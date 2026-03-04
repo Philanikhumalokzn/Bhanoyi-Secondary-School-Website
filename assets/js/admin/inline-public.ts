@@ -4010,6 +4010,31 @@ const wireSportsHouseManagerInline = () => {
     return normalizeText(staffRef.firstName || '', 80);
   };
 
+  const resolveLearnerDisplayName = (learnerRef: Record<string, unknown>) => {
+    const surname = normalizeText(learnerRef.surname || '', 80);
+    const firstName = normalizeText(learnerRef.firstName || learnerRef.givenName || '', 80);
+    if (surname || firstName) {
+      return [surname, firstName].filter(Boolean).join(' ').trim();
+    }
+
+    const rawName = normalizeText(learnerRef.name || '', 120);
+    if (!rawName) return '';
+
+    if (rawName.includes(',')) {
+      const [surnamePart, ...rest] = rawName
+        .split(',')
+        .map((entry) => normalizeText(entry, 120))
+        .filter(Boolean);
+      return [surnamePart, rest.join(' ')].filter(Boolean).join(' ').trim();
+    }
+
+    const parts = rawName.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return rawName;
+    const detectedSurname = parts[parts.length - 1];
+    const detectedNames = parts.slice(0, -1).join(' ');
+    return [detectedSurname, detectedNames].filter(Boolean).join(' ').trim();
+  };
+
   const collectEnrollmentLearners = (): EnrollmentLearnerRecord[] => {
     const records: EnrollmentLearnerRecord[] = [];
 
@@ -4041,7 +4066,7 @@ const wireSportsHouseManagerInline = () => {
             learners.forEach((learnerEntry, learnerIndex) => {
               if (!learnerEntry || typeof learnerEntry !== 'object' || Array.isArray(learnerEntry)) return;
               const learnerRef = learnerEntry as Record<string, unknown>;
-              const displayName = normalizeText(learnerRef.name, 120);
+              const displayName = resolveLearnerDisplayName(learnerRef);
               if (!displayName) return;
 
               const admissionNo = normalizeText(learnerRef.admissionNo || learnerRef.admission, 40);
