@@ -4344,41 +4344,67 @@ const wireSportsHouseManagerInline = () => {
   };
 
   const buildAllocationSnapshot = (): AllocationSnapshot => {
-    const records = collectEnrollmentLearners();
-    const learners = records.filter((record) => record.memberType === 'learner');
-    const teachers = records.filter((record) => record.memberType === 'teacher');
-    const allowedHouseIds = new Set(readState.options.map((entry) => entry.id));
-    const unallocatedRecords = learners.filter((record) => !record.houseId || !allowedHouseIds.has(record.houseId));
-    const assignmentStore = loadHouseSportsAssignments();
-    const roleStore = loadHouseRoleAssignments();
-
-    const byHouse = readState.options.reduce<Record<string, HouseSummarySnapshot>>((accumulator, house) => {
-      const houseLearners = learners.filter((record) => record.houseId === house.id);
-      const houseTeachers = teachers.filter((record) => record.houseId === house.id);
-      const houseAssignments = assignmentStore[house.id] || {};
-      const roleEntry = roleStore[house.id] || { staffRoles: {}, learnerCaptaincies: {} };
-      const sportingAssigned = houseLearners.filter((record) => Array.isArray(houseAssignments[record.key]) && houseAssignments[record.key].length).length;
-      const houseManagers = Object.values(roleEntry.staffRoles).filter((roles) => Array.isArray(roles) && roles.includes('house_manager')).length;
-      const captaincies = Object.keys(roleEntry.learnerCaptaincies).length;
-
+    const emptyByHouse = readState.options.reduce<Record<string, HouseSummarySnapshot>>((accumulator, house) => {
       accumulator[house.id] = {
-        learners: houseLearners.length,
-        teachers: houseTeachers.length,
-        sportingAssigned,
-        houseManagers,
-        captaincies
+        learners: 0,
+        teachers: 0,
+        sportingAssigned: 0,
+        houseManagers: 0,
+        captaincies: 0
       };
       return accumulator;
     }, {});
 
-    return {
-      totalLearners: learners.length,
-      allocatedLearners: learners.length - unallocatedRecords.length,
-      unallocatedLearners: unallocatedRecords.length,
-      totalTeachers: teachers.length,
-      unallocatedRecords,
-      byHouse
-    };
+    try {
+      const records = collectEnrollmentLearners();
+      const learners = records.filter((record) => record.memberType === 'learner');
+      const teachers = records.filter((record) => record.memberType === 'teacher');
+      const allowedHouseIds = new Set(readState.options.map((entry) => entry.id));
+      const unallocatedRecords = learners.filter((record) => !record.houseId || !allowedHouseIds.has(record.houseId));
+      const assignmentStore = loadHouseSportsAssignments();
+      const roleStore = loadHouseRoleAssignments();
+
+      const byHouse = readState.options.reduce<Record<string, HouseSummarySnapshot>>((accumulator, house) => {
+        const houseLearners = learners.filter((record) => record.houseId === house.id);
+        const houseTeachers = teachers.filter((record) => record.houseId === house.id);
+        const houseAssignments = assignmentStore[house.id] || {};
+        const roleEntry = roleStore[house.id] || { staffRoles: {}, learnerCaptaincies: {} };
+        const sportingAssigned = houseLearners.filter(
+          (record) => Array.isArray(houseAssignments[record.key]) && houseAssignments[record.key].length
+        ).length;
+        const houseManagers = Object.values(roleEntry.staffRoles).filter(
+          (roles) => Array.isArray(roles) && roles.includes('house_manager')
+        ).length;
+        const captaincies = Object.keys(roleEntry.learnerCaptaincies).length;
+
+        accumulator[house.id] = {
+          learners: houseLearners.length,
+          teachers: houseTeachers.length,
+          sportingAssigned,
+          houseManagers,
+          captaincies
+        };
+        return accumulator;
+      }, {});
+
+      return {
+        totalLearners: learners.length,
+        allocatedLearners: learners.length - unallocatedRecords.length,
+        unallocatedLearners: unallocatedRecords.length,
+        totalTeachers: teachers.length,
+        unallocatedRecords,
+        byHouse
+      };
+    } catch {
+      return {
+        totalLearners: 0,
+        allocatedLearners: 0,
+        unallocatedLearners: 0,
+        totalTeachers: 0,
+        unallocatedRecords: [],
+        byHouse: emptyByHouse
+      };
+    }
   };
 
   const renderHouseEditorSummaries = () => {
