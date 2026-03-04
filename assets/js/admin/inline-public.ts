@@ -3452,6 +3452,16 @@ const wireSportsHouseManagerInline = () => {
       .replace(/\s+/g, ' ')
       .slice(0, maxLength);
 
+  const escapeHtmlText = (value: unknown) =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const escapeHtmlAttribute = (value: unknown) => escapeHtmlText(value).replace(/`/g, '&#96;');
+
   const parseConfig = (raw: string) => {
     try {
       const parsed = JSON.parse((raw || '{}').trim());
@@ -3930,6 +3940,7 @@ const wireSportsHouseManagerInline = () => {
   let memberSportFilterValue = 'all';
   let unallocatedSearchValue = '';
   let unallocatedSortValue: 'surname_asc' | 'surname_desc' | 'class_asc' | 'class_desc' = 'surname_asc';
+  let isRenderingHouseMembersModal = false;
   let selectedMemberKeys = new Set<string>();
 
   const unallocatedOverlay = document.createElement('div');
@@ -4687,6 +4698,9 @@ const wireSportsHouseManagerInline = () => {
   };
 
   const renderHouseMembersModal = () => {
+    if (isRenderingHouseMembersModal) return;
+    isRenderingHouseMembersModal = true;
+    try {
     if (!activeHouseId) return;
     const activeHouse = readState.options.find((entry) => entry.id === activeHouseId);
     if (!activeHouse) {
@@ -5221,6 +5235,9 @@ const wireSportsHouseManagerInline = () => {
     requestAnimationFrame(() => {
       refreshExpandedHouseSectionHeights();
     });
+    } finally {
+      isRenderingHouseMembersModal = false;
+    }
   };
 
   const buildHouseExportRows = (houseId: string) => {
