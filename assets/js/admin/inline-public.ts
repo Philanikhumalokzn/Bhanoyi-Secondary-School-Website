@@ -4720,6 +4720,8 @@ const wireSportsHouseManagerInline = () => {
     const filteredSelected = Array.from(selectedMemberKeys).filter((key) => validMemberKeys.has(key));
     selectedMemberKeys = new Set(filteredSelected);
     const canManageHouseRoles = document.body.classList.contains('inline-admin-active');
+    const roleStore = loadHouseRoleAssignments();
+    const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
 
     const learnerCount = learnerMembers.length;
     const teacherCount = members.filter((record) => record.memberType === 'teacher').length;
@@ -4835,8 +4837,6 @@ const wireSportsHouseManagerInline = () => {
       ...baseStaffRoleOptions,
       ...sportCodes.map((entry) => ({ id: `coach_${entry.id}`, label: `Coach (${entry.title})` }))
     ];
-    const roleStore = loadHouseRoleAssignments();
-    const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
 
     const normalizedSearch = memberSearchValue.trim().toLowerCase();
     const descendingSort = memberSortValue === 'surname_desc';
