@@ -6024,32 +6024,31 @@ const wireSportsHouseManagerInline = () => {
     ];
 
     const rows: Array<Record<string, string> & { _section?: string }> = [];
+    let sectionNumber = 0;
     const pushSection = (label: string) => {
-      rows.push({ section: label, field: '', response: '', notes: '', _section: label });
+      sectionNumber += 1;
+      const sectionLabel = `${sectionNumber}. ${label}`;
+      rows.push({ section: sectionLabel, field: '', response: '', notes: '', _section: sectionLabel });
     };
     const pushField = (_section: string, field: string, notes = '') => {
       rows.push({ field, response: '', notes });
     };
 
-    pushSection('1) House Identity');
+    pushSection('House Identity');
     pushField('House Identity', 'Current house name', activeHouse.name);
     pushField('House Identity', 'New inspirational house name (required)', 'Example: Determined, House Excel');
     pushField('House Identity', 'House slogan / motto (optional)', 'Short, inspiring phrase');
     pushField('House Identity', 'Short motivation for the new name', 'One or two short lines');
 
-    pushSection('2) Staff Executive Roles');
+    pushSection('Staff Executive Roles');
     staffRoleOptions.forEach((entry) => {
       pushField('Staff Executive Roles', entry.label, 'Write title, surname, initials');
     });
 
-    pushSection('3) Sporting Captains');
+    pushSection('Sporting Captains');
     sportCodes.forEach((entry) => {
       pushField('Sporting Captains', `Captain (${entry.title})`, 'Learner full name');
     });
-
-    pushSection('4) Confirmation');
-    pushField('Confirmation', 'Completed by (Name & role)', 'House representative');
-    pushField('Confirmation', 'Date completed', 'DD/MM/YYYY');
 
     return {
       activeHouse,
@@ -6374,7 +6373,7 @@ const wireSportsHouseManagerInline = () => {
               const cell = sheet.getCell(`A${rowNumber}`);
               cell.value = row._section;
               cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF173A5E' } };
-              cell.alignment = { horizontal: 'left', vertical: 'middle' };
+              cell.alignment = { horizontal: 'center', vertical: 'middle' };
               cell.fill = {
                 type: 'pattern',
                 pattern: 'solid',
