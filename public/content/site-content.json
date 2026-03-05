@@ -34,9 +34,20 @@
       "href": "sports.html"
     },
     {
+      "key": "calendar",
+      "label": "Calendar",
+      "href": "calendar.html"
+    },
+    {
       "key": "admissions",
       "label": "Admissions",
       "href": "admissions.html"
+    },
+    {
+      "key": "enrollment",
+      "label": "Enrollment",
+      "href": "enrollment.html",
+      "adminOnly": true
     },
     {
       "key": "policies",
@@ -58,18 +69,6 @@
         "eyebrow": "Welcome to",
         "title": "Bhanoyi Secondary School",
         "lead": "Building future-ready learners through academic excellence, discipline, and community values.",
-        "cta": [
-          {
-            "label": "Apply / Enquire",
-            "href": "admissions.html",
-            "variant": "primary"
-          },
-          {
-            "label": "Contact School",
-            "href": "contact.html",
-            "variant": "secondary"
-          }
-        ],
         "notice": {
           "title": "Important Notice",
           "body": "2026 applications are open. Submit forms before 31 March 2026.",
@@ -80,7 +79,7 @@
       "sections": [
         {
           "type": "cards",
-          "title": "Latest News",
+          "title": "Read Latest News",
           "sectionKey": "latest_news",
           "editable": true,
           "alt": true,
@@ -114,13 +113,13 @@
               "title": "Sports Update",
               "body": "Our teams performed strongly in the district fixtures.",
               "imageUrl": "/images/news/sports.svg",
-              "href": "index.html"
+              "href": "sports.html"
             }
           ]
         },
         {
           "type": "cards",
-          "title": "Quick Links",
+          "title": "Use Quick Links",
           "sectionKey": "quick_links",
           "editable": true,
           "clickable": true,
@@ -149,7 +148,7 @@
         },
         {
           "type": "announcements",
-          "title": "Notices & Announcements",
+          "title": "Check Notices & Announcements",
           "items": [
             {
               "date": "17 Feb 2026",
@@ -173,7 +172,7 @@
         },
         {
           "type": "cards",
-          "title": "Upcoming Events",
+          "title": "See Upcoming Events",
           "sectionKey": "upcoming_events",
           "editable": true,
           "columns": 3,
@@ -201,19 +200,12 @@
       "hero": {
         "eyebrow": "Who we are",
         "title": "About Our School",
-        "lead": "Bhanoyi Secondary School is committed to quality education and holistic learner development.",
-        "cta": [
-          {
-            "label": "Contact Leadership",
-            "href": "contact.html",
-            "variant": "secondary"
-          }
-        ]
+        "lead": "Bhanoyi Secondary School is committed to quality education and holistic learner development."
       },
       "sections": [
         {
           "type": "split",
-          "title": "Vision and Values",
+          "title": "Discover Vision and Values",
           "body": "We partner with parents and the wider community to create a safe and focused environment where every learner can succeed.",
           "panel": {
             "title": "Principal’s Message",
@@ -222,7 +214,7 @@
         },
         {
           "type": "cards",
-          "title": "School Culture",
+          "title": "Explore School Culture",
           "sectionKey": "school_culture",
           "editable": true,
           "alt": true,
@@ -251,19 +243,12 @@
       "hero": {
         "eyebrow": "Teaching and learning",
         "title": "Academics",
-        "lead": "Comprehensive subject offerings and structured support to help learners achieve excellent results.",
-        "cta": [
-          {
-            "label": "View Admissions",
-            "href": "admissions.html",
-            "variant": "primary"
-          }
-        ]
+        "lead": "Comprehensive subject offerings and structured support to help learners achieve excellent results."
       },
       "sections": [
         {
           "type": "cards",
-          "title": "Academic Programme",
+          "title": "Explore Academic Programmes",
           "sectionKey": "academic_programme",
           "editable": true,
           "columns": 3,
@@ -284,7 +269,7 @@
         },
         {
           "type": "split",
-          "title": "Curriculum Information",
+          "title": "Review Curriculum Information",
           "alt": true,
           "body": "Parents and guardians can request full curriculum details by grade and subject stream.",
           "panel": {
@@ -301,20 +286,136 @@
     "sports": {
       "key": "sports",
       "metaTitle": "Sports | Bhanoyi Secondary School",
-      "metaDescription": "Sports programme and current league standings for Bhanoyi Secondary School teams.",
+      "metaDescription": "Sports programmes, teams, fixtures, and learner development through athletics at Bhanoyi Secondary School.",
       "hero": {
-        "eyebrow": "School Sport",
+        "eyebrow": "Athletics and teamwork",
         "title": "Sports",
-        "lead": "Follow our competitive fixtures and current league performance across the district season.",
-        "cta": [
-          {
-            "label": "Contact School",
-            "href": "contact.html",
-            "variant": "secondary"
-          }
-        ]
+        "lead": "We use sport to build discipline, teamwork, leadership, and school pride across all grades."
       },
       "sections": [
+        {
+          "type": "match-log",
+          "title": "Follow Live Match Events",
+          "sectionKey": "sports_match_log",
+          "body": "Follow football or netball match events as they happen, with score updates shown live.",
+          "sport": "Football / Netball",
+          "competition": "Inter-House Friendly",
+          "venue": "Main Field",
+          "houseOptions": [
+            {
+              "id": "house_1",
+              "name": "House 1"
+            },
+            {
+              "id": "house_2",
+              "name": "House 2"
+            },
+            {
+              "id": "house_3",
+              "name": "House 3"
+            },
+            {
+              "id": "house_4",
+              "name": "House 4"
+            },
+            {
+              "id": "house_5",
+              "name": "House 5"
+            }
+          ],
+          "leftTeamId": "house_1",
+          "rightTeamId": "house_2",
+          "initialScores": {
+            "house_1": 0,
+            "house_2": 0,
+            "house_3": 0,
+            "house_4": 0,
+            "house_5": 0
+          },
+          "eventTypes": [
+            {
+              "key": "goal",
+              "label": "Goal",
+              "icon": "⚽",
+              "scoreFor": "self",
+              "allowAssist": true,
+              "playerLabel": "Scorer"
+            },
+            {
+              "key": "penalty_goal",
+              "label": "Penalty Goal",
+              "icon": "⚽",
+              "scoreFor": "self",
+              "playerLabel": "Scorer"
+            },
+            {
+              "key": "own_goal",
+              "label": "Own Goal",
+              "icon": "⚽",
+              "scoreFor": "opponent",
+              "playerLabel": "Player"
+            },
+            {
+              "key": "yellow_card",
+              "label": "Yellow Card",
+              "icon": "🟨",
+              "scoreFor": "none",
+              "playerLabel": "Booked Player"
+            },
+            {
+              "key": "red_card",
+              "label": "Red Card",
+              "icon": "🟥",
+              "scoreFor": "none",
+              "playerLabel": "Sent-off Player"
+            },
+            {
+              "key": "injury",
+              "label": "Injury",
+              "icon": "🩹",
+              "scoreFor": "none",
+              "playerLabel": "Injured Player"
+            },
+            {
+              "key": "substitution",
+              "label": "Substitution",
+              "icon": "🔁",
+              "scoreFor": "none",
+              "playerLabel": "Player"
+            }
+          ]
+        },
+        {
+          "type": "fixture-creator",
+          "title": "View Season Fixtures",
+          "sectionKey": "sports_fixture_creator",
+          "body": "View the full home-and-away round-robin schedule for the selected houses.",
+          "sport": "Football / Netball",
+          "competition": "Inter-House League",
+          "venue": "Main Field",
+          "houseOptions": [
+            {
+              "id": "house_1",
+              "name": "House 1"
+            },
+            {
+              "id": "house_2",
+              "name": "House 2"
+            },
+            {
+              "id": "house_3",
+              "name": "House 3"
+            },
+            {
+              "id": "house_4",
+              "name": "House 4"
+            },
+            {
+              "id": "house_5",
+              "name": "House 5"
+            }
+          ]
+        },
         {
           "type": "league-standings",
           "title": "League Standings Log",
@@ -403,6 +504,60 @@
               "pts": 5
             }
           ]
+        },
+        {
+          "type": "cards",
+          "title": "Explore Sporting Codes",
+          "sectionKey": "sporting_codes",
+          "editable": true,
+          "columns": 3,
+          "items": [
+            {
+              "title": "Football",
+              "body": "Boys and girls teams compete in local league and district fixtures."
+            },
+            {
+              "title": "Netball",
+              "body": "Regular training supports fitness, game awareness, and team performance."
+            },
+            {
+              "title": "Athletics",
+              "body": "Learners participate in track and field events throughout the season."
+            }
+          ]
+        },
+        {
+          "type": "split",
+          "title": "Plan Training and Fixtures",
+          "alt": true,
+          "body": "Training schedules and fixture updates are shared with learners and parents each term.",
+          "panel": {
+            "title": "Want to Join a Team?",
+            "body": "Speak to the sports coordinator to register for trials and training sessions.",
+            "link": {
+              "href": "contact.html",
+              "label": "Contact sports office"
+            }
+          }
+        }
+      ]
+    },
+    "calendar": {
+      "key": "calendar",
+      "metaTitle": "School Calendar | Bhanoyi Secondary School",
+      "metaDescription": "School calendar with fixtures and events for Bhanoyi Secondary School.",
+      "hero": {
+        "eyebrow": "Schedule and events",
+        "title": "School Calendar",
+        "lead": "View school events, match dates, and key activities in one place."
+      },
+      "sections": [
+        {
+          "type": "calendar",
+          "title": "View School Calendar",
+          "sectionKey": "school_calendar",
+          "body": "Browse school events, match dates, and key activities in one place.",
+          "fixtureSectionKey": "sports_fixture_creator"
         }
       ]
     },
@@ -413,19 +568,12 @@
       "hero": {
         "eyebrow": "Join our school",
         "title": "Admissions",
-        "lead": "Apply by completing the admission form and submitting required documents before the deadline.",
-        "cta": [
-          {
-            "label": "Contact Admissions",
-            "href": "contact.html",
-            "variant": "primary"
-          }
-        ]
+        "lead": "Apply by completing the admission form and submitting required documents before the deadline."
       },
       "sections": [
         {
           "type": "split",
-          "title": "Application Requirements",
+          "title": "Check Application Requirements",
           "body": "Submit all required documents to the school office to complete your application.",
           "list": [
             "Certified copy of learner birth certificate or ID",
@@ -445,7 +593,7 @@
         {
           "type": "cards",
           "alt": true,
-          "title": "Admission Support",
+          "title": "Get Admission Support",
           "sectionKey": "admission_support",
           "editable": true,
           "columns": 3,
@@ -466,7 +614,7 @@
         },
         {
           "type": "downloads",
-          "title": "Admission Forms & Documents",
+          "title": "Download Admission Forms & Documents",
           "items": [
             {
               "title": "Admission Application Form",
@@ -490,6 +638,24 @@
         }
       ]
     },
+    "enrollment": {
+      "key": "enrollment",
+      "metaTitle": "Enrollment | Bhanoyi Secondary School",
+      "metaDescription": "Admin enrollment workspace for managing intake, records, and enrolment workflow.",
+      "hero": {
+        "eyebrow": "Admissions management",
+        "title": "Enrollment",
+        "lead": "Manage learner enrollment workflow, records, and checklist progress."
+      },
+      "sections": [
+        {
+          "type": "enrollment-manager",
+          "sectionKey": "enrollment_manager",
+          "title": "Manage Enrollment",
+          "body": "Manage classes per grade (6 to 12)."
+        }
+      ]
+    },
     "policies": {
       "key": "policies",
       "metaTitle": "Policies | Bhanoyi Secondary School",
@@ -497,19 +663,12 @@
       "hero": {
         "eyebrow": "Governance and compliance",
         "title": "Policies & Public Information",
-        "lead": "Access the core policy areas parents and learners need most.",
-        "cta": [
-          {
-            "label": "Contact School Office",
-            "href": "contact.html",
-            "variant": "secondary"
-          }
-        ]
+        "lead": "Access the core policy areas parents and learners need most."
       },
       "sections": [
         {
           "type": "cards",
-          "title": "Policy Categories",
+          "title": "Explore Policy Categories",
           "sectionKey": "policy_categories",
           "editable": true,
           "items": [
@@ -534,7 +693,7 @@
         {
           "type": "cards",
           "alt": true,
-          "title": "Public Information Areas",
+          "title": "View Public Information Areas",
           "sectionKey": "public_information_areas",
           "editable": true,
           "columns": 3,
@@ -555,7 +714,7 @@
         },
         {
           "type": "downloads",
-          "title": "Policy Downloads",
+          "title": "Download Policy Documents",
           "items": [
             {
               "title": "Code of Conduct (PDF)",
@@ -597,7 +756,7 @@
       "sections": [
         {
           "type": "contact-cards",
-          "title": "Contact Information",
+          "title": "Find Contact Information",
           "items": [
             {
               "title": "Phone",
@@ -616,7 +775,7 @@
         {
           "type": "cards",
           "alt": true,
-          "title": "Office Hours",
+          "title": "Check Office Hours",
           "columns": 3,
           "items": [
             {

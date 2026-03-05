@@ -6,6 +6,16 @@
       "maxDuration": 30
     }
   },
+  "rewrites": [
+    {
+      "source": "/staff=1",
+      "destination": "/staff.html"
+    },
+    {
+      "source": "/staff",
+      "destination": "/staff.html"
+    }
+  ],
   "headers": [
     {
       "source": "/assets/(.*)",
