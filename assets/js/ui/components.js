@@ -759,6 +759,9 @@ const initSportsWorkflowSteps = (rootNode) => {
 
 const renderMatchLogSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const inputSuffix = String(fallbackSectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const playerOptionsId = `match-player-options-${inputSuffix}`;
+  const assistOptionsId = `match-assist-options-${inputSuffix}`;
   const fixtureSectionKey = (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const houseOptions = normalizeMatchTeams(
     Array.isArray(section.houseOptions) && section.houseOptions.length
@@ -907,7 +910,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   <div class="match-log-form-grid">
                     <label data-player-label>
                       Player name
-                      <input type="text" name="playerName" maxlength="120" placeholder="e.g. Sipho" />
+                      <input type="text" name="playerName" maxlength="120" placeholder="Start typing player name" list="${playerOptionsId}" autocomplete="off" />
+                      <datalist id="${playerOptionsId}" data-match-player-options></datalist>
                     </label>
                     <label>
                       Jersey number
@@ -916,7 +920,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   </div>
                   <label class="match-log-assist-row is-hidden" data-assist-row>
                     Assist by (optional)
-                    <input type="text" name="assistName" maxlength="120" placeholder="e.g. Themba" />
+                    <input type="text" name="assistName" maxlength="120" placeholder="Start typing assister name" list="${assistOptionsId}" autocomplete="off" />
+                    <datalist id="${assistOptionsId}" data-match-assist-options></datalist>
                   </label>
                   <label>
                     Notes (optional)
@@ -1004,6 +1009,7 @@ const saveMatchLogByFixtureStore = (fixtureSectionKey, store) => {
   const key = getMatchLogByFixtureStorageKey(fixtureSectionKey);
   const safeStore = store && typeof store === 'object' ? store : {};
   localStorage.setItem(key, JSON.stringify(safeStore));
+  void persistLocalStore(key, safeStore);
   return key;
 };
 
@@ -1031,6 +1037,229 @@ const summarizeMatchLogEntry = (entry) => {
     scoreLabel,
     compactLabel
   };
+};
+
+const normalizeMatchPlayerEntry = (entry, fallback = {}) => {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const name = String(entry.name || entry.playerName || '').trim();
+  if (!name) return null;
+
+  const admissionNo = String(entry.admissionNo || entry.admission || '').trim();
+  const houseId = String(entry.houseId || fallback.houseId || '').trim().toLowerCase();
+  const baseId = String(entry.id || '').trim();
+  const normalizedNameKey = name.toLowerCase().replace(/\s+/g, ' ').trim();
+  const id = baseId || admissionNo || `${houseId || 'team'}:${normalizedNameKey}`;
+
+  return {
+    id,
+    name,
+    admissionNo,
+    houseId,
+    gender: String(entry.gender || '').trim(),
+    jerseyNumber: String(entry.jerseyNumber || '').trim(),
+    sportingCodes: Array.isArray(entry.sportingCodes)
+      ? Array.from(
+          new Set(
+            entry.sportingCodes
+              .map((value) => String(value || '').trim())
+              .filter(Boolean)
+          )
+        )
+      : []
+  };
+};
+
+const normalizeMatchPlayersForTeam = (players, fallback = {}) => {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(players) ? players : []).forEach((entry) => {
+    const player = normalizeMatchPlayerEntry(entry, fallback);
+    if (!player) return;
+    const dedupeKey = `${player.id}::${player.name.toLowerCase()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push(player);
+  });
+
+  return normalized.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const inferSportCodeMatches = (sportLabel, sportingCodes = []) => {
+  const normalizedSport = String(sportLabel || '').trim().toLowerCase();
+  if (!normalizedSport) return false;
+
+  const hasSoccerLike = normalizedSport.includes('soccer') || normalizedSport.includes('football');
+  const hasNetballLike = normalizedSport.includes('netball');
+
+  const normalizedCodes = (Array.isArray(sportingCodes) ? sportingCodes : [])
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!normalizedCodes.length) return false;
+
+  if (hasSoccerLike) {
+    return normalizedCodes.some((entry) => entry.includes('soccer') || entry.includes('football'));
+  }
+
+  if (hasNetballLike) {
+    return normalizedCodes.some((entry) => entry.includes('netball'));
+  }
+
+  return normalizedCodes.some((entry) => normalizedSport.includes(entry) || entry.includes(normalizedSport));
+};
+
+const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel) => {
+  const targetHouseIds = new Set(
+    [String(homeId || '').trim().toLowerCase(), String(awayId || '').trim().toLowerCase()].filter(Boolean)
+  );
+  const byHouse = {
+    [String(homeId || '').trim().toLowerCase()]: [],
+    [String(awayId || '').trim().toLowerCase()]: []
+  };
+
+  if (!targetHouseIds.size) return byHouse;
+
+  const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
+  const houseBuckets = new Map();
+
+  enrollmentKeys.forEach((key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const profiles = parsed?.classProfilesByGrade;
+      if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles)) return;
+
+      Object.values(profiles).forEach((gradeProfiles) => {
+        if (!gradeProfiles || typeof gradeProfiles !== 'object' || Array.isArray(gradeProfiles)) return;
+        Object.values(gradeProfiles).forEach((profile) => {
+          const learners = Array.isArray(profile?.learners) ? profile.learners : [];
+          learners.forEach((learner) => {
+            if (!learner || typeof learner !== 'object') return;
+            const houseId = String(learner.houseId || '').trim().toLowerCase();
+            if (!targetHouseIds.has(houseId)) return;
+            const name = String(learner.name || '').trim();
+            if (!name) return;
+
+            const admissionNo = String(learner.admissionNo || '').trim();
+            const entry = {
+              id: admissionNo || `${houseId}:${name.toLowerCase().replace(/\s+/g, ' ').trim()}`,
+              name,
+              admissionNo,
+              houseId,
+              gender: String(learner.gender || '').trim(),
+              sportingCodes: Array.isArray(learner.sportingCodes)
+                ? learner.sportingCodes.map((value) => String(value || '').trim()).filter(Boolean)
+                : []
+            };
+
+            if (!houseBuckets.has(houseId)) {
+              houseBuckets.set(houseId, []);
+            }
+            houseBuckets.get(houseId).push(entry);
+          });
+        });
+      });
+    } catch {
+      return;
+    }
+  });
+
+  targetHouseIds.forEach((houseId) => {
+    const allPlayers = normalizeMatchPlayersForTeam(houseBuckets.get(houseId) || [], { houseId });
+    const sportFiltered = allPlayers.filter((player) => inferSportCodeMatches(sportLabel, player.sportingCodes));
+    byHouse[houseId] = sportFiltered.length ? sportFiltered : allPlayers;
+  });
+
+  return byHouse;
+};
+
+const normalizeFixturePlayersByTeam = (fixture, storedPlayersByTeam, fallbackPlayersByTeam = null) => {
+  if (!fixture) return {};
+  const homeId = String(fixture.homeId || '').trim();
+  const awayId = String(fixture.awayId || '').trim();
+
+  const stored = storedPlayersByTeam && typeof storedPlayersByTeam === 'object' ? storedPlayersByTeam : {};
+  const fallback = fallbackPlayersByTeam && typeof fallbackPlayersByTeam === 'object' ? fallbackPlayersByTeam : {};
+
+  const homePlayers = normalizeMatchPlayersForTeam(
+    stored[homeId] || stored.homePlayers || fallback[homeId] || fallback.homePlayers || [],
+    { houseId: homeId }
+  );
+  const awayPlayers = normalizeMatchPlayersForTeam(
+    stored[awayId] || stored.awayPlayers || fallback[awayId] || fallback.awayPlayers || [],
+    { houseId: awayId }
+  );
+
+  if (homePlayers.length || awayPlayers.length) {
+    return {
+      [homeId]: homePlayers,
+      [awayId]: awayPlayers
+    };
+  }
+
+  const derived = loadEnrollmentPlayersByHouse(homeId, awayId, fixture.sport || '');
+  return {
+    [homeId]: normalizeMatchPlayersForTeam(derived[homeId] || [], { houseId: homeId }),
+    [awayId]: normalizeMatchPlayersForTeam(derived[awayId] || [], { houseId: awayId })
+  };
+};
+
+const buildPlayerEventIndex = (events, fixture, playersByTeam) => {
+  if (!fixture) return [];
+  const playerById = new Map();
+
+  [fixture.homeId, fixture.awayId].forEach((teamId) => {
+    const teamPlayers = normalizeMatchPlayersForTeam(playersByTeam?.[teamId] || [], { houseId: teamId });
+    teamPlayers.forEach((player) => {
+      playerById.set(player.id, player);
+    });
+  });
+
+  const index = new Map();
+
+  (Array.isArray(events) ? events : []).forEach((event) => {
+    const teamId = String(event?.teamId || '').trim();
+    if (!teamId) return;
+
+    const eventType = String(event?.type || '').trim();
+    const playerName = String(event?.playerName || '').trim();
+    const playerId = String(event?.playerId || '').trim();
+    if (!playerName && !playerId) return;
+
+    const resolved = playerById.get(playerId) || null;
+    const key = `${teamId}::${playerId || playerName.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+    const existing =
+      index.get(key) ||
+      {
+        key,
+        teamId,
+        playerId: playerId || (resolved?.id || ''),
+        name: playerName || (resolved?.name || ''),
+        admissionNo: String(event?.playerAdmissionNo || resolved?.admissionNo || '').trim(),
+        totalEvents: 0,
+        eventTypes: {},
+        lastEventAt: 0
+      };
+
+    existing.totalEvents += 1;
+    if (eventType) {
+      existing.eventTypes[eventType] = (existing.eventTypes[eventType] || 0) + 1;
+    }
+    const createdAt = Number(event?.createdAt);
+    if (Number.isFinite(createdAt) && createdAt > existing.lastEventAt) {
+      existing.lastEventAt = createdAt;
+    }
+
+    index.set(key, existing);
+  });
+
+  return Array.from(index.values()).sort((left, right) => {
+    if (left.teamId !== right.teamId) return left.teamId.localeCompare(right.teamId);
+    return left.name.localeCompare(right.name);
+  });
 };
 
 const getOtherTeamId = (teamId, teams) => {
@@ -1137,6 +1366,8 @@ const hydrateMatchLog = (matchLogNode) => {
   const jerseyInput = eventForm?.querySelector('input[name="jerseyNumber"]');
   const assistInput = eventForm?.querySelector('input[name="assistName"]');
   const notesInput = eventForm?.querySelector('textarea[name="notes"]');
+  const playerOptionsNode = matchLogNode.querySelector('[data-match-player-options]');
+  const assistOptionsNode = matchLogNode.querySelector('[data-match-assist-options]');
 
   portalOverlayToBody(workspaceModal, `match-log-workspace:${sectionKey}`);
   portalOverlayToBody(modal, `match-log-modal:${sectionKey}`);
@@ -1190,6 +1421,7 @@ const hydrateMatchLog = (matchLogNode) => {
   let activeTeamId = '';
   let selectedTypeKey = '';
   let currentEvents = [];
+  let currentPlayersByTeam = {};
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
 
@@ -1223,7 +1455,18 @@ const hydrateMatchLog = (matchLogNode) => {
       initialScores,
       homeScore: Number.isFinite(Number(safeStored.homeScore)) ? Number(safeStored.homeScore) : initialScores[fixture.homeId] || 0,
       awayScore: Number.isFinite(Number(safeStored.awayScore)) ? Number(safeStored.awayScore) : initialScores[fixture.awayId] || 0,
-      events: Array.isArray(safeStored.events) ? safeStored.events : []
+      events: Array.isArray(safeStored.events) ? safeStored.events : [],
+      playersByTeam: normalizeFixturePlayersByTeam(
+        fixture,
+        safeStored.playersByTeam || {
+          homePlayers: safeStored.homePlayers,
+          awayPlayers: safeStored.awayPlayers
+        },
+        fixture.playersByTeam || {
+          homePlayers: fixture.homePlayers,
+          awayPlayers: fixture.awayPlayers
+        }
+      )
     };
   };
 
@@ -1240,9 +1483,56 @@ const hydrateMatchLog = (matchLogNode) => {
         playerName: String(entry.playerName || '').trim(),
         jerseyNumber: String(entry.jerseyNumber || '').trim(),
         assistName: String(entry.assistName || '').trim(),
+        playerId: String(entry.playerId || '').trim(),
+        playerAdmissionNo: String(entry.playerAdmissionNo || '').trim(),
+        playerHouseId: String(entry.playerHouseId || '').trim(),
+        playerGender: String(entry.playerGender || '').trim(),
+        assistId: String(entry.assistId || '').trim(),
+        assistAdmissionNo: String(entry.assistAdmissionNo || '').trim(),
         notes: String(entry.notes || '').trim(),
         createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
       }));
+  };
+
+  const getPlayersForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return [];
+    const normalizedTeamId = teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+    return normalizeMatchPlayersForTeam(currentPlayersByTeam?.[normalizedTeamId] || [], { houseId: normalizedTeamId });
+  };
+
+  const findPlayerByTypedName = (teamId, typedName) => {
+    const normalizedName = String(typedName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!normalizedName) return null;
+
+    const teamPlayers = getPlayersForTeam(teamId);
+    return (
+      teamPlayers.find((player) => String(player.name || '').trim().toLowerCase().replace(/\s+/g, ' ') === normalizedName) ||
+      null
+    );
+  };
+
+  const renderAutocompleteOptions = () => {
+    const fixture = getCurrentFixture();
+    if (!(playerOptionsNode instanceof HTMLDataListElement) || !(assistOptionsNode instanceof HTMLDataListElement)) return;
+    if (!fixture) {
+      playerOptionsNode.innerHTML = '';
+      assistOptionsNode.innerHTML = '';
+      return;
+    }
+
+    const teamPlayers = getPlayersForTeam(activeTeamId || fixture.homeId);
+    const optionsMarkup = teamPlayers
+      .map((player) => {
+        const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
+          .filter(Boolean)
+          .join(' · ');
+        return `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(meta || player.name)}"></option>`;
+      })
+      .join('');
+
+    playerOptionsNode.innerHTML = optionsMarkup;
+    assistOptionsNode.innerHTML = optionsMarkup;
   };
 
   const computeScores = (fixture) => {
@@ -1276,9 +1566,23 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) return;
     const scores = computeScores(fixture);
     const baseEntry = getFixtureEntry(fixture);
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(
+      fixture,
+      currentPlayersByTeam,
+      fixture.playersByTeam || {
+        homePlayers: fixture.homePlayers,
+        awayPlayers: fixture.awayPlayers
+      }
+    );
+    const playerEventIndex = buildPlayerEventIndex(currentEvents, fixture, normalizedPlayersByTeam);
+
     logsByFixture[fixture.fixtureId] = {
       ...baseEntry,
       events: [...currentEvents],
+      playersByTeam: normalizedPlayersByTeam,
+      homePlayers: normalizedPlayersByTeam[fixture.homeId] || [],
+      awayPlayers: normalizedPlayersByTeam[fixture.awayId] || [],
+      playerEventIndex,
       homeScore: Number(scores[fixture.homeId] || 0),
       awayScore: Number(scores[fixture.awayId] || 0),
       updatedAt: Date.now()
@@ -1298,10 +1602,22 @@ const hydrateMatchLog = (matchLogNode) => {
     const fixture = getCurrentFixture();
     if (!fixture) {
       currentEvents = [];
+      currentPlayersByTeam = {};
       return;
     }
     const entry = getFixtureEntry(fixture);
     currentEvents = sanitizeEventsForFixture(fixture, entry?.events || []);
+    currentPlayersByTeam = normalizeFixturePlayersByTeam(
+      fixture,
+      entry?.playersByTeam || {
+        homePlayers: entry?.homePlayers,
+        awayPlayers: entry?.awayPlayers
+      },
+      fixture.playersByTeam || {
+        homePlayers: fixture.homePlayers,
+        awayPlayers: fixture.awayPlayers
+      }
+    );
   };
 
   const populateFixtureData = () => {
@@ -1338,6 +1654,12 @@ const hydrateMatchLog = (matchLogNode) => {
           sport: String(fixture.sport || config.sport || '').trim(),
           competition: String(fixture.competition || config.competition || '').trim(),
           venue: String(fixture.venue || config.venue || '').trim(),
+          playersByTeam:
+            fixture.playersByTeam && typeof fixture.playersByTeam === 'object' && !Array.isArray(fixture.playersByTeam)
+              ? fixture.playersByTeam
+              : {},
+          homePlayers: Array.isArray(fixture.homePlayers) ? fixture.homePlayers : [],
+          awayPlayers: Array.isArray(fixture.awayPlayers) ? fixture.awayPlayers : [],
           round: Number(fixture.round || 0),
           match: Number(fixture.match || 0),
           stamp: normalizeFixtureStampGlobal(fixtureDateMap[fixtureId])
@@ -1507,6 +1829,7 @@ const hydrateMatchLog = (matchLogNode) => {
         }
       });
       syncModalTeamState();
+      renderAutocompleteOptions();
       return;
     }
 
@@ -1567,6 +1890,7 @@ const hydrateMatchLog = (matchLogNode) => {
     });
 
     syncModalTeamState();
+    renderAutocompleteOptions();
   };
 
   const resetModal = () => {
@@ -1590,6 +1914,7 @@ const hydrateMatchLog = (matchLogNode) => {
     if (assistRow) {
       assistRow.classList.add('is-hidden');
     }
+    renderAutocompleteOptions();
   };
 
   const closeModal = () => {
@@ -1625,6 +1950,7 @@ const hydrateMatchLog = (matchLogNode) => {
       modalTeamSelect.innerHTML = '<option value="">Select team</option>';
       modalTeamSelect.disabled = true;
       if (teamLabel) teamLabel.textContent = '';
+      renderAutocompleteOptions();
       return;
     }
 
@@ -1644,6 +1970,8 @@ const hydrateMatchLog = (matchLogNode) => {
       const teamName = activeTeamId === fixture.awayId ? fixture.awayName : fixture.homeName;
       teamLabel.textContent = `Team: ${teamName}`;
     }
+
+    renderAutocompleteOptions();
   };
 
   const openModalForTeam = (teamId) => {
@@ -1723,6 +2051,8 @@ const hydrateMatchLog = (matchLogNode) => {
     const jerseyNumber = (jerseyInput?.value || '').trim();
     const assistName = (assistInput?.value || '').trim();
     const notes = (notesInput?.value || '').trim();
+    const selectedPlayer = findPlayerByTypedName(activeTeamId, playerName);
+    const selectedAssist = findPlayerByTypedName(activeTeamId, assistName);
 
     currentEvents.push({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1730,9 +2060,15 @@ const hydrateMatchLog = (matchLogNode) => {
       type: selectedTypeKey,
       minute: Number.isFinite(minute) && minute >= 0 ? Math.floor(minute) : null,
       stoppage: Number.isFinite(stoppage) && stoppage > 0 ? Math.floor(stoppage) : null,
-      playerName,
+      playerName: selectedPlayer?.name || playerName,
+      playerId: selectedPlayer?.id || '',
+      playerAdmissionNo: selectedPlayer?.admissionNo || '',
+      playerHouseId: selectedPlayer?.houseId || activeTeamId,
+      playerGender: selectedPlayer?.gender || '',
       jerseyNumber,
-      assistName,
+      assistName: selectedAssist?.name || assistName,
+      assistId: selectedAssist?.id || '',
+      assistAdmissionNo: selectedAssist?.admissionNo || '',
       notes,
       createdAt: Date.now()
     });
@@ -1816,6 +2152,7 @@ const hydrateMatchLog = (matchLogNode) => {
     const nextTeamId = String(modalTeamSelect.value || '').trim();
     activeTeamId = nextTeamId === fixture.awayId ? fixture.awayId : fixture.homeId;
     syncModalTeamState();
+    renderAutocompleteOptions();
   });
 
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
@@ -1911,29 +2248,38 @@ const hydrateMatchLog = (matchLogNode) => {
   const requestedDate = normalizeFixtureDateOnlyGlobal(params.get('logDate') || '');
   const requestedSection = String(params.get('logFixtureSectionKey') || '').trim();
 
-  populateFixtureData();
-  if (requestedSection && requestedSection !== fixtureSectionKey) {
-    selectedDate = fixtureDates()[0] || '';
-  } else if (requestedDate) {
-    selectedDate = requestedDate;
-  } else {
-    selectedDate = fixtureDates()[0] || '';
-  }
-
-  renderFixturePickers();
-
-  if (!requestedSection || requestedSection === fixtureSectionKey) {
-    if (requestedFixtureId && fixtureOptions.some((entry) => entry.fixtureId === requestedFixtureId)) {
-      selectedFixtureId = requestedFixtureId;
-      const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
-      selectedDate = matchedFixture?.date || selectedDate;
-      renderFixturePickers();
-      openWorkspaceModal();
+  const initializeMatchLogState = () => {
+    populateFixtureData();
+    if (requestedSection && requestedSection !== fixtureSectionKey) {
+      selectedDate = fixtureDates()[0] || '';
+    } else if (requestedDate) {
+      selectedDate = requestedDate;
+    } else {
+      selectedDate = fixtureDates()[0] || '';
     }
-  }
 
-  applyFixtureSelection();
-  syncModalTeamState();
+    renderFixturePickers();
+
+    if (!requestedSection || requestedSection === fixtureSectionKey) {
+      if (requestedFixtureId && fixtureOptions.some((entry) => entry.fixtureId === requestedFixtureId)) {
+        selectedFixtureId = requestedFixtureId;
+        const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
+        selectedDate = matchedFixture?.date || selectedDate;
+        renderFixturePickers();
+        openWorkspaceModal();
+      }
+    }
+
+    applyFixtureSelection();
+    syncModalTeamState();
+    renderAutocompleteOptions();
+  };
+
+  void syncLocalStoreFromRemote(matchLogStoreStorageKey)
+    .catch(() => null)
+    .finally(() => {
+      initializeMatchLogState();
+    });
 };
 
 const isGenericHouseName = (value) => /^house\s*\d+$/i.test(String(value || '').trim());
