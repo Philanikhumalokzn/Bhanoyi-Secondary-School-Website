@@ -8457,20 +8457,84 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     try {
       const exportFixtures = getExportFixtures();
-      const fixtureRows = exportFixtures.map((fixture) => {
+      const compactFormatLabel = (value) => {
+        const raw = normalizeText(value, 220);
+        if (!raw) return '';
+        const structureMatch = raw.match(/(\d+)\s*x\s*(\d+)\s*min/i);
+        const repeatMatch = raw.match(/(\d+)x\s+per\s+opponent\s+per\s+leg/i);
+        if (structureMatch) {
+          const base = `${structureMatch[1]}x${structureMatch[2]} min`;
+          const repeatSuffix = repeatMatch ? ` · ${repeatMatch[1]}x/leg` : '';
+          return `${base}${repeatSuffix}`;
+        }
+        return raw.length > 30 ? `${raw.slice(0, 27)}…` : raw;
+      };
+
+      const fixtureRows = [];
+      let previousRound = Number.NaN;
+      let previousLeg = '';
+      let secondLegBannerInserted = false;
+
+      exportFixtures.forEach((fixture) => {
         const fixtureId = getFixtureId(fixture);
         const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
-        return {
+        const normalizedLeg = String(fixture.leg || '').trim();
+        const isNewLeg = normalizedLeg !== previousLeg;
+        const isNewRound = Number(fixture.round) !== Number(previousRound);
+
+        if (!secondLegBannerInserted && /^return$/i.test(normalizedLeg)) {
+          fixtureRows.push({
+            round: 'SECOND LEG STARTS',
+            leg: '',
+            match: '',
+            date: '',
+            kickoff: '',
+            format: '',
+            home: '',
+            away: '',
+            __kind: 'leg-break'
+          });
+          secondLegBannerInserted = true;
+        }
+
+        if (isNewLeg || isNewRound) {
+          fixtureRows.push({
+            round: `Round ${fixture.round} • ${normalizedLeg || 'Leg'}`,
+            leg: '',
+            match: '',
+            date: '',
+            kickoff: '',
+            format: '',
+            home: '',
+            away: '',
+            __kind: 'round-break'
+          });
+        }
+
+        fixtureRows.push({
           round: fixture.round,
-          leg: fixture.leg,
+          leg: normalizedLeg,
           match: `R${fixture.round}M${fixture.match}`,
           date: formatFriendlyDate(stampValue.date),
           kickoff: stampValue.time || 'TBD',
-          format: fixture.formatLabel || '',
+          format: compactFormatLabel(fixture.formatLabel || ''),
           home: teamNameById(fixture.homeId),
-          away: teamNameById(fixture.awayId)
-        };
+          away: teamNameById(fixture.awayId),
+          __kind: 'fixture'
+        });
+
+        previousRound = Number(fixture.round);
+        previousLeg = normalizedLeg;
       });
+
+      const selectedRuleLabels = selectedFairnessRuleIds()
+        .map((ruleId) => fairnessRuleLabelById(ruleId))
+        .map((label) => normalizeText(label, 200))
+        .filter(Boolean);
+      const firstLegCount = exportFixtures.filter((entry) => String(entry.leg || '').trim() === 'First').length;
+      const returnLegCount = exportFixtures.filter((entry) => String(entry.leg || '').trim() === 'Return').length;
+      const fixtureTeamCount = Array.from(new Set(exportFixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))).length;
+      const pinnedCount = getPinnedFixtureIndexes(lastFixtures).length;
 
       await exportProfessionalWorkbook({
         fileName: `${baseName}.xlsx`,
@@ -8489,7 +8553,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           { header: 'Away', key: 'away', width: 17, align: 'left' }
         ],
         rows: fixtureRows,
-        note: 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.',
+        note: 'Notice: Fixture dates/times are synchronized with the school calendar. Share updates through official school channels.',
         signatures: [
           {
             anchor: 'right',
@@ -8498,30 +8562,51 @@ const hydrateFixtureCreator = (fixtureNode) => {
             shiftColumns: 2
           }
         ],
-        afterRows: ({ sheet, dataStartRow }) => {
-          let runStart = 0;
-          while (runStart < exportFixtures.length) {
-            const runFixture = exportFixtures[runStart];
-            const runKey = `${runFixture.round}::${runFixture.leg}`;
-            let runEnd = runStart;
-            while (runEnd + 1 < exportFixtures.length) {
-              const nextFixture = exportFixtures[runEnd + 1];
-              const nextKey = `${nextFixture.round}::${nextFixture.leg}`;
-              if (nextKey !== runKey) break;
-              runEnd += 1;
-            }
-
-            if (runEnd > runStart) {
-              const startRow = dataStartRow + runStart;
-              const endRow = dataStartRow + runEnd;
-              sheet.mergeCells(`A${startRow}:A${endRow}`);
-              sheet.mergeCells(`B${startRow}:B${endRow}`);
-              sheet.getCell(`A${startRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-              sheet.getCell(`B${startRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-            }
-
-            runStart = runEnd + 1;
+        footerSections: [
+          {
+            title: 'Fixture Summary',
+            lines: [
+              `Total fixtures: ${exportFixtures.length} (${firstLegCount} First leg, ${returnLegCount} Return leg).`,
+              `Teams scheduled: ${fixtureTeamCount}.`,
+              `Matches per opponent per leg: ${configuredMatchesPerOpponentPerLeg()}.`,
+              `Pinned fixture constraints: ${pinnedCount}.`,
+              currentUnfairnessReport.hasUnfairness
+                ? `Fairness check status: ${currentUnfairnessReport.affectedFixtureCount} fixture(s) currently flagged.`
+                : 'Fairness check status: no active fairness violations in current draft.'
+            ]
+          },
+          {
+            title: 'Applied Fairness Rules',
+            lines: selectedRuleLabels.length
+              ? selectedRuleLabels.map((label, index) => `${index + 1}. ${label}`)
+              : ['No fairness rules selected by admin.']
           }
+        ],
+        afterRows: ({ sheet, dataStartRow }) => {
+          const endColumn = 'H';
+          fixtureRows.forEach((row, rowIndex) => {
+            if (!row.__kind || row.__kind === 'fixture') return;
+            const targetRow = dataStartRow + rowIndex;
+            sheet.mergeCells(`A${targetRow}:${endColumn}${targetRow}`);
+            const titleCell = sheet.getCell(`A${targetRow}`);
+            titleCell.value = row.round || '';
+            titleCell.font = {
+              name: 'Calibri',
+              size: row.__kind === 'leg-break' ? 10.5 : 10,
+              bold: true,
+              color: { argb: 'FF173A5E' }
+            };
+            titleCell.alignment = {
+              horizontal: row.__kind === 'leg-break' ? 'center' : 'left',
+              vertical: 'middle'
+            };
+            titleCell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: row.__kind === 'leg-break' ? 'FFEAF3FF' : 'FFF5FAFF' }
+            };
+            sheet.getRow(targetRow).height = row.__kind === 'leg-break' ? 22 : 20;
+          });
         }
       });
       showSmartToast('Professional fixture file exported (.xlsx).', { tone: 'success' });

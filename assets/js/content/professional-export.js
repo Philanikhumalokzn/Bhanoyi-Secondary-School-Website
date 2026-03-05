@@ -67,6 +67,7 @@ export const exportProfessionalWorkbook = async ({
   rows,
   note,
   signatures,
+  footerSections,
   logoUrl = '/branding/bhanoyi-logo.png',
   afterRows
 }) => {
@@ -391,6 +392,52 @@ export const exportProfessionalWorkbook = async ({
         applySignatureBlock(rightSignature, rightRange);
       }
     }
+  }
+
+  if (safeSignatures.length) {
+    footerRowNumber += 6;
+  }
+
+  const safeFooterSections = Array.isArray(footerSections)
+    ? footerSections
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+          title: String(entry.title || '').trim(),
+          lines: Array.isArray(entry.lines)
+            ? entry.lines.map((line) => String(line || '').trim()).filter(Boolean)
+            : []
+        }))
+        .filter((entry) => entry.title || entry.lines.length)
+    : [];
+
+  if (safeFooterSections.length) {
+    let sectionRow = footerRowNumber;
+    safeFooterSections.forEach((section, sectionIndex) => {
+      if (sectionIndex > 0) {
+        sectionRow += 1;
+      }
+
+      sheet.mergeCells(`A${sectionRow}:${endColumnLabel}${sectionRow}`);
+      const titleCell = sheet.getCell(`A${sectionRow}`);
+      titleCell.value = section.title || `Summary ${sectionIndex + 1}`;
+      titleCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+      titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+      titleCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${theme.metaBlue}` }
+      };
+      sectionRow += 1;
+
+      section.lines.forEach((line) => {
+        sheet.mergeCells(`A${sectionRow}:${endColumnLabel}${sectionRow}`);
+        const lineCell = sheet.getCell(`A${sectionRow}`);
+        lineCell.value = line;
+        lineCell.font = { name: 'Calibri', size: 10, color: { argb: `FF${theme.deepBlue}` } };
+        lineCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        sectionRow += 1;
+      });
+    });
   }
 
   const normalizedFileName = String(fileName || 'export.xlsx').trim() || 'export.xlsx';
