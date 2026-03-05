@@ -6222,6 +6222,19 @@ const wireSportsHouseManagerInline = () => {
         .filter((entry) => Boolean(entry));
       const houseManagerSignatureName = managerNames[0] || '____________________________';
 
+      const roleStore = loadHouseRoleAssignments();
+      const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+      const staffByKey = new Map(
+        collectEnrollmentLearners()
+          .filter((record) => record.houseId === activeHouse.id && record.memberType === 'teacher')
+          .map((record) => [record.key, record.displayName])
+      );
+      const managerNames = Object.entries(houseRoleEntry.staffRoles)
+        .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
+        .map(([memberKey]) => staffByKey.get(memberKey) || '')
+        .filter((entry) => Boolean(entry));
+      const houseManagerSignatureName = managerNames[0] || '____________________________';
+
       await exportProfessionalWorkbook({
         fileName: `${safeHouseName}-house-register.xlsx`,
         sheetName: 'House Register',
@@ -6323,6 +6336,13 @@ const wireSportsHouseManagerInline = () => {
         ],
         rows,
         note: 'Please keep entries clear and concise. Choose a values-based, inspirational house name and slogan/motto that reflect both school and house identity.',
+        signatures: [
+          {
+            anchor: 'left',
+            name: houseManagerSignatureName,
+            role: 'House Manager'
+          }
+        ],
         afterRows: ({ sheet, dataStartRow }) => {
           const headerRowNumber = dataStartRow - 1;
           const headerRow = sheet.getRow(headerRowNumber);
