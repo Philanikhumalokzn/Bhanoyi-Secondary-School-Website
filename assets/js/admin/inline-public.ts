@@ -182,50 +182,10 @@ const initAdminSessionSideMenu = (session: unknown) => {
     .trim()
     .toLowerCase();
 
-  const shell = document.createElement('aside');
-  shell.className = 'inline-admin-side-menu';
-  shell.innerHTML = `
-    <div class="inline-admin-side-menu-header">
-      <h3>Admin Session Control</h3>
-      <p>View devices logged in with admin credentials and revoke access.</p>
-    </div>
-    <div class="inline-admin-side-menu-pin" data-admin-session-pin-block>
-      <label>
-        Extra Admin PIN
-        <input type="password" data-admin-session-pin-input autocomplete="one-time-code" placeholder="Enter extra PIN" />
-      </label>
-      <button type="button" class="btn btn-secondary" data-admin-session-unlock>Unlock</button>
-    </div>
-    <p class="inline-admin-side-menu-status" data-admin-session-status aria-live="polite"></p>
-    <div class="inline-admin-side-menu-content is-hidden" data-admin-session-content>
-      <div class="inline-admin-side-menu-actions">
-        <button type="button" class="btn btn-secondary" data-admin-session-refresh>Refresh list</button>
-        <button type="button" class="btn btn-secondary" data-admin-session-logout-all>Log out all devices</button>
-      </div>
-      <ul class="inline-admin-session-list" data-admin-session-list></ul>
-    </div>
-  `;
-
-  document.body.appendChild(shell);
-
-  const pinInput = shell.querySelector('[data-admin-session-pin-input]') as HTMLInputElement | null;
-  const unlockButton = shell.querySelector('[data-admin-session-unlock]') as HTMLButtonElement | null;
-  const statusNode = shell.querySelector('[data-admin-session-status]') as HTMLElement | null;
-  const contentNode = shell.querySelector('[data-admin-session-content]') as HTMLElement | null;
-  const listNode = shell.querySelector('[data-admin-session-list]') as HTMLElement | null;
-  const refreshButton = shell.querySelector('[data-admin-session-refresh]') as HTMLButtonElement | null;
-  const logoutAllButton = shell.querySelector('[data-admin-session-logout-all]') as HTMLButtonElement | null;
-
-  if (!pinInput || !unlockButton || !statusNode || !contentNode || !listNode || !refreshButton || !logoutAllButton) {
-    shell.remove();
-    return;
-  }
-
-  let unlockedPin = '';
   let pollTimer: number | null = null;
 
   const setLocalStatus = (message: string) => {
-    statusNode.textContent = message;
+    showStatus(message);
   };
 
   const forceLogoutCurrentDevice = async (message: string) => {
@@ -303,7 +263,7 @@ const initAdminSessionSideMenu = (session: unknown) => {
       });
     });
 
-  const renderSessionList = (sessions: InlineAdminSessionRow[]) => {
+  const renderSessionList = (sessions: InlineAdminSessionRow[], listNode: HTMLElement) => {
     if (!sessions.length) {
       listNode.innerHTML = '<li class="inline-admin-session-empty">No active admin devices found.</li>';
       return;
@@ -329,22 +289,172 @@ const initAdminSessionSideMenu = (session: unknown) => {
       .join('');
   };
 
-  const loadSessions = async () => {
-    if (!unlockedPin) {
-      setLocalStatus('Enter the extra admin PIN to unlock this menu.');
+  const openSessionControlModal = () => {
+    const existing = document.querySelector('[data-admin-session-control-modal="true"]') as HTMLElement | null;
+    if (existing) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'news-overlay';
+    overlay.setAttribute('data-admin-session-control-modal', 'true');
+    overlay.innerHTML = `
+      <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Admin session control">
+        <h3>Admin Session Control</h3>
+        <p>View devices logged in with admin credentials and revoke access.</p>
+        <div class="inline-admin-side-menu-pin" data-admin-session-pin-block>
+          <label>
+            Extra Admin PIN
+            <input type="password" data-admin-session-pin-input autocomplete="one-time-code" placeholder="Enter extra PIN" />
+          </label>
+          <button type="button" class="btn btn-secondary" data-admin-session-unlock>Unlock</button>
+        </div>
+        <p class="inline-admin-side-menu-status" data-admin-session-status aria-live="polite"></p>
+        <div class="inline-admin-side-menu-content is-hidden" data-admin-session-content>
+          <div class="inline-admin-side-menu-actions">
+            <button type="button" class="btn btn-secondary" data-admin-session-refresh>Refresh list</button>
+            <button type="button" class="btn btn-secondary" data-admin-session-logout-all>Log out all devices</button>
+          </div>
+          <ul class="inline-admin-session-list" data-admin-session-list></ul>
+        </div>
+        <div class="news-overlay-actions">
+          <button type="button" data-admin-session-close>Close</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    lockOverlayBackgroundScroll();
+
+    const pinInput = overlay.querySelector('[data-admin-session-pin-input]') as HTMLInputElement | null;
+    const unlockButton = overlay.querySelector('[data-admin-session-unlock]') as HTMLButtonElement | null;
+    const statusNode = overlay.querySelector('[data-admin-session-status]') as HTMLElement | null;
+    const contentNode = overlay.querySelector('[data-admin-session-content]') as HTMLElement | null;
+    const listNode = overlay.querySelector('[data-admin-session-list]') as HTMLElement | null;
+    const refreshButton = overlay.querySelector('[data-admin-session-refresh]') as HTMLButtonElement | null;
+    const logoutAllButton = overlay.querySelector('[data-admin-session-logout-all]') as HTMLButtonElement | null;
+    const closeButton = overlay.querySelector('[data-admin-session-close]') as HTMLButtonElement | null;
+
+    if (!pinInput || !unlockButton || !statusNode || !contentNode || !listNode || !refreshButton || !logoutAllButton) {
+      overlay.remove();
+      unlockOverlayBackgroundScroll();
       return;
     }
 
-    try {
-      setLocalStatus('Loading active admin devices...');
-      const response = await callInlineAdminSessionsApi('GET', accessToken, null, unlockedPin);
-      const sessions = Array.isArray(response.sessions) ? response.sessions : [];
-      const visible = sessions.filter((entry) => String(entry.email || '').toLowerCase() === currentEmail);
-      renderSessionList(visible);
-      setLocalStatus(`Loaded ${visible.length} active admin device${visible.length === 1 ? '' : 's'}.`);
-    } catch (error) {
-      setLocalStatus(error instanceof Error ? error.message : 'Could not load admin devices.');
-    }
+    let unlockedPin = '';
+
+    const setModalStatus = (message: string) => {
+      statusNode.textContent = message;
+    };
+
+    const closeModal = () => {
+      overlay.remove();
+      unlockOverlayBackgroundScroll();
+    };
+
+    const loadSessions = async () => {
+      if (!unlockedPin) {
+        setModalStatus('Enter the extra admin PIN to unlock this menu.');
+        return;
+      }
+
+      try {
+        setModalStatus('Loading active admin devices...');
+        const response = await callInlineAdminSessionsApi('GET', accessToken, null, unlockedPin);
+        const sessions = Array.isArray(response.sessions) ? response.sessions : [];
+        const visible = sessions.filter((entry) => String(entry.email || '').toLowerCase() === currentEmail);
+        renderSessionList(visible, listNode);
+        setModalStatus(`Loaded ${visible.length} active admin device${visible.length === 1 ? '' : 's'}.`);
+      } catch (error) {
+        setModalStatus(error instanceof Error ? error.message : 'Could not load admin devices.');
+      }
+    };
+
+    unlockButton.addEventListener('click', async () => {
+      const candidatePin = pinInput.value.trim();
+      if (!candidatePin) {
+        setModalStatus('Enter the extra admin PIN first.');
+        return;
+      }
+
+      try {
+        unlockButton.disabled = true;
+        unlockedPin = candidatePin;
+        contentNode.classList.remove('is-hidden');
+        await loadSessions();
+        pinInput.value = '';
+      } finally {
+        unlockButton.disabled = false;
+      }
+    });
+
+    refreshButton.addEventListener('click', async () => {
+      await loadSessions();
+    });
+
+    logoutAllButton.addEventListener('click', async () => {
+      if (!unlockedPin) {
+        setModalStatus('Unlock with the extra admin PIN first.');
+        return;
+      }
+
+      const confirmed = window.confirm('Log out all active admin devices, including this one?');
+      if (!confirmed) return;
+
+      try {
+        logoutAllButton.disabled = true;
+        await callInlineAdminSessionsApi('DELETE', accessToken, { scope: 'all' }, unlockedPin);
+        await forceLogoutCurrentDevice('All admin devices were logged out.');
+      } catch (error) {
+        setModalStatus(error instanceof Error ? error.message : 'Could not log out all devices.');
+      } finally {
+        logoutAllButton.disabled = false;
+      }
+    });
+
+    listNode.addEventListener('click', async (event) => {
+      const target = event.target as HTMLElement;
+      const button = target.closest('button[data-admin-session-logout-one]') as HTMLButtonElement | null;
+      if (!button) return;
+
+      const targetSessionId = String(button.dataset.adminSessionLogoutOne || '').trim();
+      if (!targetSessionId || !unlockedPin) return;
+
+      const isCurrentDevice = targetSessionId === deviceSessionId;
+      const reason = await requestLogoutReason(isCurrentDevice);
+      if (!reason) return;
+
+      try {
+        button.disabled = true;
+        await callInlineAdminSessionsApi(
+          'DELETE',
+          accessToken,
+          {
+            scope: 'one',
+            sessionId: targetSessionId,
+            reason
+          },
+          unlockedPin
+        );
+
+        if (targetSessionId === deviceSessionId) {
+          await forceLogoutCurrentDevice('This device was logged out from admin session control.');
+          return;
+        }
+
+        setModalStatus('Selected admin device was logged out.');
+        await loadSessions();
+      } catch (error) {
+        setModalStatus(error instanceof Error ? error.message : 'Could not log out selected device.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    closeButton?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) {
+        closeModal();
+      }
+    });
   };
 
   const sendHeartbeat = async () => {
@@ -368,86 +478,26 @@ const initAdminSessionSideMenu = (session: unknown) => {
     }
   };
 
-  unlockButton.addEventListener('click', async () => {
-    const candidatePin = pinInput.value.trim();
-    if (!candidatePin) {
-      setLocalStatus('Enter the extra admin PIN first.');
-      return;
-    }
+  const footerHost =
+    (document.querySelector('.footer-admin-tools') as HTMLElement | null) ||
+    (document.querySelector('.site-footer .footer-bottom') as HTMLElement | null) ||
+    (document.querySelector('.site-footer .container') as HTMLElement | null);
 
-    try {
-      unlockButton.disabled = true;
-      unlockedPin = candidatePin;
-      contentNode.classList.remove('is-hidden');
-      await loadSessions();
-      pinInput.value = '';
-    } finally {
-      unlockButton.disabled = false;
-    }
-  });
+  const actionHost = footerHost || document.body;
+  const existingButton = actionHost.querySelector('[data-admin-session-control-open="true"]') as HTMLButtonElement | null;
+  if (!existingButton) {
+    const triggerButton = document.createElement('button');
+    triggerButton.type = 'button';
+    triggerButton.className = 'btn btn-secondary';
+    triggerButton.dataset.adminSessionControlOpen = 'true';
+    triggerButton.textContent = 'Admin Session Control';
+    triggerButton.addEventListener('click', () => {
+      openSessionControlModal();
+    });
+    actionHost.appendChild(triggerButton);
+  }
 
-  refreshButton.addEventListener('click', async () => {
-    await loadSessions();
-  });
-
-  logoutAllButton.addEventListener('click', async () => {
-    if (!unlockedPin) {
-      setLocalStatus('Unlock with the extra admin PIN first.');
-      return;
-    }
-
-    const confirmed = window.confirm('Log out all active admin devices, including this one?');
-    if (!confirmed) return;
-
-    try {
-      logoutAllButton.disabled = true;
-      await callInlineAdminSessionsApi('DELETE', accessToken, { scope: 'all' }, unlockedPin);
-      await forceLogoutCurrentDevice('All admin devices were logged out.');
-    } catch (error) {
-      setLocalStatus(error instanceof Error ? error.message : 'Could not log out all devices.');
-    } finally {
-      logoutAllButton.disabled = false;
-    }
-  });
-
-  listNode.addEventListener('click', async (event) => {
-    const target = event.target as HTMLElement;
-    const button = target.closest('button[data-admin-session-logout-one]') as HTMLButtonElement | null;
-    if (!button) return;
-
-    const targetSessionId = String(button.dataset.adminSessionLogoutOne || '').trim();
-    if (!targetSessionId || !unlockedPin) return;
-
-    const isCurrentDevice = targetSessionId === deviceSessionId;
-    const reason = await requestLogoutReason(isCurrentDevice);
-    if (!reason) return;
-
-    try {
-      button.disabled = true;
-      await callInlineAdminSessionsApi(
-        'DELETE',
-        accessToken,
-        {
-          scope: 'one',
-          sessionId: targetSessionId,
-          reason
-        },
-        unlockedPin
-      );
-
-      if (targetSessionId === deviceSessionId) {
-        await forceLogoutCurrentDevice('This device was logged out from admin session control.');
-        return;
-      }
-
-      setLocalStatus('Selected admin device was logged out.');
-      await loadSessions();
-    } catch (error) {
-      setLocalStatus(error instanceof Error ? error.message : 'Could not log out selected device.');
-    } finally {
-      button.disabled = false;
-    }
-  });
+  setLocalStatus('Admin session control is available in the footer button.');
 
   void sendHeartbeat();
   pollTimer = window.setInterval(() => {
