@@ -1131,6 +1131,9 @@ const renderMatchLogSection = (section, sectionIndex) => {
   );
   const teamPair = getDefaultMatchPair(houseOptions, section.leftTeamId || '', section.rightTeamId || '');
   const eventTypes = normalizeMatchEventTypes(section.eventTypes);
+  const pauseReasons = (Array.isArray(section.pauseReasons) ? section.pauseReasons : [])
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
   const initialScores = houseOptions.reduce((acc, team) => {
     const raw = Number(section.initialScores?.[team.id]);
     acc[team.id] = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
@@ -1147,6 +1150,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
     leftTeamId: teamPair.leftTeamId,
     rightTeamId: teamPair.rightTeamId,
     eventTypes,
+    pauseReasons,
     initialScores
   };
 
@@ -1195,6 +1199,33 @@ const renderMatchLogSection = (section, sectionIndex) => {
                 </label>
               </div>
               <p class="match-log-status" data-match-selected-fixture aria-live="polite">Choose a fixture date, then pick a match to log.</p>
+              <div class="match-log-clock-panel">
+                <div class="match-log-clock-grid">
+                  <p class="match-log-clock-item">
+                    <span>Match clock</span>
+                    <strong data-match-clock>00:00</strong>
+                  </p>
+                  <p class="match-log-clock-item">
+                    <span>Interruptions</span>
+                    <strong data-match-interruption-clock>00:00</strong>
+                  </p>
+                </div>
+                <div class="match-log-clock-actions">
+                  <button type="button" class="btn btn-secondary" data-match-clock-start>Start match clock</button>
+                  <label>
+                    Pause reason
+                    <select data-match-pause-reason>
+                      <option value="">Select reason</option>
+                      ${(config.pauseReasons.length ? config.pauseReasons : ['Injury', 'Weather delay', 'Equipment issue', 'Crowd disturbance', 'Official timeout'])
+                        .map((reason) => `<option value="${escapeHtmlAttribute(reason)}">${escapeHtmlText(reason)}</option>`)
+                        .join('')}
+                    </select>
+                  </label>
+                  <button type="button" class="btn btn-secondary" data-match-pause>Pause match</button>
+                  <button type="button" class="btn btn-secondary" data-match-resume>Resume match</button>
+                </div>
+                <p class="match-log-status" data-match-clock-status aria-live="polite">Match clock not started.</p>
+              </div>
             </div>
           </section>
           <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="log-events">
@@ -1724,6 +1755,29 @@ const formatMatchMinuteLabel = (minute, stoppage) => {
   return `${base}'`;
 };
 
+const MATCH_CONTROL_EVENT_DEFINITIONS = {
+  match_pause: {
+    key: 'match_pause',
+    label: 'Match paused',
+    icon: '⏸️',
+    scoreFor: 'none'
+  },
+  match_resume: {
+    key: 'match_resume',
+    label: 'Match resumed',
+    icon: '▶️',
+    scoreFor: 'none'
+  }
+};
+
+const formatClockDuration = (milliseconds) => {
+  const safeMs = Number.isFinite(Number(milliseconds)) ? Math.max(0, Math.floor(Number(milliseconds))) : 0;
+  const totalSeconds = Math.floor(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
 const renderMatchEventItem = (event, definition, options = {}) => {
   const editable = options.editable === true;
   const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
@@ -1773,6 +1827,9 @@ const hydrateMatchLog = (matchLogNode) => {
   const matchLogStoreStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
 
   const eventTypes = normalizeMatchEventTypes(config.eventTypes);
+  const pauseReasons = (Array.isArray(config.pauseReasons) ? config.pauseReasons : [])
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
   try {
     const persistedHouseOptions = (Array.isArray(config.houseOptions) ? config.houseOptions : [])
       .map((entry, index) => ({
@@ -1787,11 +1844,21 @@ const hydrateMatchLog = (matchLogNode) => {
   } catch {
     // ignore house option persistence errors
   }
-  const eventTypeByKey = new Map(eventTypes.map((entry) => [entry.key, entry]));
+  const eventTypeByKey = new Map([
+    ...eventTypes.map((entry) => [entry.key, entry]),
+    ...Object.values(MATCH_CONTROL_EVENT_DEFINITIONS).map((entry) => [entry.key, entry])
+  ]);
   const baseInitialScores = config.initialScores && typeof config.initialScores === 'object' ? config.initialScores : {};
 
   const statusNode = matchLogNode.querySelector('[data-match-status]');
   const selectedFixtureNode = matchLogNode.querySelector('[data-match-selected-fixture]');
+  const matchClockNode = matchLogNode.querySelector('[data-match-clock]');
+  const interruptionClockNode = matchLogNode.querySelector('[data-match-interruption-clock]');
+  const clockStatusNode = matchLogNode.querySelector('[data-match-clock-status]');
+  const startClockButton = matchLogNode.querySelector('[data-match-clock-start]');
+  const pauseButton = matchLogNode.querySelector('[data-match-pause]');
+  const resumeButton = matchLogNode.querySelector('[data-match-resume]');
+  const pauseReasonSelect = matchLogNode.querySelector('[data-match-pause-reason]');
   const leftNameNode = matchLogNode.querySelector('[data-left-team-name]');
   const rightNameNode = matchLogNode.querySelector('[data-right-team-name]');
   const leftScoreNode = matchLogNode.querySelector('[data-left-team-score]');
@@ -1885,6 +1952,12 @@ const hydrateMatchLog = (matchLogNode) => {
   let editingEventId = '';
   let currentEvents = [];
   let currentPlayersByTeam = {};
+  let matchStartedAt = null;
+  let interruptionAccumulatedMs = 0;
+  let activePauseStartedAt = null;
+  let activePauseReason = '';
+  let pauseCompensationStartedAt = null;
+  let clockTickerId = null;
   const canEditEvents = isAdminModeEnabled();
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
@@ -1892,6 +1965,69 @@ const hydrateMatchLog = (matchLogNode) => {
   const getInitialScoreForTeam = (teamId) => {
     const raw = Number(baseInitialScores?.[teamId]);
     return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+  };
+
+  const getMatchElapsedMs = (referenceTime = Date.now()) => {
+    if (!Number.isFinite(Number(matchStartedAt))) return 0;
+    return Math.max(0, Number(referenceTime) - Number(matchStartedAt));
+  };
+
+  const getInterruptionElapsedMs = (referenceTime = Date.now()) => {
+    const base = Number.isFinite(Number(interruptionAccumulatedMs)) ? Math.max(0, Number(interruptionAccumulatedMs)) : 0;
+    if (!Number.isFinite(Number(activePauseStartedAt))) return base;
+    return base + Math.max(0, Number(referenceTime) - Number(activePauseStartedAt));
+  };
+
+  const getMatchMinuteFromClock = (referenceTime = Date.now()) => Math.floor(getMatchElapsedMs(referenceTime) / 60000);
+
+  const renderClockStatus = () => {
+    const fixture = getCurrentFixture();
+    const hasFixture = Boolean(fixture);
+    const started = Number.isFinite(Number(matchStartedAt));
+    const paused = Number.isFinite(Number(activePauseStartedAt));
+
+    if (matchClockNode) {
+      matchClockNode.textContent = formatClockDuration(started ? getMatchElapsedMs() : 0);
+    }
+    if (interruptionClockNode) {
+      interruptionClockNode.textContent = formatClockDuration(started ? getInterruptionElapsedMs() : 0);
+    }
+
+    if (startClockButton instanceof HTMLButtonElement) {
+      startClockButton.disabled = !hasFixture || started;
+    }
+    if (pauseButton instanceof HTMLButtonElement) {
+      const hasReason = pauseReasonSelect instanceof HTMLSelectElement ? Boolean(String(pauseReasonSelect.value || '').trim()) : true;
+      pauseButton.disabled = !hasFixture || !started || paused || !hasReason;
+    }
+    if (resumeButton instanceof HTMLButtonElement) {
+      resumeButton.disabled = !hasFixture || !started || !paused;
+    }
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      if (!pauseReasons.length && pauseReasonSelect.options.length <= 1) {
+        pauseReasonSelect.innerHTML = '<option value="">Select reason</option>';
+      }
+      pauseReasonSelect.disabled = !hasFixture || !started || paused;
+    }
+
+    if (clockStatusNode) {
+      if (!hasFixture) {
+        clockStatusNode.textContent = 'Select a fixture to start timing.';
+      } else if (!started) {
+        clockStatusNode.textContent = 'Match clock not started.';
+      } else if (paused) {
+        clockStatusNode.textContent = `Match paused${activePauseReason ? `: ${activePauseReason}` : ''}.`;
+      } else {
+        clockStatusNode.textContent = 'Match clock running.';
+      }
+    }
+  };
+
+  const ensureClockTicker = () => {
+    if (clockTickerId) return;
+    clockTickerId = window.setInterval(() => {
+      renderClockStatus();
+    }, 1000);
   };
 
   const getFixtureEntry = (fixture) => {
@@ -1919,6 +2055,12 @@ const hydrateMatchLog = (matchLogNode) => {
       initialScores,
       homeScore: Number.isFinite(Number(safeStored.homeScore)) ? Number(safeStored.homeScore) : initialScores[fixture.homeId] || 0,
       awayScore: Number.isFinite(Number(safeStored.awayScore)) ? Number(safeStored.awayScore) : initialScores[fixture.awayId] || 0,
+      matchStartedAt: Number.isFinite(Number(safeStored.matchStartedAt)) ? Number(safeStored.matchStartedAt) : null,
+      interruptionAccumulatedMs: Number.isFinite(Number(safeStored.interruptionAccumulatedMs))
+        ? Math.max(0, Number(safeStored.interruptionAccumulatedMs))
+        : 0,
+      activePauseStartedAt: Number.isFinite(Number(safeStored.activePauseStartedAt)) ? Number(safeStored.activePauseStartedAt) : null,
+      activePauseReason: String(safeStored.activePauseReason || '').trim(),
       events: Array.isArray(safeStored.events) ? safeStored.events : [],
       playersByTeam: normalizeFixturePlayersByTeam(
         fixture,
@@ -1938,24 +2080,30 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) return [];
     return (Array.isArray(events) ? events : [])
       .filter((entry) => entry && typeof entry === 'object' && eventTypeByKey.has(entry.type))
-      .map((entry) => ({
-        id: entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        teamId: entry.teamId === fixture.awayId ? fixture.awayId : fixture.homeId,
-        type: entry.type,
-        minute: Number.isFinite(Number(entry.minute)) ? Number(entry.minute) : null,
-        stoppage: Number.isFinite(Number(entry.stoppage)) ? Number(entry.stoppage) : null,
-        playerName: String(entry.playerName || '').trim(),
-        jerseyNumber: String(entry.jerseyNumber || '').trim(),
-        assistName: String(entry.assistName || '').trim(),
-        playerId: String(entry.playerId || '').trim(),
-        playerAdmissionNo: String(entry.playerAdmissionNo || '').trim(),
-        playerHouseId: String(entry.playerHouseId || '').trim(),
-        playerGender: String(entry.playerGender || '').trim(),
-        assistId: String(entry.assistId || '').trim(),
-        assistAdmissionNo: String(entry.assistAdmissionNo || '').trim(),
-        notes: String(entry.notes || '').trim(),
-        createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
-      }));
+      .map((entry) => {
+        const type = String(entry.type || '').trim();
+        const isMatchScoped = String(entry.scope || '').trim() === 'match' || type.startsWith('match_');
+        return {
+          id: entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          scope: isMatchScoped ? 'match' : 'team',
+          teamId: isMatchScoped ? '' : entry.teamId === fixture.awayId ? fixture.awayId : fixture.homeId,
+          type,
+          minute: Number.isFinite(Number(entry.minute)) ? Number(entry.minute) : null,
+          stoppage: Number.isFinite(Number(entry.stoppage)) ? Number(entry.stoppage) : null,
+          playerName: String(entry.playerName || '').trim(),
+          jerseyNumber: String(entry.jerseyNumber || '').trim(),
+          assistName: String(entry.assistName || '').trim(),
+          playerId: String(entry.playerId || '').trim(),
+          playerAdmissionNo: String(entry.playerAdmissionNo || '').trim(),
+          playerHouseId: String(entry.playerHouseId || '').trim(),
+          playerGender: String(entry.playerGender || '').trim(),
+          assistId: String(entry.assistId || '').trim(),
+          assistAdmissionNo: String(entry.assistAdmissionNo || '').trim(),
+          reason: String(entry.reason || '').trim(),
+          notes: String(entry.notes || '').trim(),
+          createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
+        };
+      });
   };
 
   const getPlayersForTeam = (teamId) => {
@@ -2043,6 +2191,10 @@ const hydrateMatchLog = (matchLogNode) => {
     logsByFixture[fixture.fixtureId] = {
       ...baseEntry,
       events: [...currentEvents],
+      matchStartedAt: Number.isFinite(Number(matchStartedAt)) ? Number(matchStartedAt) : null,
+      interruptionAccumulatedMs: Number.isFinite(Number(interruptionAccumulatedMs)) ? Math.max(0, Number(interruptionAccumulatedMs)) : 0,
+      activePauseStartedAt: Number.isFinite(Number(activePauseStartedAt)) ? Number(activePauseStartedAt) : null,
+      activePauseReason: String(activePauseReason || '').trim(),
       playersByTeam: normalizedPlayersByTeam,
       homePlayers: normalizedPlayersByTeam[fixture.homeId] || [],
       awayPlayers: normalizedPlayersByTeam[fixture.awayId] || [],
@@ -2067,10 +2219,22 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) {
       currentEvents = [];
       currentPlayersByTeam = {};
+      matchStartedAt = null;
+      interruptionAccumulatedMs = 0;
+      activePauseStartedAt = null;
+      activePauseReason = '';
+      pauseCompensationStartedAt = null;
       return;
     }
     const entry = getFixtureEntry(fixture);
     currentEvents = sanitizeEventsForFixture(fixture, entry?.events || []);
+    matchStartedAt = Number.isFinite(Number(entry?.matchStartedAt)) ? Number(entry.matchStartedAt) : null;
+    interruptionAccumulatedMs = Number.isFinite(Number(entry?.interruptionAccumulatedMs))
+      ? Math.max(0, Number(entry.interruptionAccumulatedMs))
+      : 0;
+    activePauseStartedAt = Number.isFinite(Number(entry?.activePauseStartedAt)) ? Number(entry.activePauseStartedAt) : null;
+    activePauseReason = String(entry?.activePauseReason || '').trim();
+    pauseCompensationStartedAt = null;
     currentPlayersByTeam = normalizeFixturePlayersByTeam(
       fixture,
       entry?.playersByTeam || {
@@ -2246,7 +2410,11 @@ const hydrateMatchLog = (matchLogNode) => {
 
     events.forEach((event) => {
       const definition = eventTypeByKey.get(event.type);
-      const teamName = event.teamId === fixture.homeId ? fixture.homeName : fixture.awayName;
+      const teamName = event.scope === 'match'
+        ? 'Match'
+        : event.teamId === fixture.homeId
+          ? fixture.homeName
+          : fixture.awayName;
       const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
       lines.push(
         [
@@ -2301,6 +2469,7 @@ const hydrateMatchLog = (matchLogNode) => {
           button.disabled = true;
         }
       });
+      renderClockStatus();
       syncModalTeamState();
       renderAutocompleteOptions();
       return;
@@ -2316,8 +2485,9 @@ const hydrateMatchLog = (matchLogNode) => {
       return leftMinute - rightMinute;
     });
 
-    const homeEvents = sortedEvents.filter((event) => event.teamId === fixture.homeId);
-    const awayEvents = sortedEvents.filter((event) => event.teamId === fixture.awayId);
+    const homeEvents = sortedEvents.filter((event) => event.scope !== 'match' && event.teamId === fixture.homeId);
+    const awayEvents = sortedEvents.filter((event) => event.scope !== 'match' && event.teamId === fixture.awayId);
+    const neutralEvents = sortedEvents.filter((event) => event.scope === 'match' || !event.teamId);
 
     if (leftNameNode) leftNameNode.textContent = fixture.homeName;
     if (rightNameNode) rightNameNode.textContent = fixture.awayName;
@@ -2325,7 +2495,7 @@ const hydrateMatchLog = (matchLogNode) => {
     if (rightScoreNode) rightScoreNode.textContent = String(scores[fixture.awayId] || 0);
 
     if (tableBodyNode) {
-      const rowCount = Math.max(homeEvents.length, awayEvents.length);
+      const rowCount = Math.max(homeEvents.length, awayEvents.length, neutralEvents.length);
       if (!rowCount) {
         tableBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="3">No events logged for this fixture yet.</td></tr>';
       } else {
@@ -2333,12 +2503,15 @@ const hydrateMatchLog = (matchLogNode) => {
         for (let index = 0; index < rowCount; index += 1) {
           const homeEvent = homeEvents[index] || null;
           const awayEvent = awayEvents[index] || null;
-          const reference = homeEvent || awayEvent;
+          const neutralEvent = neutralEvents[index] || null;
+          const reference = homeEvent || awayEvent || neutralEvent;
           const minuteLabel = reference ? formatMatchMinuteLabel(reference.minute, reference.stoppage) : '';
           rows.push(`
             <tr>
               <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type), { editable: canEditEvents }) : ''}</td>
-              <td class="match-log-minute-cell">${escapeHtmlText(minuteLabel || '—')}</td>
+              <td class="match-log-minute-cell">${neutralEvent
+                ? renderMatchEventItem(neutralEvent, eventTypeByKey.get(neutralEvent.type), { editable: false })
+                : escapeHtmlText(minuteLabel || '—')}</td>
               <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type), { editable: canEditEvents }) : ''}</td>
             </tr>
           `);
@@ -2464,6 +2637,7 @@ const hydrateMatchLog = (matchLogNode) => {
       }
     });
 
+    renderClockStatus();
     syncModalTeamState();
     renderAutocompleteOptions();
   };
@@ -2496,6 +2670,7 @@ const hydrateMatchLog = (matchLogNode) => {
 
   const closeModal = () => {
     modal.classList.add('is-hidden');
+    pauseCompensationStartedAt = null;
     resetModal();
   };
 
@@ -2554,6 +2729,9 @@ const hydrateMatchLog = (matchLogNode) => {
   const openModalForTeam = (teamId) => {
     const fixture = getCurrentFixture();
     if (!fixture || !teamId) return;
+    if (Number.isFinite(Number(matchStartedAt)) && !Number.isFinite(Number(activePauseStartedAt))) {
+      pauseCompensationStartedAt = Date.now();
+    }
     openWorkspaceModal();
     workflowSteps?.expandStep('log-events');
     activeTeamId = teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
@@ -2567,6 +2745,7 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture || !eventId) return;
     const existing = currentEvents.find((entry) => String(entry.id || '') === String(eventId));
     if (!existing) return;
+    if (existing.scope === 'match') return;
 
     openWorkspaceModal();
     workflowSteps?.expandStep('log-events');
@@ -2690,6 +2869,7 @@ const hydrateMatchLog = (matchLogNode) => {
 
     const nextEvent = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      scope: 'team',
       teamId: activeTeamId,
       type: selectedTypeKey,
       minute: Number.isFinite(minute) && minute >= 0 ? Math.floor(minute) : null,
@@ -2722,6 +2902,7 @@ const hydrateMatchLog = (matchLogNode) => {
       currentEvents.push(nextEvent);
     }
 
+    pauseCompensationStartedAt = null;
     persistCurrentFixtureLog();
     render();
     closeModal();
@@ -2833,6 +3014,110 @@ const hydrateMatchLog = (matchLogNode) => {
     renderAutocompleteOptions();
   });
 
+  pauseReasonSelect?.addEventListener('change', () => {
+    renderClockStatus();
+  });
+
+  startClockButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (Number.isFinite(Number(matchStartedAt))) return;
+
+    const now = Date.now();
+    matchStartedAt = now;
+    interruptionAccumulatedMs = 0;
+    activePauseStartedAt = null;
+    activePauseReason = '';
+    pauseCompensationStartedAt = null;
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      pauseReasonSelect.value = '';
+    }
+    persistCurrentFixtureLog();
+    render();
+  });
+
+  pauseButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (!Number.isFinite(Number(matchStartedAt))) return;
+    if (Number.isFinite(Number(activePauseStartedAt))) return;
+
+    const reason = pauseReasonSelect instanceof HTMLSelectElement ? String(pauseReasonSelect.value || '').trim() : '';
+    if (!reason) return;
+
+    const now = Date.now();
+    const compensationStart = Number(pauseCompensationStartedAt);
+    const compensatedPauseStart =
+      Number.isFinite(compensationStart) && compensationStart > 0 && compensationStart <= now
+        ? compensationStart
+        : now;
+    activePauseStartedAt = compensatedPauseStart;
+    activePauseReason = reason;
+    pauseCompensationStartedAt = null;
+    currentEvents.push({
+      id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+      scope: 'match',
+      teamId: '',
+      type: 'match_pause',
+      minute: getMatchMinuteFromClock(compensatedPauseStart),
+      stoppage: null,
+      playerName: '',
+      jerseyNumber: '',
+      assistName: '',
+      playerId: '',
+      playerAdmissionNo: '',
+      playerHouseId: '',
+      playerGender: '',
+      assistId: '',
+      assistAdmissionNo: '',
+      reason,
+      notes: reason,
+      createdAt: now
+    });
+    persistCurrentFixtureLog();
+    render();
+  });
+
+  resumeButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (!Number.isFinite(Number(matchStartedAt))) return;
+    if (!Number.isFinite(Number(activePauseStartedAt))) return;
+
+    const now = Date.now();
+    const reason = String(activePauseReason || '').trim();
+    interruptionAccumulatedMs = getInterruptionElapsedMs(now);
+    activePauseStartedAt = null;
+    activePauseReason = '';
+    pauseCompensationStartedAt = null;
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      pauseReasonSelect.value = '';
+    }
+
+    currentEvents.push({
+      id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+      scope: 'match',
+      teamId: '',
+      type: 'match_resume',
+      minute: getMatchMinuteFromClock(now),
+      stoppage: null,
+      playerName: '',
+      jerseyNumber: '',
+      assistName: '',
+      playerId: '',
+      playerAdmissionNo: '',
+      playerHouseId: '',
+      playerGender: '',
+      assistId: '',
+      assistAdmissionNo: '',
+      reason,
+      notes: reason ? `Resumed after: ${reason}` : 'Play resumed',
+      createdAt: now
+    });
+    persistCurrentFixtureLog();
+    render();
+  });
+
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
     const fixture = getCurrentFixture();
     if (!fixture) return;
@@ -2841,6 +3126,14 @@ const hydrateMatchLog = (matchLogNode) => {
     );
     if (!confirmed) return;
     currentEvents = [];
+    matchStartedAt = null;
+    interruptionAccumulatedMs = 0;
+    activePauseStartedAt = null;
+    activePauseReason = '';
+    pauseCompensationStartedAt = null;
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      pauseReasonSelect.value = '';
+    }
     persistCurrentFixtureLog();
     render();
   });
@@ -2927,6 +3220,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const requestedSection = String(params.get('logFixtureSectionKey') || '').trim();
 
   const initializeMatchLogState = () => {
+    ensureClockTicker();
     populateFixtureData();
     if (requestedSection && requestedSection !== fixtureSectionKey) {
       selectedDate = fixtureDates()[0] || '';

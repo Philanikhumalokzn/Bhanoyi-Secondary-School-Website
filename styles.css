@@ -3069,6 +3069,61 @@ body.match-log-workspace-open {
   font-size: 0.74rem;
 }
 
+.match-log-clock-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.match-log-clock-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.match-log-clock-item {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.match-log-clock-item span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.match-log-clock-item strong {
+  font-size: 1.08rem;
+}
+
+.match-log-clock-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.match-log-clock-actions label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.match-log-clock-actions select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+}
+
 .match-log-modal {
   position: fixed;
   inset: 0;
