@@ -6027,8 +6027,8 @@ const wireSportsHouseManagerInline = () => {
     const pushSection = (label: string) => {
       rows.push({ section: label, field: '', response: '', notes: '', _section: label });
     };
-    const pushField = (section: string, field: string, notes = '') => {
-      rows.push({ section, field, response: '', notes });
+    const pushField = (_section: string, field: string, notes = '') => {
+      rows.push({ field, response: '', notes });
     };
 
     pushSection('1) House Identity');
@@ -6317,43 +6317,70 @@ const wireSportsHouseManagerInline = () => {
         ],
         metaLine: `Positions to fill: ${rolesCount}`,
         columns: [
-          { header: 'Section', key: 'section', width: 22, align: 'left' },
-          { header: 'Field', key: 'field', width: 38, align: 'left', wrapText: true },
-          { header: 'House response', key: 'response', width: 34, align: 'left', wrapText: true },
-          { header: 'Notes', key: 'notes', width: 30, align: 'left', wrapText: true }
+          { header: 'Field', key: 'field', width: 44, align: 'left', wrapText: true },
+          { header: 'House response', key: 'response', width: 42, align: 'left', wrapText: true },
+          { header: 'Notes', key: 'notes', width: 28, align: 'left', wrapText: true }
         ],
         rows,
         note: 'Please keep entries clear and concise. Choose a values-based, inspirational house name and slogan/motto that reflect both school and house identity.',
         afterRows: ({ sheet, dataStartRow }) => {
+          const headerRowNumber = dataStartRow - 1;
+          const headerRow = sheet.getRow(headerRowNumber);
+          headerRow.height = 22;
+          headerRow.eachCell((cell) => {
+            cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          });
+
           rows.forEach((row, index) => {
-            if (!row._section) return;
             const rowNumber = dataStartRow + index;
-            sheet.mergeCells(`A${rowNumber}:D${rowNumber}`);
-            const cell = sheet.getCell(`A${rowNumber}`);
-            cell.value = row._section;
-            cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF173A5E' } };
-            cell.alignment = { horizontal: 'left', vertical: 'middle' };
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFEAF3FF' }
-            };
-            cell.border = {
-              top: { style: 'thin', color: { argb: 'FFD0E0F0' } },
-              left: { style: 'thin', color: { argb: 'FFD0E0F0' } },
-              bottom: { style: 'thin', color: { argb: 'FFD0E0F0' } },
-              right: { style: 'thin', color: { argb: 'FFD0E0F0' } }
-            };
+            if (row._section) {
+              sheet.mergeCells(`A${rowNumber}:C${rowNumber}`);
+              const cell = sheet.getCell(`A${rowNumber}`);
+              cell.value = row._section;
+              cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF173A5E' } };
+              cell.alignment = { horizontal: 'left', vertical: 'middle' };
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFEAF3FF' }
+              };
+              cell.border = {
+                top: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+                left: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+                bottom: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+                right: { style: 'thin', color: { argb: 'FFD0E0F0' } }
+              };
+              sheet.getRow(rowNumber).height = 24;
+              return;
+            }
+
+            const currentRow = sheet.getRow(rowNumber);
+            const isLongResponseField = row.field === 'Short motivation for the new name';
+            currentRow.height = isLongResponseField ? 44 : 34;
+
+            const fieldCell = sheet.getCell(`A${rowNumber}`);
+            const responseCell = sheet.getCell(`B${rowNumber}`);
+            const notesCell = sheet.getCell(`C${rowNumber}`);
+
+            fieldCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF173A5E' } };
+            fieldCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+            responseCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF173A5E' } };
+            responseCell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+
+            notesCell.font = { name: 'Calibri', size: 12, italic: true, color: { argb: 'FF6B7280' } };
+            notesCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
           });
 
           rows.forEach((row, index) => {
             if (row.field !== 'New inspirational house name (required)') return;
             const rowNumber = dataStartRow + index;
-            const responseCell = sheet.getCell(`C${rowNumber}`);
+            const responseCell = sheet.getCell(`B${rowNumber}`);
             if (String(responseCell.value || '').trim()) return;
             responseCell.value = 'e.g. Determined / House Excel';
-            responseCell.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF7A8694' } };
-            responseCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+            responseCell.font = { name: 'Calibri', size: 12, italic: true, color: { argb: 'FF7A8694' } };
+            responseCell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
           });
         }
       });
