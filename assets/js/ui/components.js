@@ -8401,8 +8401,23 @@ const hydrateFixtureCreator = (fixtureNode) => {
     });
   };
 
+  const buildVisibleMatchLabelMap = (fixtures) => {
+    const scopeCounts = {};
+    const labels = {};
+
+    (fixtures || []).forEach((fixture) => {
+      const scopeKey = `${Number(fixture?.round) || 0}::${String(fixture?.leg || '').trim()}`;
+      scopeCounts[scopeKey] = (scopeCounts[scopeKey] || 0) + 1;
+      const fixtureId = getFixtureId(fixture);
+      labels[fixtureId] = `R${fixture.round}M${scopeCounts[scopeKey]}`;
+    });
+
+    return labels;
+  };
+
   const buildFixtureCsvContent = () => {
     const exportFixtures = getExportFixtures();
+    const visibleMatchLabelById = buildVisibleMatchLabelMap(exportFixtures);
     const lines = [
       ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
       ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
@@ -8419,7 +8434,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         [
           fixture.round,
           fixture.leg,
-          `R${fixture.round}M${fixture.match}`,
+          visibleMatchLabelById[fixtureId] || `R${fixture.round}M${fixture.match}`,
           stampValue.date || '',
           stampValue.time || '',
           fixture.formatLabel || '',
@@ -8457,6 +8472,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     try {
       const exportFixtures = getExportFixtures();
+      const visibleMatchLabelById = buildVisibleMatchLabelMap(exportFixtures);
       const compactFormatLabel = (value) => {
         const raw = normalizeText(value, 220);
         if (!raw) return '';
@@ -8514,7 +8530,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         fixtureRows.push({
           round: fixture.round,
           leg: normalizedLeg,
-          match: `R${fixture.round}M${fixture.match}`,
+          match: visibleMatchLabelById[fixtureId] || `R${fixture.round}M${fixture.match}`,
           date: formatFriendlyDate(stampValue.date),
           kickoff: stampValue.time || 'TBD',
           format: compactFormatLabel(fixture.formatLabel || ''),
