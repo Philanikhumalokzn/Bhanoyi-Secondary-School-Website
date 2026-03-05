@@ -6579,47 +6579,73 @@ const hydrateFixtureCreator = (fixtureNode) => {
       };
     }
 
-    let baselineFixtures = [];
-    let usePinnedLocks = false;
-    if (Array.isArray(lastFixtures) && lastFixtures.length) {
-      baselineFixtures = lastFixtures.map((entry) => ({ ...entry }));
-      usePinnedLocks = true;
-    } else {
-      const profile = selectedSportProfile();
-      if (!profile) {
-        return {
-          ok: true,
-          reason: 'Choose a sport to evaluate fairness rule compatibility.'
-        };
-      }
-      const setup = profile.readSetup();
-      const formatLabel = String(setup?.formatLabel || '').trim();
-      baselineFixtures = buildSingleRoundRobin(teamIds).map((fixture) => ({
+    const profile = selectedSportProfile();
+    if (!profile) {
+      return {
+        ok: true,
+        reason: 'Choose a sport to evaluate fairness rule compatibility.'
+      };
+    }
+
+    const setup = profile.readSetup();
+    const formatLabel = String(setup?.formatLabel || '').trim();
+    const generationOrders = buildGenerationTeamOrders(teamIds, 40);
+    const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teamIds);
+    let lastFailureReason = '';
+
+    const hasFeasibleCandidate = generationOrders.some((teamOrder) => {
+      const candidateFixtures = buildSingleRoundRobin(teamOrder).map((fixture) => ({
         ...fixture,
         sportKey: profile.key,
         sportLabel: profile.label,
         formatLabel
       }));
-    }
 
-    if (!baselineFixtures.length) {
-      return {
-        ok: true,
-        reason: 'Generate fixtures first to validate these fairness constraints.'
-      };
-    }
+      const pinnedIndexes = [];
+      const constrainedFixtures = candidateFixtures.map((fixture, index) => {
+        const slotKey = fixtureSlotKey(fixture);
+        const pinned = pinnedBySlot[slotKey];
+        if (!pinned) return fixture;
+        pinnedIndexes.push(index);
+        return {
+          ...fixture,
+          homeId: pinned.homeId,
+          awayId: pinned.awayId
+        };
+      });
 
-    const lockedIndexes = usePinnedLocks ? getPinnedFixtureIndexes(baselineFixtures) : [];
-    const result = enforceSelectedFairnessRules({
-      fixtures: baselineFixtures,
-      teamIds,
-      selectedRuleIds: normalizedRuleIds,
-      lockedIndexes
+      const repairResult = repairRoundRobinFixtureSet({
+        fixtures: constrainedFixtures,
+        teamIds: teamOrder,
+        lockedIndexes: pinnedIndexes
+      });
+      if (!repairResult.ok) {
+        lastFailureReason = repairResult.message;
+        return false;
+      }
+
+      const fairnessResult = enforceSelectedFairnessRules({
+        fixtures: repairResult.fixtures,
+        teamIds: teamOrder,
+        selectedRuleIds: normalizedRuleIds,
+        lockedIndexes: pinnedIndexes
+      });
+      if (!fairnessResult.ok) {
+        lastFailureReason = fairnessResult.message;
+        return false;
+      }
+
+      return true;
     });
 
     return {
-      ok: result.ok === true,
-      reason: normalizeText(result?.message || '', 220)
+      ok: hasFeasibleCandidate,
+      reason: normalizeText(
+        hasFeasibleCandidate
+          ? ''
+          : (lastFailureReason || 'This rule conflicts with current pinned/manual constraints for all tested team orders.'),
+        220
+      )
     };
   };
 
