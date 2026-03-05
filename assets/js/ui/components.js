@@ -1724,7 +1724,8 @@ const formatMatchMinuteLabel = (minute, stoppage) => {
   return `${base}'`;
 };
 
-const renderMatchEventItem = (event, definition) => {
+const renderMatchEventItem = (event, definition, options = {}) => {
+  const editable = options.editable === true;
   const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
   const playerParts = [event.playerName || '', event.jerseyNumber ? `#${event.jerseyNumber}` : ''].filter(Boolean);
   const playerLabel = playerParts.join(' ');
@@ -1742,6 +1743,14 @@ const renderMatchEventItem = (event, definition) => {
         ${minute ? `<span class="match-log-event-minute">${minute}</span>` : ''}
       </div>
       ${detailParts.length ? `<p class="match-log-event-detail">${escapeHtmlText(detailParts.join(' · '))}</p>` : ''}
+      ${editable
+        ? `
+          <div class="match-log-event-actions">
+            <button type="button" class="btn btn-secondary" data-match-edit-event="${escapeHtmlAttribute(event.id || '')}">Edit</button>
+            <button type="button" class="btn btn-secondary" data-match-delete-event="${escapeHtmlAttribute(event.id || '')}">Delete</button>
+          </div>
+        `
+        : ''}
     </div>
   `;
 };
@@ -1873,8 +1882,10 @@ const hydrateMatchLog = (matchLogNode) => {
   let selectedFixtureId = '';
   let activeTeamId = '';
   let selectedTypeKey = '';
+  let editingEventId = '';
   let currentEvents = [];
   let currentPlayersByTeam = {};
+  const canEditEvents = isAdminModeEnabled();
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
 
@@ -2326,9 +2337,9 @@ const hydrateMatchLog = (matchLogNode) => {
           const minuteLabel = reference ? formatMatchMinuteLabel(reference.minute, reference.stoppage) : '';
           rows.push(`
             <tr>
-              <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type)) : ''}</td>
+              <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type), { editable: canEditEvents }) : ''}</td>
               <td class="match-log-minute-cell">${escapeHtmlText(minuteLabel || '—')}</td>
-              <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type)) : ''}</td>
+              <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type), { editable: canEditEvents }) : ''}</td>
             </tr>
           `);
         }
@@ -2459,9 +2470,11 @@ const hydrateMatchLog = (matchLogNode) => {
 
   const resetModal = () => {
     selectedTypeKey = '';
+    editingEventId = '';
     typeStep.classList.remove('is-hidden');
     detailsStep.classList.add('is-hidden');
     nextButton.disabled = true;
+    saveButton.textContent = 'Save event';
     typeListNode.innerHTML = eventTypes
       .map(
         (entry) => `
@@ -2549,6 +2562,63 @@ const hydrateMatchLog = (matchLogNode) => {
     modal.classList.remove('is-hidden');
   };
 
+  const openModalForEdit = (eventId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture || !eventId) return;
+    const existing = currentEvents.find((entry) => String(entry.id || '') === String(eventId));
+    if (!existing) return;
+
+    openWorkspaceModal();
+    workflowSteps?.expandStep('log-events');
+    resetModal();
+
+    activeTeamId = existing.teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+    syncModalTeamState();
+
+    selectedTypeKey = existing.type;
+    const definition = eventTypeByKey.get(selectedTypeKey);
+    if (!definition) return;
+
+    if (playerLabelNode) {
+      playerLabelNode.firstChild.textContent = `${definition.playerLabel || 'Player name'} `;
+    }
+
+    if (assistRow) {
+      assistRow.classList.toggle('is-hidden', !definition.allowAssist);
+    }
+
+    const selectedTypeInput = typeListNode.querySelector(`input[name="match-event-type"][value="${CSS.escape(selectedTypeKey)}"]`);
+    if (selectedTypeInput instanceof HTMLInputElement) {
+      selectedTypeInput.checked = true;
+    }
+
+    if (minuteInput instanceof HTMLInputElement) {
+      minuteInput.value = Number.isFinite(existing.minute) ? String(existing.minute) : '';
+    }
+    if (stoppageInput instanceof HTMLInputElement) {
+      stoppageInput.value = Number.isFinite(existing.stoppage) ? String(existing.stoppage) : '';
+    }
+    if (playerInput instanceof HTMLInputElement) {
+      playerInput.value = String(existing.playerName || '').trim();
+    }
+    if (jerseyInput instanceof HTMLInputElement) {
+      jerseyInput.value = String(existing.jerseyNumber || '').trim();
+    }
+    if (assistInput instanceof HTMLInputElement) {
+      assistInput.value = String(existing.assistName || '').trim();
+    }
+    if (notesInput instanceof HTMLTextAreaElement) {
+      notesInput.value = String(existing.notes || '').trim();
+    }
+
+    editingEventId = String(existing.id || '').trim();
+    saveButton.textContent = 'Update event';
+    typeStep.classList.add('is-hidden');
+    detailsStep.classList.remove('is-hidden');
+    modal.classList.remove('is-hidden');
+    renderAutocompleteOptions();
+  };
+
   const applyFixtureSelection = () => {
     loadCurrentFixtureLog();
     render();
@@ -2618,7 +2688,7 @@ const hydrateMatchLog = (matchLogNode) => {
     const selectedPlayer = findPlayerByTypedName(activeTeamId, playerName);
     const selectedAssist = findPlayerByTypedName(activeTeamId, assistName);
 
-    currentEvents.push({
+    const nextEvent = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       teamId: activeTeamId,
       type: selectedTypeKey,
@@ -2635,11 +2705,55 @@ const hydrateMatchLog = (matchLogNode) => {
       assistAdmissionNo: selectedAssist?.admissionNo || '',
       notes,
       createdAt: Date.now()
-    });
+    };
+
+    if (editingEventId) {
+      const index = currentEvents.findIndex((entry) => String(entry.id || '') === String(editingEventId));
+      if (index >= 0) {
+        const existingCreatedAt = Number(currentEvents[index]?.createdAt);
+        currentEvents[index] = {
+          ...nextEvent,
+          id: editingEventId,
+          createdAt: Number.isFinite(existingCreatedAt) ? existingCreatedAt : Date.now(),
+          updatedAt: Date.now()
+        };
+      }
+    } else {
+      currentEvents.push(nextEvent);
+    }
 
     persistCurrentFixtureLog();
     render();
     closeModal();
+  });
+
+  tableBodyNode?.addEventListener('click', (event) => {
+    if (!canEditEvents) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const deleteButton = target.closest('[data-match-delete-event]');
+    if (deleteButton instanceof HTMLElement) {
+      const eventId = String(deleteButton.dataset.matchDeleteEvent || '').trim();
+      if (!eventId) return;
+      const existing = currentEvents.find((entry) => String(entry.id || '') === eventId);
+      if (!existing) return;
+
+      const confirmed = window.confirm('Delete this event from the match log?');
+      if (!confirmed) return;
+
+      currentEvents = currentEvents.filter((entry) => String(entry.id || '') !== eventId);
+      persistCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const editButton = target.closest('[data-match-edit-event]');
+    if (editButton instanceof HTMLElement) {
+      const eventId = String(editButton.dataset.matchEditEvent || '').trim();
+      if (!eventId) return;
+      openModalForEdit(eventId);
+    }
   });
 
   cancelButtons.forEach((button) => {

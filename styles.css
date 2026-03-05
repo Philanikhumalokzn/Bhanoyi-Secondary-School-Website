@@ -3056,6 +3056,19 @@ body.match-log-workspace-open {
   font-size: 0.78rem;
 }
 
+.match-log-event-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.match-log-event-actions .btn {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+}
+
 .match-log-modal {
   position: fixed;
   inset: 0;
