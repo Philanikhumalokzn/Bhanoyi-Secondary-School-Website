@@ -876,6 +876,20 @@ const renderMatchLogSection = (section, sectionIndex) => {
               <div class="match-log-player-stats">
                 <h4>Player stats</h4>
                 <p class="match-log-status" data-match-player-stats-status aria-live="polite">No player stats yet.</p>
+                <div class="match-log-player-highlights" data-match-player-highlights>
+                  <div class="match-log-player-highlight-card">
+                    <span class="match-log-player-highlight-label">Top scorer</span>
+                    <strong data-match-highlight-scorer>—</strong>
+                  </div>
+                  <div class="match-log-player-highlight-card">
+                    <span class="match-log-player-highlight-label">Top assister</span>
+                    <strong data-match-highlight-assister>—</strong>
+                  </div>
+                  <div class="match-log-player-highlight-card">
+                    <span class="match-log-player-highlight-label">Most booked</span>
+                    <strong data-match-highlight-booked>—</strong>
+                  </div>
+                </div>
                 <div class="match-log-table-wrap">
                   <table class="match-log-table match-log-player-stats-table">
                     <thead>
@@ -1395,6 +1409,9 @@ const hydrateMatchLog = (matchLogNode) => {
   const tableBodyNode = matchLogNode.querySelector('[data-match-table-body]');
   const playerStatsBodyNode = matchLogNode.querySelector('[data-match-player-stats-body]');
   const playerStatsStatusNode = matchLogNode.querySelector('[data-match-player-stats-status]');
+  const topScorerNode = matchLogNode.querySelector('[data-match-highlight-scorer]');
+  const topAssisterNode = matchLogNode.querySelector('[data-match-highlight-assister]');
+  const mostBookedNode = matchLogNode.querySelector('[data-match-highlight-booked]');
   const matchDaySelect = matchLogNode.querySelector('[data-matchday-select]');
   const fixtureSelect = matchLogNode.querySelector('[data-match-fixture-select]');
   const modal = matchLogNode.querySelector('[data-match-modal]');
@@ -1874,6 +1891,9 @@ const hydrateMatchLog = (matchLogNode) => {
       if (playerStatsStatusNode) {
         playerStatsStatusNode.textContent = 'Choose a fixture to view player stats.';
       }
+      if (topScorerNode) topScorerNode.textContent = '—';
+      if (topAssisterNode) topAssisterNode.textContent = '—';
+      if (mostBookedNode) mostBookedNode.textContent = '—';
       if (statusNode) {
         statusNode.textContent = fixtureOptions.length
           ? 'No match selected yet.'
@@ -2001,6 +2021,49 @@ const hydrateMatchLog = (matchLogNode) => {
       } else {
         playerStatsStatusNode.textContent = `${playerStats.length} player${playerStats.length === 1 ? '' : 's'} with recorded stats.`;
       }
+    }
+
+    const topScorer = playerStats
+      .filter((entry) => entry.goals > 0)
+      .sort((left, right) => {
+        if (left.goals !== right.goals) return right.goals - left.goals;
+        return left.playerName.localeCompare(right.playerName);
+      })[0] || null;
+
+    const topAssister = playerStats
+      .filter((entry) => entry.assists > 0)
+      .sort((left, right) => {
+        if (left.assists !== right.assists) return right.assists - left.assists;
+        return left.playerName.localeCompare(right.playerName);
+      })[0] || null;
+
+    const mostBooked = playerStats
+      .map((entry) => ({
+        ...entry,
+        bookings: entry.yellowCards + entry.redCards
+      }))
+      .filter((entry) => entry.bookings > 0)
+      .sort((left, right) => {
+        if (left.bookings !== right.bookings) return right.bookings - left.bookings;
+        return left.playerName.localeCompare(right.playerName);
+      })[0] || null;
+
+    if (topScorerNode) {
+      topScorerNode.textContent = topScorer
+        ? `${topScorer.playerName} (${topScorer.goals})`
+        : 'No goals yet';
+    }
+
+    if (topAssisterNode) {
+      topAssisterNode.textContent = topAssister
+        ? `${topAssister.playerName} (${topAssister.assists})`
+        : 'No assists yet';
+    }
+
+    if (mostBookedNode) {
+      mostBookedNode.textContent = mostBooked
+        ? `${mostBooked.playerName} (${mostBooked.bookings})`
+        : 'No cards yet';
     }
 
     openButtons.forEach((button) => {
