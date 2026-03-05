@@ -6058,6 +6058,27 @@ const wireSportsHouseManagerInline = () => {
     };
   };
 
+  const resolveHouseManagerSignatureName = (houseId: string) => {
+    const roleStore = loadHouseRoleAssignments();
+    const houseRoleEntry = roleStore[houseId] || { staffRoles: {}, learnerCaptaincies: {} };
+    const staffByKey = new Map(
+      collectEnrollmentLearners()
+        .filter((record) => record.houseId === houseId && record.memberType === 'teacher')
+        .map((record) => [record.key, record.displayName])
+    );
+    const managerNames = Object.entries(houseRoleEntry.staffRoles)
+      .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
+      .map(([memberKey]) => staffByKey.get(memberKey) || '')
+      .filter((entry) => Boolean(entry));
+
+    return managerNames[0] || '____________________________';
+  };
+
+  const resolveSportsCoordinatorSignatureName = async () => {
+    const configuredName = String(await getSiteSetting('sports_committee_coordinator_name') || '').trim();
+    return configuredName || 'Mr. B.C Dlamini';
+  };
+
   houseModalSearch.addEventListener('input', () => {
     memberSearchValue = houseModalSearch.value;
     renderHouseMembersModal();
@@ -6209,31 +6230,8 @@ const wireSportsHouseManagerInline = () => {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'house';
 
-      const roleStore = loadHouseRoleAssignments();
-      const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
-      const staffByKey = new Map(
-        collectEnrollmentLearners()
-          .filter((record) => record.houseId === activeHouse.id && record.memberType === 'teacher')
-          .map((record) => [record.key, record.displayName])
-      );
-      const managerNames = Object.entries(houseRoleEntry.staffRoles)
-        .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
-        .map(([memberKey]) => staffByKey.get(memberKey) || '')
-        .filter((entry) => Boolean(entry));
-      const houseManagerSignatureName = managerNames[0] || '____________________________';
-
-      const roleStore = loadHouseRoleAssignments();
-      const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
-      const staffByKey = new Map(
-        collectEnrollmentLearners()
-          .filter((record) => record.houseId === activeHouse.id && record.memberType === 'teacher')
-          .map((record) => [record.key, record.displayName])
-      );
-      const managerNames = Object.entries(houseRoleEntry.staffRoles)
-        .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
-        .map(([memberKey]) => staffByKey.get(memberKey) || '')
-        .filter((entry) => Boolean(entry));
-      const houseManagerSignatureName = managerNames[0] || '____________________________';
+      const houseManagerSignatureName = resolveHouseManagerSignatureName(activeHouse.id);
+      const sportsCoordinatorSignatureName = await resolveSportsCoordinatorSignatureName();
 
       await exportProfessionalWorkbook({
         fileName: `${safeHouseName}-house-register.xlsx`,
@@ -6278,7 +6276,7 @@ const wireSportsHouseManagerInline = () => {
           },
           {
             anchor: 'right',
-            name: 'Mr. B.C Dlamini',
+            name: sportsCoordinatorSignatureName,
             role: 'Sports Committee Coordinator',
             shiftColumns: 2
           }
@@ -6309,6 +6307,9 @@ const wireSportsHouseManagerInline = () => {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'house';
 
+      const houseManagerSignatureName = resolveHouseManagerSignatureName(activeHouse.id);
+      const sportsCoordinatorSignatureName = await resolveSportsCoordinatorSignatureName();
+
       await exportProfessionalWorkbook({
         fileName: `${safeHouseName}-executive-election-form.xlsx`,
         sheetName: 'Executive Form',
@@ -6336,6 +6337,14 @@ const wireSportsHouseManagerInline = () => {
         ],
         rows,
         note: 'Please keep entries clear and concise. Choose a values-based, inspirational house name and slogan/motto that reflect both school and house identity.',
+        footerSections: [
+          {
+            title: 'Inclusion note',
+            lines: [
+              'Include permanent non-teaching staff in the house executive where appropriate.'
+            ]
+          }
+        ],
         signatures: [
           {
             anchor: 'left',
@@ -6344,7 +6353,7 @@ const wireSportsHouseManagerInline = () => {
           },
           {
             anchor: 'right',
-            name: 'Mr. B.C Dlamini',
+            name: sportsCoordinatorSignatureName,
             role: 'Sports Committee Coordinator',
             shiftColumns: 2
           }
