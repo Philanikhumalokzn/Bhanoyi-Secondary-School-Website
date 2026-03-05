@@ -4209,6 +4209,7 @@ const wireSportsHouseManagerInline = () => {
         <h3 data-house-members-title>Manage House</h3>
         <div class="inline-house-members-head-actions">
           <button type="button" class="btn btn-secondary" data-house-members-export="true">Export house list</button>
+          <button type="button" class="btn btn-secondary" data-house-members-executive-form-export="true">Export executive form</button>
           <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
         </div>
       </div>
@@ -4330,6 +4331,7 @@ const wireSportsHouseManagerInline = () => {
   const houseModalPullSelect = houseModal.querySelector('[data-house-members-pull-select]');
   const houseModalPullButton = houseModal.querySelector('[data-house-members-pull]');
   const houseModalExportButton = houseModal.querySelector('[data-house-members-export="true"]');
+  const houseModalExecutiveFormExportButton = houseModal.querySelector('[data-house-members-executive-form-export="true"]');
   const houseModalCloseButtons = Array.from(houseModal.querySelectorAll('[data-house-members-close="true"]'));
 
   if (
@@ -4350,7 +4352,8 @@ const wireSportsHouseManagerInline = () => {
     !(houseModalRemoveSportButton instanceof HTMLButtonElement) ||
     !(houseModalPullSelect instanceof HTMLSelectElement) ||
     !(houseModalPullButton instanceof HTMLButtonElement) ||
-    !(houseModalExportButton instanceof HTMLButtonElement)
+    !(houseModalExportButton instanceof HTMLButtonElement) ||
+    !(houseModalExecutiveFormExportButton instanceof HTMLButtonElement)
   ) {
     return;
   }
@@ -6004,6 +6007,57 @@ const wireSportsHouseManagerInline = () => {
     return { activeHouse, rows, managementRows };
   };
 
+  const buildHouseExecutiveFormRows = (houseId: string) => {
+    const activeHouse = readState.options.find((entry) => entry.id === houseId);
+    if (!activeHouse) {
+      return {
+        activeHouse: null,
+        rows: [] as Array<Record<string, string> & { _section?: string }>,
+        rolesCount: 0
+      };
+    }
+
+    const sportCodes = loadSportingCodes();
+    const staffRoleOptions = [
+      ...baseStaffRoleOptions,
+      ...sportCodes.map((entry) => ({ id: `coach_${entry.id}`, label: `Coach (${entry.title})` }))
+    ];
+
+    const rows: Array<Record<string, string> & { _section?: string }> = [];
+    const pushSection = (label: string) => {
+      rows.push({ section: label, field: '', response: '', notes: '', _section: label });
+    };
+    const pushField = (section: string, field: string, notes = '') => {
+      rows.push({ section, field, response: '', notes });
+    };
+
+    pushSection('1) House Identity');
+    pushField('House Identity', 'Current house name', activeHouse.name);
+    pushField('House Identity', 'New inspirational house name (required)', 'Example: Determined, House Excel');
+    pushField('House Identity', 'House slogan / motto (optional)', 'Short, inspiring phrase');
+    pushField('House Identity', 'Short motivation for the new name', 'One or two short lines');
+
+    pushSection('2) Staff Executive Roles');
+    staffRoleOptions.forEach((entry) => {
+      pushField('Staff Executive Roles', entry.label, 'Write title, surname, initials');
+    });
+
+    pushSection('3) Sporting Captains');
+    sportCodes.forEach((entry) => {
+      pushField('Sporting Captains', `Captain (${entry.title})`, 'Learner full name');
+    });
+
+    pushSection('4) Confirmation');
+    pushField('Confirmation', 'Completed by (Name & role)', 'House representative');
+    pushField('Confirmation', 'Date completed', 'DD/MM/YYYY');
+
+    return {
+      activeHouse,
+      rows,
+      rolesCount: staffRoleOptions.length + sportCodes.length
+    };
+  };
+
   houseModalSearch.addEventListener('input', () => {
     memberSearchValue = houseModalSearch.value;
     renderHouseMembersModal();
@@ -6221,6 +6275,82 @@ const wireSportsHouseManagerInline = () => {
       showStatus(`${activeHouse.name} house list exported (.xlsx).`);
     } catch (error) {
       showStatus(error instanceof Error ? error.message : 'Failed to export house list.');
+    }
+  });
+
+  houseModalExecutiveFormExportButton.addEventListener('click', async () => {
+    if (!activeHouseId) {
+      showStatus('Open a house first, then export its executive form.');
+      return;
+    }
+
+    try {
+      const { activeHouse, rows, rolesCount } = buildHouseExecutiveFormRows(activeHouseId);
+      if (!activeHouse) {
+        showStatus('House details could not be resolved for export.');
+        return;
+      }
+
+      const safeHouseName = activeHouse.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'house';
+
+      await exportProfessionalWorkbook({
+        fileName: `${safeHouseName}-executive-election-form.xlsx`,
+        sheetName: 'Executive Form',
+        title: 'House Executive Election Form',
+        contextLine: `${activeHouse.name} • ${resolveHouseColorLabel(activeHouse.color)}`,
+        contextLineRich: [
+          {
+            text: `${activeHouse.name} `,
+            color: 'FFFFFF'
+          },
+          {
+            text: '• ',
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          },
+          {
+            text: resolveHouseColorLabel(activeHouse.color),
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          }
+        ],
+        metaLine: `Positions to fill: ${rolesCount}`,
+        columns: [
+          { header: 'Section', key: 'section', width: 22, align: 'left' },
+          { header: 'Field', key: 'field', width: 38, align: 'left', wrapText: true },
+          { header: 'House response', key: 'response', width: 34, align: 'left', wrapText: true },
+          { header: 'Notes', key: 'notes', width: 30, align: 'left', wrapText: true }
+        ],
+        rows,
+        note: 'Please keep entries clear and concise. Choose a values-based, inspirational house name and slogan/motto that reflect both school and house identity.',
+        afterRows: ({ sheet, dataStartRow }) => {
+          rows.forEach((row, index) => {
+            if (!row._section) return;
+            const rowNumber = dataStartRow + index;
+            sheet.mergeCells(`A${rowNumber}:D${rowNumber}`);
+            const cell = sheet.getCell(`A${rowNumber}`);
+            cell.value = row._section;
+            cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF173A5E' } };
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFEAF3FF' }
+            };
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+              left: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+              bottom: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+              right: { style: 'thin', color: { argb: 'FFD0E0F0' } }
+            };
+          });
+        }
+      });
+
+      showStatus(`${activeHouse.name} executive election form exported (.xlsx).`);
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to export executive election form.');
     }
   });
 
