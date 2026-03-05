@@ -229,17 +229,20 @@ export const exportProfessionalWorkbook = async ({
   let headerRowNumber = 7;
 
   if (managementRows.length) {
-    const blockStartRow = 6;
+    const blockStartRow = 7;
     const blockTitleRow = blockStartRow;
     const blockHeaderRow = blockStartRow + 1;
     const blockDataStartRow = blockStartRow + 2;
     const blockEndRow = blockDataStartRow + managementRows.length - 1;
     const managementColumnCount = Math.min(safeColumns.length, 5);
-    const managementEndColumnLabel = toColumnLabel(Math.max(1, managementColumnCount));
-    const managementHeaders = ['Name (Title, Surname, INITIALS)', 'Role', 'PL', 'Staff No.', 'Gender'];
+    const managementStartColumn = Math.max(1, Math.min(safeColumns.length, Math.ceil((safeColumns.length - managementColumnCount) / 2) + 1));
+    const managementEndColumn = Math.min(safeColumns.length, managementStartColumn + managementColumnCount - 1);
+    const managementStartColumnLabel = toColumnLabel(managementStartColumn);
+    const managementEndColumnLabel = toColumnLabel(managementEndColumn);
+    const managementHeaders = ['Name', 'Role', 'PL', 'Staff No.', 'Gender'];
 
-    sheet.mergeCells(`A${blockTitleRow}:${managementEndColumnLabel}${blockTitleRow}`);
-    const managementTitleCell = sheet.getCell(`A${blockTitleRow}`);
+    sheet.mergeCells(`${managementStartColumnLabel}${blockTitleRow}:${managementEndColumnLabel}${blockTitleRow}`);
+    const managementTitleCell = sheet.getCell(`${managementStartColumnLabel}${blockTitleRow}`);
     managementTitleCell.value = managementTitle;
     managementTitleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${theme.deepBlue}` } };
     managementTitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
@@ -249,11 +252,11 @@ export const exportProfessionalWorkbook = async ({
       fgColor: { argb: `FF${theme.metaBlue}` }
     };
 
-    for (let columnIndex = 1; columnIndex <= managementColumnCount; columnIndex += 1) {
+    for (let columnIndex = managementStartColumn; columnIndex <= managementEndColumn; columnIndex += 1) {
       const headingCell = sheet.getRow(blockHeaderRow).getCell(columnIndex);
-      headingCell.value = managementHeaders[columnIndex - 1] || '';
+      headingCell.value = managementHeaders[columnIndex - managementStartColumn] || '';
       headingCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
-      headingCell.alignment = { vertical: 'middle', horizontal: columnIndex === 1 ? 'left' : 'center' };
+      headingCell.alignment = { vertical: 'middle', horizontal: columnIndex === managementStartColumn ? 'left' : 'center' };
       headingCell.fill = {
         type: 'pattern',
         pattern: 'solid',
@@ -274,14 +277,14 @@ export const exportProfessionalWorkbook = async ({
         String(entry.gender || '').trim()
       ];
 
-      for (let columnIndex = 1; columnIndex <= managementColumnCount; columnIndex += 1) {
+      for (let columnIndex = managementStartColumn; columnIndex <= managementEndColumn; columnIndex += 1) {
         const cell = row.getCell(columnIndex);
-        cell.value = values[columnIndex - 1] || '';
+        cell.value = values[columnIndex - managementStartColumn] || '';
         cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${theme.deepBlue}` } };
         cell.alignment = {
           vertical: 'middle',
-          horizontal: columnIndex === 1 ? 'left' : 'center',
-          wrapText: columnIndex === 1
+          horizontal: columnIndex === managementStartColumn ? 'left' : 'center',
+          wrapText: columnIndex === managementStartColumn
         };
         cell.fill = {
           type: 'pattern',
@@ -292,12 +295,12 @@ export const exportProfessionalWorkbook = async ({
     });
 
     for (let rowNumber = blockTitleRow; rowNumber <= blockEndRow; rowNumber += 1) {
-      for (let columnIndex = 1; columnIndex <= managementColumnCount; columnIndex += 1) {
+      for (let columnIndex = managementStartColumn; columnIndex <= managementEndColumn; columnIndex += 1) {
         const cell = sheet.getRow(rowNumber).getCell(columnIndex);
         const isTop = rowNumber === blockTitleRow;
         const isBottom = rowNumber === blockEndRow;
-        const isLeft = columnIndex === 1;
-        const isRight = columnIndex === managementColumnCount;
+        const isLeft = columnIndex === managementStartColumn;
+        const isRight = columnIndex === managementEndColumn;
 
         const existingBorder = cell.border || {};
         cell.border = {

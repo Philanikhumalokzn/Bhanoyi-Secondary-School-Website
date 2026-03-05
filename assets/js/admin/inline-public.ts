@@ -6345,6 +6345,16 @@ const wireSportsHouseManagerInline = () => {
               right: { style: 'thin', color: { argb: 'FFD0E0F0' } }
             };
           });
+
+          rows.forEach((row, index) => {
+            if (row.field !== 'New inspirational house name (required)') return;
+            const rowNumber = dataStartRow + index;
+            const responseCell = sheet.getCell(`C${rowNumber}`);
+            if (String(responseCell.value || '').trim()) return;
+            responseCell.value = 'e.g. Determined / House Excel';
+            responseCell.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF7A8694' } };
+            responseCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          });
         }
       });
 
