@@ -419,89 +419,60 @@
         {
           "type": "league-standings",
           "title": "League Standings Log",
-          "subtitle": "District Schools League · U17 Division · 2026 Season",
+          "subtitle": "Inter-House League · Football / Netball · 2026 Season",
+          "fixtureSectionKey": "sports_fixture_creator",
           "lastUpdated": "05 Mar 2026",
           "sortNote": "Tie-break order: Pts > GD > GF",
           "items": [
             {
-              "team": "Bhanoyi Secondary School",
-              "mp": 12,
-              "w": 9,
-              "d": 2,
-              "l": 1,
-              "gf": 27,
-              "ga": 8,
-              "pts": 29
+              "team": "House 1",
+              "mp": 0,
+              "w": 0,
+              "d": 0,
+              "l": 0,
+              "gf": 0,
+              "ga": 0,
+              "pts": 0
             },
             {
-              "team": "Nkandla High School",
-              "mp": 12,
-              "w": 8,
-              "d": 2,
-              "l": 2,
-              "gf": 24,
-              "ga": 11,
-              "pts": 26
+              "team": "House 2",
+              "mp": 0,
+              "w": 0,
+              "d": 0,
+              "l": 0,
+              "gf": 0,
+              "ga": 0,
+              "pts": 0
             },
             {
-              "team": "Umsinga Secondary",
-              "mp": 12,
-              "w": 7,
-              "d": 3,
-              "l": 2,
-              "gf": 22,
-              "ga": 13,
-              "pts": 24
+              "team": "House 3",
+              "mp": 0,
+              "w": 0,
+              "d": 0,
+              "l": 0,
+              "gf": 0,
+              "ga": 0,
+              "pts": 0
             },
             {
-              "team": "Eshowe College",
-              "mp": 12,
-              "w": 6,
-              "d": 3,
-              "l": 3,
-              "gf": 19,
-              "ga": 14,
-              "pts": 21
+              "team": "House 4",
+              "mp": 0,
+              "w": 0,
+              "d": 0,
+              "l": 0,
+              "gf": 0,
+              "ga": 0,
+              "pts": 0
             },
             {
-              "team": "Empangeni Central",
-              "mp": 12,
-              "w": 5,
-              "d": 2,
-              "l": 5,
-              "gf": 17,
-              "ga": 18,
-              "pts": 17
-            },
-            {
-              "team": "Dondotha High",
-              "mp": 12,
-              "w": 4,
-              "d": 2,
-              "l": 6,
-              "gf": 14,
-              "ga": 20,
-              "pts": 14
-            },
-            {
-              "team": "Melmoth Secondary",
-              "mp": 12,
-              "w": 2,
-              "d": 4,
-              "l": 6,
-              "gf": 12,
-              "ga": 21,
-              "pts": 10
-            },
-            {
-              "team": "Mandeni Academy",
-              "mp": 12,
-              "w": 1,
-              "d": 2,
-              "l": 9,
-              "gf": 9,
-              "ga": 29,
-              "pts": 5
+              "team": "House 5",
+              "mp": 0,
+              "w": 0,
+              "d": 0,
+              "l": 0,
+              "gf": 0,
+              "ga": 0,
+              "pts": 0
             }
           ]
         },

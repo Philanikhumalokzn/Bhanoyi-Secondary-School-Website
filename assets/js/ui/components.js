@@ -372,44 +372,266 @@ const parseStandingMetric = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const renderLeagueStandingsSection = (section, sectionIndex) => {
-  const rows = Array.isArray(section.items) ? section.items : [];
-  const lastUpdated = (section.lastUpdated || '').trim();
-  const sortNote = (section.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF';
-  const normalizedRows = rows
-    .map((item, index) => {
-      const mp = parseStandingMetric(item.mp);
-      const w = parseStandingMetric(item.w);
-      const d = parseStandingMetric(item.d);
-      const l = parseStandingMetric(item.l);
-      const gf = parseStandingMetric(item.gf);
-      const ga = parseStandingMetric(item.ga);
-      const pts = parseStandingMetric(item.pts);
-      const gd = gf - ga;
+const normalizeStandingsTeamOptions = (section, context = {}) => {
+  const normalizeOption = (entry, index) => {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const id = String(source.id || source.key || source.teamId || `team_${index + 1}`)
+      .trim()
+      .toLowerCase();
+    const name = String(source.name || source.label || source.team || `Team ${index + 1}`).trim() || `Team ${index + 1}`;
+    if (!id) return null;
+    return { id, name };
+  };
 
-      return {
-        position: parseStandingMetric(item.position) || index + 1,
-        team: (item.team || '').trim() || `Team ${index + 1}`,
-        mp,
-        w,
-        d,
-        l,
-        gf,
-        ga,
-        gd,
-        pts
-      };
-    })
+  const pageSections = Array.isArray(context?.page?.sections) ? context.page.sections : [];
+  const fixtureSectionKey = String(section.fixtureSectionKey || '').trim();
+  const linkedFixtureSection = pageSections.find((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    if (entry.type !== 'fixture-creator') return false;
+    if (!fixtureSectionKey) return true;
+    return String(entry.sectionKey || '').trim() === fixtureSectionKey;
+  });
+  const linkedMatchSection = pageSections.find((entry) => entry && typeof entry === 'object' && entry.type === 'match-log');
+
+  const persistedHouseOptions = (() => {
+    try {
+      const raw = localStorage.getItem('bhanoyi.sportsHouseOptions');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  const candidates = [
+    Array.isArray(section.houseOptions) ? section.houseOptions : [],
+    Array.isArray(linkedFixtureSection?.houseOptions) ? linkedFixtureSection.houseOptions : [],
+    Array.isArray(linkedMatchSection?.houseOptions) ? linkedMatchSection.houseOptions : [],
+    persistedHouseOptions
+  ];
+
+  const picked = candidates.find((entry) => Array.isArray(entry) && entry.length > 0) || [];
+  const uniqueById = new Map();
+  picked
+    .map(normalizeOption)
+    .filter(Boolean)
+    .forEach((entry) => {
+      if (!uniqueById.has(entry.id)) {
+        uniqueById.set(entry.id, entry);
+      }
+    });
+
+  return Array.from(uniqueById.values());
+};
+
+const getSortedStandingsRows = (rows) =>
+  rows
+    .map((entry) => ({
+      ...entry,
+      mp: parseStandingMetric(entry.mp),
+      w: parseStandingMetric(entry.w),
+      d: parseStandingMetric(entry.d),
+      l: parseStandingMetric(entry.l),
+      gf: parseStandingMetric(entry.gf),
+      ga: parseStandingMetric(entry.ga),
+      gd: parseStandingMetric(entry.gd),
+      pts: parseStandingMetric(entry.pts)
+    }))
     .sort((left, right) => {
       if (right.pts !== left.pts) return right.pts - left.pts;
       if (right.gd !== left.gd) return right.gd - left.gd;
       if (right.gf !== left.gf) return right.gf - left.gf;
-      return left.team.localeCompare(right.team);
+      return String(left.team || '').localeCompare(String(right.team || ''));
     })
-    .map((item, index) => ({ ...item, position: index + 1 }));
+    .map((entry, index) => ({ ...entry, position: index + 1 }));
+
+const computeStandingsViewModel = (section, context = {}) => {
+  const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const houseOptions = normalizeStandingsTeamOptions(section, context);
+  const teamStats = new Map(
+    houseOptions.map((team) => [
+      team.id,
+      {
+        teamId: team.id,
+        team: team.name,
+        mp: 0,
+        w: 0,
+        d: 0,
+        l: 0,
+        gf: 0,
+        ga: 0,
+        gd: 0,
+        pts: 0
+      }
+    ])
+  );
+
+  const fixtureCatalog = readLocalStorageObject(getFixtureCatalogStorageKey(fixtureSectionKey));
+  const fixtureDateMap = readLocalStorageObject(getFixtureDateStorageKey(fixtureSectionKey));
+  const logsByFixture = readLocalStorageObject(getMatchLogByFixtureStorageKey(fixtureSectionKey));
+
+  let latestUpdatedAt = 0;
+
+  Object.entries(fixtureCatalog).forEach(([fixtureId, fixtureData]) => {
+    const fixture = fixtureData && typeof fixtureData === 'object' ? fixtureData : {};
+    const stamp = splitFixtureStampGlobal(fixtureDateMap[fixtureId]);
+    if (!stamp.date) return;
+
+    const homeId = String(fixture.homeId || '').trim().toLowerCase();
+    const awayId = String(fixture.awayId || '').trim().toLowerCase();
+    if (!homeId || !awayId || homeId === awayId) return;
+
+    const entry = logsByFixture[fixtureId];
+    if (!entry || typeof entry !== 'object') return;
+
+    const homeScore = Number(entry.homeScore);
+    const awayScore = Number(entry.awayScore);
+    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return;
+
+    const eventCount = Array.isArray(entry.events) ? entry.events.length : 0;
+    const hasResult =
+      eventCount > 0 ||
+      entry.hasResult === true ||
+      entry.isFinal === true ||
+      entry.markedPlayed === true;
+    if (!hasResult) return;
+
+    if (!teamStats.has(homeId)) {
+      teamStats.set(homeId, {
+        teamId: homeId,
+        team: String(fixture.homeName || homeId).trim() || homeId,
+        mp: 0,
+        w: 0,
+        d: 0,
+        l: 0,
+        gf: 0,
+        ga: 0,
+        gd: 0,
+        pts: 0
+      });
+    }
+    if (!teamStats.has(awayId)) {
+      teamStats.set(awayId, {
+        teamId: awayId,
+        team: String(fixture.awayName || awayId).trim() || awayId,
+        mp: 0,
+        w: 0,
+        d: 0,
+        l: 0,
+        gf: 0,
+        ga: 0,
+        gd: 0,
+        pts: 0
+      });
+    }
+
+    const home = teamStats.get(homeId);
+    const away = teamStats.get(awayId);
+
+    home.mp += 1;
+    away.mp += 1;
+    home.gf += homeScore;
+    home.ga += awayScore;
+    away.gf += awayScore;
+    away.ga += homeScore;
+
+    if (homeScore > awayScore) {
+      home.w += 1;
+      home.pts += 3;
+      away.l += 1;
+    } else if (awayScore > homeScore) {
+      away.w += 1;
+      away.pts += 3;
+      home.l += 1;
+    } else {
+      home.d += 1;
+      away.d += 1;
+      home.pts += 1;
+      away.pts += 1;
+    }
+
+    const updatedAt = Number(entry.updatedAt);
+    if (Number.isFinite(updatedAt) && updatedAt > latestUpdatedAt) {
+      latestUpdatedAt = updatedAt;
+    }
+  });
+
+  let rows = Array.from(teamStats.values()).map((entry) => ({
+    ...entry,
+    gd: entry.gf - entry.ga
+  }));
+
+  if (!rows.length && Array.isArray(section.items) && section.items.length) {
+    rows = section.items.map((item, index) => {
+      const gf = parseStandingMetric(item.gf);
+      const ga = parseStandingMetric(item.ga);
+      return {
+        position: parseStandingMetric(item.position) || index + 1,
+        team: (item.team || '').trim() || `Team ${index + 1}`,
+        mp: parseStandingMetric(item.mp),
+        w: parseStandingMetric(item.w),
+        d: parseStandingMetric(item.d),
+        l: parseStandingMetric(item.l),
+        gf,
+        ga,
+        gd: gf - ga,
+        pts: parseStandingMetric(item.pts)
+      };
+    });
+  }
+
+  const sortedRows = getSortedStandingsRows(rows);
+  const sectionLastUpdated = String(section.lastUpdated || '').trim();
+  const computedLastUpdated = latestUpdatedAt
+    ? new Date(latestUpdatedAt).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      })
+    : '';
+
+  return {
+    fixtureSectionKey,
+    rows: sortedRows,
+    lastUpdated: computedLastUpdated || sectionLastUpdated || 'N/A',
+    sortNote: (section.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+    houseOptions
+  };
+};
+
+const renderStandingsRowsMarkup = (rows) =>
+  rows
+    .map(
+      (item, index) => `
+        <tr class="${index === 0 ? 'standings-row-leading' : ''}">
+          <td>${item.position}</td>
+          <th scope="row">${escapeHtmlText(item.team)}</th>
+          <td>${item.mp}</td>
+          <td>${item.w}</td>
+          <td>${item.d}</td>
+          <td>${item.l}</td>
+          <td>${item.gf}</td>
+          <td>${item.ga}</td>
+          <td>${item.gd}</td>
+          <td><strong>${item.pts}</strong></td>
+        </tr>
+      `
+    )
+    .join('');
+
+const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
+  const viewModel = computeStandingsViewModel(section, context);
+  const standingsConfig = {
+    fixtureSectionKey: viewModel.fixtureSectionKey,
+    houseOptions: viewModel.houseOptions,
+    items: Array.isArray(section.items) ? section.items : [],
+    lastUpdated: String(section.lastUpdated || '').trim(),
+    sortNote: String(section.sortNote || '').trim()
+  };
 
   return `
-    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="league-standings">
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="league-standings" data-league-standings="true" data-standings-config="${escapeHtmlAttribute(JSON.stringify(standingsConfig))}">
       <div class="container">
         <h2>${section.title}</h2>
         ${section.subtitle ? `<p class="standings-subtitle">${section.subtitle}</p>` : ''}
@@ -430,36 +652,80 @@ const renderLeagueStandingsSection = (section, sectionIndex) => {
                   <th scope="col">Pts</th>
                 </tr>
               </thead>
-              <tbody>
-                ${normalizedRows
-                  .map(
-                    (item, index) => `
-                      <tr class="${index === 0 ? 'standings-row-leading' : ''}">
-                        <td>${item.position}</td>
-                        <th scope="row">${item.team}</th>
-                        <td>${item.mp}</td>
-                        <td>${item.w}</td>
-                        <td>${item.d}</td>
-                        <td>${item.l}</td>
-                        <td>${item.gf}</td>
-                        <td>${item.ga}</td>
-                        <td>${item.gd}</td>
-                        <td><strong>${item.pts}</strong></td>
-                      </tr>
-                    `
-                  )
-                  .join('')}
+              <tbody data-standings-body>
+                ${renderStandingsRowsMarkup(viewModel.rows)}
               </tbody>
             </table>
           </div>
           <p class="standings-meta">
-            ${lastUpdated ? `<span>Last Updated: ${lastUpdated}</span>` : '<span>Last Updated: N/A</span>'}
-            <span>${sortNote}</span>
+            <span data-standings-last-updated>Last Updated: ${escapeHtmlText(viewModel.lastUpdated)}</span>
+            <span data-standings-sort-note>${escapeHtmlText(viewModel.sortNote)}</span>
           </p>
         </article>
       </div>
     </section>
   `;
+};
+
+const hydrateLeagueStandings = (standingsNode) => {
+  const rawConfig = String(standingsNode?.dataset?.standingsConfig || '').trim();
+  if (!rawConfig) return;
+
+  let section;
+  try {
+    section = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  if (!section || typeof section !== 'object') return;
+
+  const bodyNode = standingsNode.querySelector('[data-standings-body]');
+  const lastUpdatedNode = standingsNode.querySelector('[data-standings-last-updated]');
+  const sortNoteNode = standingsNode.querySelector('[data-standings-sort-note]');
+  if (!(bodyNode instanceof HTMLElement)) return;
+
+  const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
+  const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
+  const matchLogStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+
+  const refresh = () => {
+    const viewModel = computeStandingsViewModel(section, {});
+    bodyNode.innerHTML = renderStandingsRowsMarkup(viewModel.rows);
+    if (lastUpdatedNode instanceof HTMLElement) {
+      lastUpdatedNode.textContent = `Last Updated: ${viewModel.lastUpdated}`;
+    }
+    if (sortNoteNode instanceof HTMLElement) {
+      sortNoteNode.textContent = viewModel.sortNote;
+    }
+  };
+
+  window.addEventListener('storage', (event) => {
+    if (!event.key) return;
+    if (
+      event.key !== fixtureCatalogStorageKey &&
+      event.key !== fixtureDateStorageKey &&
+      event.key !== matchLogStorageKey
+    ) {
+      return;
+    }
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:fixtures-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.sectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:match-log-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  refresh();
 };
 
 export const renderHeader = (siteContent, pageKey) => {
@@ -1083,6 +1349,26 @@ const getMatchStorageKey = (sectionKey) => {
 
 const getMatchLogByFixtureStorageKey = (fixtureSectionKey) =>
   `bhanoyi.matchLogByFixture.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const getFixtureCatalogStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.fixtures.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const getFixtureDateStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.fixtureDates.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const readLocalStorageObject = (key) => {
+  try {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) return {};
+    const raw = localStorage.getItem(normalizedKey);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+};
 
 const normalizeFixtureDateOnlyGlobal = (value) => {
   const raw = String(value || '').trim();
@@ -12088,7 +12374,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   }
 
   if (effectiveSection.type === 'league-standings') {
-    return renderLeagueStandingsSection(effectiveSection, sectionIndex);
+    return renderLeagueStandingsSection(effectiveSection, sectionIndex, context);
   }
 
   return '';
@@ -12804,6 +13090,11 @@ export const initSchoolCalendars = () => {
 export const initEnrollmentManagers = () => {
   const managers = Array.from(document.querySelectorAll('[data-enrollment-manager="true"]'));
   managers.forEach((manager) => hydrateEnrollmentManager(manager));
+};
+
+export const initLeagueStandings = () => {
+  const tables = Array.from(document.querySelectorAll('[data-league-standings="true"]'));
+  tables.forEach((table) => hydrateLeagueStandings(table));
 };
 
 export const renderFooter = (siteContent) => `
