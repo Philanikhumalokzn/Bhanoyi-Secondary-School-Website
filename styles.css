@@ -3124,6 +3124,19 @@ body.match-log-workspace-open {
   background: var(--surface);
 }
 
+.match-log-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+
+.match-log-footer-actions .match-log-status {
+  margin: 0;
+}
+
 .match-log-modal {
   position: fixed;
   inset: 0;

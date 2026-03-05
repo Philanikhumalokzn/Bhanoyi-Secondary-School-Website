@@ -1304,6 +1304,10 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   </table>
                 </div>
               </div>
+              <div class="match-log-footer-actions">
+                <button type="button" class="btn btn-primary" data-match-save-log>Save match log</button>
+                <p class="match-log-status" data-match-save-status aria-live="polite">Auto-save is on for every logged event.</p>
+              </div>
             </div>
           </section>
           <div class="match-log-modal is-hidden" data-match-modal>
@@ -1875,6 +1879,8 @@ const hydrateMatchLog = (matchLogNode) => {
   const teamLabel = matchLogNode.querySelector('[data-match-modal-team]');
   const modalTeamSelect = matchLogNode.querySelector('[data-match-modal-team-select]');
   const exportButton = matchLogNode.querySelector('[data-match-export]');
+  const saveLogButton = matchLogNode.querySelector('[data-match-save-log]');
+  const saveStatusNode = matchLogNode.querySelector('[data-match-save-status]');
   const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
   const detailsStep = matchLogNode.querySelector('[data-match-step="details"]');
   const typeListNode = matchLogNode.querySelector('[data-match-event-types]');
@@ -2204,6 +2210,9 @@ const hydrateMatchLog = (matchLogNode) => {
       updatedAt: Date.now()
     };
     saveMatchLogByFixtureStore(fixtureSectionKey, logsByFixture);
+    if (saveStatusNode) {
+      saveStatusNode.textContent = 'Auto-saved to DB.';
+    }
     window.dispatchEvent(
       new CustomEvent('bhanoyi:match-log-updated', {
         detail: {
@@ -2464,6 +2473,12 @@ const hydrateMatchLog = (matchLogNode) => {
           ? 'Select a match to continue.'
           : 'No fixture dates available yet.';
       }
+      if (saveLogButton instanceof HTMLButtonElement) {
+        saveLogButton.disabled = true;
+      }
+      if (saveStatusNode) {
+        saveStatusNode.textContent = 'Auto-save is on for every logged event.';
+      }
       openButtons.forEach((button) => {
         if (button instanceof HTMLButtonElement) {
           button.disabled = true;
@@ -2522,6 +2537,12 @@ const hydrateMatchLog = (matchLogNode) => {
 
     if (selectedFixtureNode) {
       selectedFixtureNode.textContent = `${formatDateLabel(fixture.date)}${fixture.time ? ` • ${fixture.time}` : ''} • ${fixture.homeName} vs ${fixture.awayName}`;
+    }
+    if (saveLogButton instanceof HTMLButtonElement) {
+      saveLogButton.disabled = false;
+    }
+    if (saveStatusNode && !String(saveStatusNode.textContent || '').trim()) {
+      saveStatusNode.textContent = 'Auto-save is on for every logged event.';
     }
     if (statusNode) {
       statusNode.textContent = sortedEvents.length
@@ -3157,6 +3178,36 @@ const hydrateMatchLog = (matchLogNode) => {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  });
+
+  saveLogButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (saveStatusNode) {
+      saveStatusNode.textContent = 'Saving match log to DB...';
+    }
+
+    if (saveLogButton instanceof HTMLButtonElement) {
+      saveLogButton.disabled = true;
+    }
+
+    Promise.resolve(persistLocalStore(matchLogStoreStorageKey, logsByFixture))
+      .then(() => {
+        if (saveStatusNode) {
+          saveStatusNode.textContent = 'Match log saved to DB.';
+        }
+      })
+      .catch(() => {
+        if (saveStatusNode) {
+          saveStatusNode.textContent = 'Could not save to DB right now. Please try again.';
+        }
+      })
+      .finally(() => {
+        const activeFixture = getCurrentFixture();
+        if (saveLogButton instanceof HTMLButtonElement) {
+          saveLogButton.disabled = !activeFixture;
+        }
+      });
   });
 
   window.addEventListener('storage', (event) => {
