@@ -259,6 +259,95 @@ const renderLatestNewsSection = (section, sectionIndex) => {
   `;
 };
 
+const parseStandingMetric = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const renderLeagueStandingsSection = (section, sectionIndex) => {
+  const rows = Array.isArray(section.items) ? section.items : [];
+  const normalizedRows = rows
+    .map((item, index) => {
+      const mp = parseStandingMetric(item.mp);
+      const w = parseStandingMetric(item.w);
+      const d = parseStandingMetric(item.d);
+      const l = parseStandingMetric(item.l);
+      const gf = parseStandingMetric(item.gf);
+      const ga = parseStandingMetric(item.ga);
+      const pts = parseStandingMetric(item.pts);
+      const gd = gf - ga;
+
+      return {
+        position: parseStandingMetric(item.position) || index + 1,
+        team: (item.team || '').trim() || `Team ${index + 1}`,
+        mp,
+        w,
+        d,
+        l,
+        gf,
+        ga,
+        gd,
+        pts
+      };
+    })
+    .sort((left, right) => {
+      if (right.pts !== left.pts) return right.pts - left.pts;
+      if (right.gd !== left.gd) return right.gd - left.gd;
+      if (right.gf !== left.gf) return right.gf - left.gf;
+      return left.team.localeCompare(right.team);
+    })
+    .map((item, index) => ({ ...item, position: index + 1 }));
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="league-standings">
+      <div class="container">
+        <h2>${section.title}</h2>
+        ${section.subtitle ? `<p class="standings-subtitle">${section.subtitle}</p>` : ''}
+        <article class="panel standings-panel">
+          <div class="standings-table-wrap" role="region" aria-label="League standings" tabindex="0">
+            <table class="standings-table">
+              <thead>
+                <tr>
+                  <th scope="col">Pos</th>
+                  <th scope="col">Team</th>
+                  <th scope="col">MP</th>
+                  <th scope="col">W</th>
+                  <th scope="col">D</th>
+                  <th scope="col">L</th>
+                  <th scope="col">GF</th>
+                  <th scope="col">GA</th>
+                  <th scope="col">GD</th>
+                  <th scope="col">Pts</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${normalizedRows
+                  .map(
+                    (item, index) => `
+                      <tr class="${index === 0 ? 'standings-row-leading' : ''}">
+                        <td>${item.position}</td>
+                        <th scope="row">${item.team}</th>
+                        <td>${item.mp}</td>
+                        <td>${item.w}</td>
+                        <td>${item.d}</td>
+                        <td>${item.l}</td>
+                        <td>${item.gf}</td>
+                        <td>${item.ga}</td>
+                        <td>${item.gd}</td>
+                        <td><strong>${item.pts}</strong></td>
+                      </tr>
+                    `
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
 export const renderHeader = (siteContent, pageKey) => {
   const links = siteContent.navigation.map((item) => {
     const current = item.key === pageKey ? ' aria-current="page"' : '';
@@ -550,6 +639,10 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
         </div>
       </section>
     `;
+  }
+
+  if (effectiveSection.type === 'league-standings') {
+    return renderLeagueStandingsSection(effectiveSection, sectionIndex);
   }
 
   return '';

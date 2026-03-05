@@ -427,6 +427,58 @@ h1 {
   margin-top: 8px;
 }
 
+.standings-subtitle {
+  margin: -6px 0 14px;
+  color: var(--muted);
+}
+
+.standings-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.standings-table-wrap {
+  overflow-x: auto;
+}
+
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.standings-table th,
+.standings-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+  font-size: 0.95rem;
+}
+
+.standings-table thead th {
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.standings-table th:nth-child(2),
+.standings-table td:nth-child(2),
+.standings-table tbody th[scope="row"] {
+  text-align: left;
+}
+
+.standings-row-leading {
+  background: var(--surface-alt);
+}
+
+.standings-table tbody tr:last-child td,
+.standings-table tbody tr:last-child th {
+  border-bottom: 0;
+}
+
 .email-form-panel {
   display: grid;
   gap: 12px;
