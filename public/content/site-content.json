@@ -7,16 +7,47 @@
     "phone": "+27 (0)00 000 0000",
     "email": "info@bhanoyisecondary.co.za",
     "address": "[School Address], KwaZulu-Natal, South Africa",
-    "hours": ["Mon–Fri: 07:30 – 15:30", "Office closes at 16:00"]
+    "hours": [
+      "Mon–Fri: 07:30 – 15:30",
+      "Office closes at 16:00"
+    ]
   },
   "navigation": [
-    { "key": "home", "label": "Home", "href": "index.html" },
-    { "key": "about", "label": "About", "href": "about.html" },
-    { "key": "academics", "label": "Academics", "href": "academics.html" },
-    { "key": "sports", "label": "Sports", "href": "sports.html" },
-    { "key": "admissions", "label": "Admissions", "href": "admissions.html" },
-    { "key": "policies", "label": "Policies", "href": "policies.html" },
-    { "key": "contact", "label": "Contact", "href": "contact.html" }
+    {
+      "key": "home",
+      "label": "Home",
+      "href": "index.html"
+    },
+    {
+      "key": "about",
+      "label": "About",
+      "href": "about.html"
+    },
+    {
+      "key": "academics",
+      "label": "Academics",
+      "href": "academics.html"
+    },
+    {
+      "key": "sports",
+      "label": "Sports",
+      "href": "sports.html"
+    },
+    {
+      "key": "admissions",
+      "label": "Admissions",
+      "href": "admissions.html"
+    },
+    {
+      "key": "policies",
+      "label": "Policies",
+      "href": "policies.html"
+    },
+    {
+      "key": "contact",
+      "label": "Contact",
+      "href": "contact.html"
+    }
   ],
   "pages": {
     "home": {
@@ -28,8 +59,16 @@
         "title": "Bhanoyi Secondary School",
         "lead": "Building future-ready learners through academic excellence, discipline, and community values.",
         "cta": [
-          { "label": "Apply / Enquire", "href": "admissions.html", "variant": "primary" },
-          { "label": "Contact School", "href": "contact.html", "variant": "secondary" }
+          {
+            "label": "Apply / Enquire",
+            "href": "admissions.html",
+            "variant": "primary"
+          },
+          {
+            "label": "Contact School",
+            "href": "contact.html",
+            "variant": "secondary"
+          }
         ],
         "notice": {
           "title": "Important Notice",
@@ -139,9 +178,18 @@
           "editable": true,
           "columns": 3,
           "items": [
-            { "title": "Open Day", "body": "Date: 09 March 2026" },
-            { "title": "Mid-Term Tests", "body": "Date: 18–26 March 2026" },
-            { "title": "Parent Forum", "body": "Date: 02 April 2026" }
+            {
+              "title": "Open Day",
+              "body": "Date: 09 March 2026"
+            },
+            {
+              "title": "Mid-Term Tests",
+              "body": "Date: 18–26 March 2026"
+            },
+            {
+              "title": "Parent Forum",
+              "body": "Date: 02 April 2026"
+            }
           ]
         }
       ]
@@ -154,7 +202,13 @@
         "eyebrow": "Who we are",
         "title": "About Our School",
         "lead": "Bhanoyi Secondary School is committed to quality education and holistic learner development.",
-        "cta": [{ "label": "Contact Leadership", "href": "contact.html", "variant": "secondary" }]
+        "cta": [
+          {
+            "label": "Contact Leadership",
+            "href": "contact.html",
+            "variant": "secondary"
+          }
+        ]
       },
       "sections": [
         {
@@ -198,7 +252,13 @@
         "eyebrow": "Teaching and learning",
         "title": "Academics",
         "lead": "Comprehensive subject offerings and structured support to help learners achieve excellent results.",
-        "cta": [{ "label": "View Admissions", "href": "admissions.html", "variant": "primary" }]
+        "cta": [
+          {
+            "label": "View Admissions",
+            "href": "admissions.html",
+            "variant": "primary"
+          }
+        ]
       },
       "sections": [
         {
@@ -230,7 +290,10 @@
           "panel": {
             "title": "Need Subject Guidance?",
             "body": "Contact the academics office for help selecting subjects and pathways.",
-            "link": { "href": "contact.html", "label": "Get in touch" }
+            "link": {
+              "href": "contact.html",
+              "label": "Get in touch"
+            }
           }
         }
       ]
@@ -243,7 +306,13 @@
         "eyebrow": "School Sport",
         "title": "Sports",
         "lead": "Follow our competitive fixtures and current league performance across the district season.",
-        "cta": [{ "label": "Contact School", "href": "contact.html", "variant": "secondary" }]
+        "cta": [
+          {
+            "label": "Contact School",
+            "href": "contact.html",
+            "variant": "secondary"
+          }
+        ]
       },
       "sections": [
         {
@@ -253,14 +322,86 @@
           "lastUpdated": "05 Mar 2026",
           "sortNote": "Tie-break order: Pts > GD > GF",
           "items": [
-            { "team": "Bhanoyi Secondary School", "mp": 12, "w": 9, "d": 2, "l": 1, "gf": 27, "ga": 8, "pts": 29 },
-            { "team": "Nkandla High School", "mp": 12, "w": 8, "d": 2, "l": 2, "gf": 24, "ga": 11, "pts": 26 },
-            { "team": "Umsinga Secondary", "mp": 12, "w": 7, "d": 3, "l": 2, "gf": 22, "ga": 13, "pts": 24 },
-            { "team": "Eshowe College", "mp": 12, "w": 6, "d": 3, "l": 3, "gf": 19, "ga": 14, "pts": 21 },
-            { "team": "Empangeni Central", "mp": 12, "w": 5, "d": 2, "l": 5, "gf": 17, "ga": 18, "pts": 17 },
-            { "team": "Dondotha High", "mp": 12, "w": 4, "d": 2, "l": 6, "gf": 14, "ga": 20, "pts": 14 },
-            { "team": "Melmoth Secondary", "mp": 12, "w": 2, "d": 4, "l": 6, "gf": 12, "ga": 21, "pts": 10 },
-            { "team": "Mandeni Academy", "mp": 12, "w": 1, "d": 2, "l": 9, "gf": 9, "ga": 29, "pts": 5 }
+            {
+              "team": "Bhanoyi Secondary School",
+              "mp": 12,
+              "w": 9,
+              "d": 2,
+              "l": 1,
+              "gf": 27,
+              "ga": 8,
+              "pts": 29
+            },
+            {
+              "team": "Nkandla High School",
+              "mp": 12,
+              "w": 8,
+              "d": 2,
+              "l": 2,
+              "gf": 24,
+              "ga": 11,
+              "pts": 26
+            },
+            {
+              "team": "Umsinga Secondary",
+              "mp": 12,
+              "w": 7,
+              "d": 3,
+              "l": 2,
+              "gf": 22,
+              "ga": 13,
+              "pts": 24
+            },
+            {
+              "team": "Eshowe College",
+              "mp": 12,
+              "w": 6,
+              "d": 3,
+              "l": 3,
+              "gf": 19,
+              "ga": 14,
+              "pts": 21
+            },
+            {
+              "team": "Empangeni Central",
+              "mp": 12,
+              "w": 5,
+              "d": 2,
+              "l": 5,
+              "gf": 17,
+              "ga": 18,
+              "pts": 17
+            },
+            {
+              "team": "Dondotha High",
+              "mp": 12,
+              "w": 4,
+              "d": 2,
+              "l": 6,
+              "gf": 14,
+              "ga": 20,
+              "pts": 14
+            },
+            {
+              "team": "Melmoth Secondary",
+              "mp": 12,
+              "w": 2,
+              "d": 4,
+              "l": 6,
+              "gf": 12,
+              "ga": 21,
+              "pts": 10
+            },
+            {
+              "team": "Mandeni Academy",
+              "mp": 12,
+              "w": 1,
+              "d": 2,
+              "l": 9,
+              "gf": 9,
+              "ga": 29,
+              "pts": 5
+            }
           ]
         }
       ]
@@ -273,7 +414,13 @@
         "eyebrow": "Join our school",
         "title": "Admissions",
         "lead": "Apply by completing the admission form and submitting required documents before the deadline.",
-        "cta": [{ "label": "Contact Admissions", "href": "contact.html", "variant": "primary" }]
+        "cta": [
+          {
+            "label": "Contact Admissions",
+            "href": "contact.html",
+            "variant": "primary"
+          }
+        ]
       },
       "sections": [
         {
@@ -289,7 +436,10 @@
           "panel": {
             "title": "Application Deadline",
             "body": "2026 applications close on 31 March 2026.",
-            "link": { "href": "contact.html", "label": "Ask admissions a question" }
+            "link": {
+              "href": "contact.html",
+              "label": "Ask admissions a question"
+            }
           }
         },
         {
@@ -348,7 +498,13 @@
         "eyebrow": "Governance and compliance",
         "title": "Policies & Public Information",
         "lead": "Access the core policy areas parents and learners need most.",
-        "cta": [{ "label": "Contact School Office", "href": "contact.html", "variant": "secondary" }]
+        "cta": [
+          {
+            "label": "Contact School Office",
+            "href": "contact.html",
+            "variant": "secondary"
+          }
+        ]
       },
       "sections": [
         {
@@ -383,8 +539,14 @@
           "editable": true,
           "columns": 3,
           "items": [
-            { "title": "School Hours", "body": "Official start and end times for the school day." },
-            { "title": "Admissions", "body": "Entry process, key dates, and application guidance." },
+            {
+              "title": "School Hours",
+              "body": "Official start and end times for the school day."
+            },
+            {
+              "title": "Admissions",
+              "body": "Entry process, key dates, and application guidance."
+            },
             {
               "title": "Careers Guidance",
               "body": "Support pathways for learners transitioning after school."
@@ -437,9 +599,18 @@
           "type": "contact-cards",
           "title": "Contact Information",
           "items": [
-            { "title": "Phone", "body": "{{school.phone}}" },
-            { "title": "Email", "body": "{{school.email}}" },
-            { "title": "Address", "body": "{{school.address}}" }
+            {
+              "title": "Phone",
+              "body": "{{school.phone}}"
+            },
+            {
+              "title": "Email",
+              "body": "{{school.email}}"
+            },
+            {
+              "title": "Address",
+              "body": "{{school.address}}"
+            }
           ]
         },
         {
@@ -448,8 +619,14 @@
           "title": "Office Hours",
           "columns": 3,
           "items": [
-            { "title": "Weekdays", "body": "{{school.hours.0}}" },
-            { "title": "Office Closing", "body": "{{school.hours.1}}" },
+            {
+              "title": "Weekdays",
+              "body": "{{school.hours.0}}"
+            },
+            {
+              "title": "Office Closing",
+              "body": "{{school.hours.1}}"
+            },
             {
               "title": "Response Time",
               "body": "General email enquiries are answered within 2 business days."
