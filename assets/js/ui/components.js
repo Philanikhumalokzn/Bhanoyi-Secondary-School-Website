@@ -6580,8 +6580,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     let baselineFixtures = [];
+    let usePinnedLocks = false;
     if (Array.isArray(lastFixtures) && lastFixtures.length) {
       baselineFixtures = lastFixtures.map((entry) => ({ ...entry }));
+      usePinnedLocks = true;
     } else {
       const profile = selectedSportProfile();
       if (!profile) {
@@ -6607,7 +6609,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       };
     }
 
-    const lockedIndexes = getPinnedFixtureIndexes(baselineFixtures);
+    const lockedIndexes = usePinnedLocks ? getPinnedFixtureIndexes(baselineFixtures) : [];
     const result = enforceSelectedFairnessRules({
       fixtures: baselineFixtures,
       teamIds,
