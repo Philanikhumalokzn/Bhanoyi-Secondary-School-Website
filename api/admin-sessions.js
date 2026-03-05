@@ -146,10 +146,12 @@ const pruneAndNormalizeState = (state, now) => {
 
 const isSessionRevoked = (session, globalRevokeBefore) => {
   const revokedAt = Number(session.revokedAt) || 0;
-  return revokedAt > 0 || (Number(globalRevokeBefore) || 0) > 0;
+  const createdAt = Number(session.createdAt) || 0;
+  const revokedByGlobalCutoff = (Number(globalRevokeBefore) || 0) > 0 && createdAt > 0 && createdAt <= Number(globalRevokeBefore);
+  return revokedAt > 0 || revokedByGlobalCutoff;
 };
 
-const upsertSession = (sessions, nextSession) => {
+const upsertSession = (sessions, nextSession, globalRevokeBefore = 0) => {
   const nextId = normalizeSessionId(nextSession.sessionId);
   const nextEmail = normalize(nextSession.email).toLowerCase();
   const existingIndex = sessions.findIndex(
@@ -158,6 +160,17 @@ const upsertSession = (sessions, nextSession) => {
 
   if (existingIndex >= 0) {
     const existing = sessions[existingIndex];
+    const existingRevoked = isSessionRevoked(existing, globalRevokeBefore);
+
+    if (existingRevoked) {
+      sessions[existingIndex] = {
+        ...nextSession,
+        createdAt: nextSession.createdAt,
+        revokedAt: 0
+      };
+      return;
+    }
+
     sessions[existingIndex] = {
       ...existing,
       ...nextSession,
@@ -216,7 +229,7 @@ export default async function handler(request, response) {
         revokedAt: 0
       };
 
-      upsertSession(currentState.sessions, nextSession);
+      upsertSession(currentState.sessions, nextSession, currentState.globalRevokeBefore);
       const nextState = pruneAndNormalizeState(currentState, now);
       await persistSessionsState(url, serviceRoleKey, nextState);
 
