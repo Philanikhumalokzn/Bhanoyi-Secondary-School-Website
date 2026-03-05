@@ -68,6 +68,7 @@ export const exportProfessionalWorkbook = async ({
   note,
   signatures,
   footerSections,
+  managementSection,
   logoUrl = '/branding/bhanoyi-logo.png',
   afterRows
 }) => {
@@ -102,7 +103,6 @@ export const exportProfessionalWorkbook = async ({
     : [{ key: 'value', header: 'Value', width: 32, align: 'left', wrapText: true }];
   const safeRows = Array.isArray(rows) ? rows : [];
 
-  sheet.views = [{ state: 'frozen', ySplit: 8 }];
   sheet.columns = safeColumns.map((entry, index) => ({
     header: entry.header || `Column ${index + 1}`,
     key: entry.key || `col_${index + 1}`,
@@ -214,7 +214,115 @@ export const exportProfessionalWorkbook = async ({
     // Optional branding image.
   }
 
-  const headerRowNumber = 7;
+  const managementRows = Array.isArray(managementSection?.rows)
+    ? managementSection.rows.filter((entry) => entry && typeof entry === 'object')
+    : [];
+  const managementTitle = String(managementSection?.title || 'Management').trim() || 'Management';
+  const normalizedManagementBorderColor = String(managementSection?.borderColor || '')
+    .trim()
+    .replace('#', '')
+    .toUpperCase();
+  const managementBorderColor = /^[0-9A-F]{6}$/.test(normalizedManagementBorderColor)
+    ? normalizedManagementBorderColor
+    : theme.headerBlue;
+
+  let headerRowNumber = 7;
+
+  if (managementRows.length) {
+    const blockStartRow = 6;
+    const blockTitleRow = blockStartRow;
+    const blockHeaderRow = blockStartRow + 1;
+    const blockDataStartRow = blockStartRow + 2;
+    const blockEndRow = blockDataStartRow + managementRows.length - 1;
+    const managementColumnCount = Math.min(safeColumns.length, 5);
+    const managementEndColumnLabel = toColumnLabel(Math.max(1, managementColumnCount));
+    const managementHeaders = ['Name (Title, Surname, INITIALS)', 'Role', 'PL', 'Staff No.', 'Gender'];
+
+    sheet.mergeCells(`A${blockTitleRow}:${managementEndColumnLabel}${blockTitleRow}`);
+    const managementTitleCell = sheet.getCell(`A${blockTitleRow}`);
+    managementTitleCell.value = managementTitle;
+    managementTitleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+    managementTitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+    managementTitleCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: `FF${theme.metaBlue}` }
+    };
+
+    for (let columnIndex = 1; columnIndex <= managementColumnCount; columnIndex += 1) {
+      const headingCell = sheet.getRow(blockHeaderRow).getCell(columnIndex);
+      headingCell.value = managementHeaders[columnIndex - 1] || '';
+      headingCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+      headingCell.alignment = { vertical: 'middle', horizontal: columnIndex === 1 ? 'left' : 'center' };
+      headingCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${theme.lightBlue}` }
+      };
+    }
+
+    managementRows.forEach((entry, index) => {
+      const rowNumber = blockDataStartRow + index;
+      const row = sheet.getRow(rowNumber);
+      row.height = 18;
+
+      const values = [
+        String(entry.fullName || '').trim(),
+        String(entry.role || '').trim(),
+        String(entry.postLevel || '').trim(),
+        String(entry.identifier || '').trim(),
+        String(entry.gender || '').trim()
+      ];
+
+      for (let columnIndex = 1; columnIndex <= managementColumnCount; columnIndex += 1) {
+        const cell = row.getCell(columnIndex);
+        cell.value = values[columnIndex - 1] || '';
+        cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${theme.deepBlue}` } };
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: columnIndex === 1 ? 'left' : 'center',
+          wrapText: columnIndex === 1
+        };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: `FF${index % 2 === 0 ? theme.white : theme.lightBlue}` }
+        };
+      }
+    });
+
+    for (let rowNumber = blockTitleRow; rowNumber <= blockEndRow; rowNumber += 1) {
+      for (let columnIndex = 1; columnIndex <= managementColumnCount; columnIndex += 1) {
+        const cell = sheet.getRow(rowNumber).getCell(columnIndex);
+        const isTop = rowNumber === blockTitleRow;
+        const isBottom = rowNumber === blockEndRow;
+        const isLeft = columnIndex === 1;
+        const isRight = columnIndex === managementColumnCount;
+
+        const existingBorder = cell.border || {};
+        cell.border = {
+          top: isTop
+            ? { style: 'medium', color: { argb: `FF${managementBorderColor}` } }
+            : existingBorder.top || { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          left: isLeft
+            ? { style: 'medium', color: { argb: `FF${managementBorderColor}` } }
+            : existingBorder.left || { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          bottom: isBottom
+            ? { style: 'medium', color: { argb: `FF${managementBorderColor}` } }
+            : existingBorder.bottom || { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          right: isRight
+            ? { style: 'medium', color: { argb: `FF${managementBorderColor}` } }
+            : existingBorder.right || { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
+        };
+      }
+    }
+
+    sheet.getRow(blockTitleRow).height = 20;
+    sheet.getRow(blockHeaderRow).height = 18;
+    headerRowNumber = blockEndRow + 2;
+  }
+
+  sheet.views = [{ state: 'frozen', ySplit: headerRowNumber + 1 }];
   const headerRow = sheet.getRow(headerRowNumber);
   headerRow.values = safeColumns.map((entry) => entry.header || '');
   headerRow.height = 20;

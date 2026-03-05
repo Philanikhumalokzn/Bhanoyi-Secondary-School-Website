@@ -2272,6 +2272,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   <p class="enrollment-class-empty">Add staff members, set post level (PL1–PL4), and assign each to a house.</p>
                 </div>
                 <div class="enrollment-staff-form" data-enrollment-staff-form>
+                  <select data-enrollment-staff-type>
+                    <option value="teaching_staff">Teaching staff</option>
+                    <option value="non_teaching_staff">Non-teaching staff</option>
+                  </select>
                   <select data-enrollment-staff-title>
                     <option value="Mr.">Mr.</option>
                     <option value="Mrs.">Mrs.</option>
@@ -2509,6 +2513,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
+  const staffTypeSelect = managerNode.querySelector('[data-enrollment-staff-type]');
   const staffTitleSelect = managerNode.querySelector('[data-enrollment-staff-title]');
   const staffInitialsInput = managerNode.querySelector('[data-enrollment-staff-initials]');
   const staffFirstNameInput = managerNode.querySelector('[data-enrollment-staff-first-name]');
@@ -2558,6 +2563,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(bulkImportLearnersButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
+    !(staffTypeSelect instanceof HTMLSelectElement) ||
     !(staffTitleSelect instanceof HTMLSelectElement) ||
     !(staffInitialsInput instanceof HTMLInputElement) ||
     !(staffFirstNameInput instanceof HTMLInputElement) ||
@@ -3112,6 +3118,11 @@ const hydrateEnrollmentManager = (managerNode) => {
     return 'PL1';
   };
 
+  const normalizeStaffType = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'non_teaching_staff' ? 'non_teaching_staff' : 'teaching_staff';
+  };
+
   const normalizeStaffTitle = (value) => {
     const allowed = ['Mr.', 'Mrs.', 'Ms.', 'Miss', 'Dr.', 'Prof.', 'Coach', 'Mx.'];
     const normalized = normalizeText(value, 20);
@@ -3221,6 +3232,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const loginPassword = normalizeText(entry.loginPassword || '', 120) || defaultCredentials.password;
     const displayNameOverride = normalizeText(entry.displayNameOverride || entry.displayName || '', 120);
     const normalized = {
+      staffType: normalizeStaffType(entry.staffType || entry.roleType || ''),
       title,
       initials,
       firstName,
@@ -3254,7 +3266,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     (Array.isArray(values) ? values : []).forEach((entry) => {
       const staff = normalizeStaffMember(entry);
       if (!staff) return;
-      const dedupeKey = `${String(staff.surname || '').toLowerCase()}::${String(staff.initials || '').toLowerCase()}::${String(staff.staffNumber || '').toLowerCase()}`;
+      const dedupeKey = `${String(staff.surname || '').toLowerCase()}::${String(staff.initials || '').toLowerCase()}::${String(staff.staffNumber || '').toLowerCase()}::${String(staff.staffType || '').toLowerCase()}`;
       if (seen.has(dedupeKey)) return;
       seen.add(dedupeKey);
       normalized.push(staff);
@@ -3775,6 +3787,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const assignedByClass = new Map();
 
     staffMembers.forEach((staff) => {
+      if (normalizeStaffType(staff?.staffType || '') !== 'teaching_staff') return;
       const grade = String(staff?.assignedGrade || '').trim();
       const letter = normalizeLetter(staff?.assignedClassLetter || '');
       if (!grade || !letter) return;
@@ -4285,6 +4298,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const teacherNames = Array.from(
       new Set(
         staffMembers
+          .filter((staff) => normalizeStaffType(staff?.staffType || '') === 'teaching_staff')
           .map((staff) => normalizeText(resolveStaffDisplayName(staff), 120))
           .filter(Boolean)
       )
@@ -4343,6 +4357,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       .map(({ staff, index }) => {
         const displayName = resolveStaffDisplayName(staff);
         const details = [
+          staff.staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff',
           staff.postLevel ? `${staff.postLevel} · ${staff.rank || staffPostLevelRanks[staff.postLevel] || ''}` : '',
           staff.gender || '',
           staff.staffNumber ? `No: ${staff.staffNumber}` : '',
@@ -4431,6 +4446,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const clearStaffForm = () => {
+    staffTypeSelect.value = 'teaching_staff';
     staffTitleSelect.value = 'Mr.';
     staffInitialsInput.value = '';
     staffFirstNameInput.value = '';
@@ -4551,6 +4567,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const staffReadOnly = !isAdminMode;
+    staffTypeSelect.disabled = staffReadOnly;
     staffTitleSelect.disabled = staffReadOnly;
     staffInitialsInput.disabled = staffReadOnly;
     staffFirstNameInput.disabled = staffReadOnly;
@@ -5005,6 +5022,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const parsedAssignedClass = parseAssignedClassValue(staffAssignedClassSelect.value);
 
     const normalized = normalizeStaffMember({
+      staffType: staffTypeSelect.value,
       title: staffTitleSelect.value,
       initials: staffInitialsInput.value,
       firstName: staffFirstNameInput.value,

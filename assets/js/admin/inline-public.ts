@@ -4542,6 +4542,13 @@ const wireSportsHouseManagerInline = () => {
     return 'Staff';
   };
 
+  const normalizeStaffType = (value: unknown) =>
+    String(value || '')
+      .trim()
+      .toLowerCase() === 'non_teaching_staff'
+      ? 'non_teaching_staff'
+      : 'teaching_staff';
+
   const staffTitleTokens = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'coach', 'mx']);
   const normalizeToken = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\./g, '');
   const resolveSurnameSortKey = (displayName: unknown, options?: { staffLike?: boolean }) => {
@@ -4732,7 +4739,9 @@ const wireSportsHouseManagerInline = () => {
 
           const postLevel = normalizeText(staffRef.postLevel, 10).toUpperCase();
           const rank = normalizeText(staffRef.rank, 60);
-          const roleLabel = postLevel || rank ? `Teacher · ${[postLevel, rank].filter(Boolean).join(' ')}` : 'Teacher';
+          const staffType = normalizeStaffType(staffRef.staffType || staffRef.roleType);
+          const rolePrefix = staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff';
+          const roleLabel = postLevel || rank ? `${rolePrefix} · ${[postLevel, rank].filter(Boolean).join(' ')}` : rolePrefix;
           const staffNumber = normalizeText(staffRef.staffNumber || '', 40);
           const gender = normalizeGender(staffRef.gender || '');
           const houseId = normalizeEnrollmentHouseId(staffRef.houseId || staffRef.house);
@@ -5861,7 +5870,11 @@ const wireSportsHouseManagerInline = () => {
   const buildHouseExportRows = (houseId: string) => {
     const activeHouse = readState.options.find((entry) => entry.id === houseId);
     if (!activeHouse) {
-      return { activeHouse: null, rows: [] as Array<Record<string, string>> };
+      return {
+        activeHouse: null,
+        rows: [] as Array<Record<string, string>>,
+        managementRows: [] as Array<Record<string, string>>
+      };
     }
 
     const sportCodes = loadSportingCodes();
@@ -5878,23 +5891,67 @@ const wireSportsHouseManagerInline = () => {
         });
       });
 
-    const rows = members.map((record) => {
+    const resolvePostLevelRank = (value: unknown) => {
+      const raw = normalizeText(value, 12).toUpperCase();
+      const parsed = Number.parseInt(raw.replace(/[^0-9]/g, ''), 10);
+      return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+    };
+
+    const resolveManagementDisplayName = (record: EnrollmentLearnerRecord) => {
+      const staffRef = record.learnerRef || {};
+      const title = normalizeText(staffRef.title, 20) || 'Mr.';
+      const surname =
+        normalizeText(staffRef.surname, 80) ||
+        normalizeText(record.displayName, 120).split(/\s+/).filter(Boolean)[0] ||
+        'Staff';
+      const initials = normalizeStaffInitials(staffRef.initials || '') || inferInitialsFromFirstName(staffRef.firstName || '');
+      return `${title} ${surname}${initials ? ` ${initials}` : ''}`.trim();
+    };
+
+    const managementMembers = members
+      .filter((record) => record.memberType !== 'learner')
+      .sort((left, right) => {
+        const leftRank = resolvePostLevelRank(left.learnerRef?.postLevel);
+        const rightRank = resolvePostLevelRank(right.learnerRef?.postLevel);
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return comparePeopleBySurname(resolveManagementDisplayName(left), resolveManagementDisplayName(right), {
+          staffLeft: true,
+          staffRight: true
+        });
+      });
+
+    const managementRows = managementMembers.map((record) => {
+      const staffRef = record.learnerRef || {};
+      const postLevel = normalizeText(staffRef.postLevel, 12).toUpperCase() || 'PL1';
+      const staffType = normalizeStaffType(staffRef.staffType || staffRef.roleType);
+      return {
+        role: staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff',
+        fullName: resolveManagementDisplayName(record),
+        identifier: record.admissionNo || '-',
+        postLevel,
+        gender: record.gender || 'Unspecified'
+      };
+    });
+
+    const rows = members
+      .filter((record) => record.memberType === 'learner')
+      .map((record) => {
       const assignedCodeIds = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
       const assignedCodes = assignedCodeIds
         .map((codeId) => sportCodeById.get(codeId)?.title || '')
         .filter((entry) => Boolean(entry));
       const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'N/A';
       return {
-        role: record.memberType === 'teacher' ? 'Teacher' : 'Learner',
+        role: 'Learner',
         fullName: record.displayName,
         identifier: record.admissionNo || '-',
         gender: record.gender || 'Unspecified',
         className: classLabel,
-        sportingCodes: record.memberType === 'teacher' ? 'Teacher member' : assignedCodes.join(', ') || 'Unassigned'
+        sportingCodes: assignedCodes.join(', ') || 'Unassigned'
       };
     });
 
-    return { activeHouse, rows };
+    return { activeHouse, rows, managementRows };
   };
 
   houseModalSearch.addEventListener('input', () => {
@@ -6037,7 +6094,7 @@ const wireSportsHouseManagerInline = () => {
     }
 
     try {
-      const { activeHouse, rows } = buildHouseExportRows(activeHouseId);
+      const { activeHouse, rows, managementRows } = buildHouseExportRows(activeHouseId);
       if (!activeHouse) {
         showStatus('House details could not be resolved for export.');
         return;
@@ -6081,6 +6138,11 @@ const wireSportsHouseManagerInline = () => {
           }
         ],
         metaLine: `Members: ${rows.length}`,
+        managementSection: {
+          title: `${activeHouse.name} Management (Non-learners)` ,
+          borderColor: normalizeHouseColor(activeHouse.color, '#64748b'),
+          rows: managementRows
+        },
         columns: [
           { header: 'Role', key: 'role', width: 12, align: 'center' },
           { header: 'Full Name', key: 'fullName', width: 30, align: 'left' },
