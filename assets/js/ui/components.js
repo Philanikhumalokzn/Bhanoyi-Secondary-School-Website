@@ -2197,8 +2197,8 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               </div>
             </div>
           </section>
-          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="review-fixtures">
-            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="review-fixtures">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Review and Finalize Fixtures</span>
             </button>
             <div class="sports-workflow-body" data-sports-workflow-body>

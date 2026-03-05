@@ -84,6 +84,377 @@ const showStatus = (message: string) => {
   document.body.appendChild(status);
 };
 
+const ADMIN_DEVICE_SESSION_KEY = 'bhanoyi.inlineAdminDeviceSessionId';
+const ADMIN_SESSION_HEARTBEAT_MS = 45_000;
+
+type InlineAdminSessionRow = {
+  sessionId: string;
+  email: string;
+  userAgent: string;
+  createdAt: number;
+  lastSeenAt: number;
+  revokedAt: number;
+};
+
+type InlineSessionResponse = {
+  ok?: boolean;
+  error?: string;
+  sessions?: InlineAdminSessionRow[];
+  revoked?: boolean;
+};
+
+const createInlineAdminDeviceSessionId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `adm-${crypto.randomUUID()}`;
+  }
+  return `adm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const getInlineAdminDeviceSessionId = () => {
+  const existing = String(localStorage.getItem(ADMIN_DEVICE_SESSION_KEY) || '').trim();
+  if (existing) return existing;
+  const next = createInlineAdminDeviceSessionId();
+  localStorage.setItem(ADMIN_DEVICE_SESSION_KEY, next);
+  return next;
+};
+
+const toShortDateTime = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return 'Unknown';
+  return new Date(value).toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const getSessionAccessToken = (session: unknown) => {
+  if (!session || typeof session !== 'object') return '';
+  const token = (session as { access_token?: unknown }).access_token;
+  return typeof token === 'string' ? token.trim() : '';
+};
+
+const parseInlineAdminSessionResponse = async (response: Response): Promise<InlineSessionResponse> => {
+  const parsed = (await response.json().catch(() => ({}))) as InlineSessionResponse;
+  if (!response.ok) {
+    throw new Error(String(parsed?.error || 'Admin session request failed.'));
+  }
+  return parsed;
+};
+
+const callInlineAdminSessionsApi = async (
+  method: 'GET' | 'POST' | 'DELETE',
+  accessToken: string,
+  payload: Record<string, unknown> | null,
+  adminPin = ''
+) => {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`
+  };
+
+  if (adminPin) {
+    headers['x-admin-extra-pin'] = adminPin;
+  }
+
+  if (payload) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch('/api/admin-sessions', {
+    method,
+    headers,
+    body: payload ? JSON.stringify(payload) : undefined
+  });
+
+  return parseInlineAdminSessionResponse(response);
+};
+
+const initAdminSessionSideMenu = (session: unknown) => {
+  const accessToken = getSessionAccessToken(session);
+  if (!accessToken) {
+    showStatus('Admin session is missing an access token. Please sign in again.');
+    return;
+  }
+
+  const deviceSessionId = getInlineAdminDeviceSessionId();
+  const currentEmail = String((session as { user?: { email?: string | null } }).user?.email || '')
+    .trim()
+    .toLowerCase();
+
+  const shell = document.createElement('aside');
+  shell.className = 'inline-admin-side-menu';
+  shell.innerHTML = `
+    <div class="inline-admin-side-menu-header">
+      <h3>Admin Session Control</h3>
+      <p>View devices logged in with admin credentials and revoke access.</p>
+    </div>
+    <div class="inline-admin-side-menu-pin" data-admin-session-pin-block>
+      <label>
+        Extra Admin PIN
+        <input type="password" data-admin-session-pin-input autocomplete="one-time-code" placeholder="Enter extra PIN" />
+      </label>
+      <button type="button" class="btn btn-secondary" data-admin-session-unlock>Unlock</button>
+    </div>
+    <p class="inline-admin-side-menu-status" data-admin-session-status aria-live="polite"></p>
+    <div class="inline-admin-side-menu-content is-hidden" data-admin-session-content>
+      <div class="inline-admin-side-menu-actions">
+        <button type="button" class="btn btn-secondary" data-admin-session-refresh>Refresh list</button>
+        <button type="button" class="btn btn-secondary" data-admin-session-logout-all>Log out all devices</button>
+      </div>
+      <ul class="inline-admin-session-list" data-admin-session-list></ul>
+    </div>
+  `;
+
+  document.body.appendChild(shell);
+
+  const pinInput = shell.querySelector('[data-admin-session-pin-input]') as HTMLInputElement | null;
+  const unlockButton = shell.querySelector('[data-admin-session-unlock]') as HTMLButtonElement | null;
+  const statusNode = shell.querySelector('[data-admin-session-status]') as HTMLElement | null;
+  const contentNode = shell.querySelector('[data-admin-session-content]') as HTMLElement | null;
+  const listNode = shell.querySelector('[data-admin-session-list]') as HTMLElement | null;
+  const refreshButton = shell.querySelector('[data-admin-session-refresh]') as HTMLButtonElement | null;
+  const logoutAllButton = shell.querySelector('[data-admin-session-logout-all]') as HTMLButtonElement | null;
+
+  if (!pinInput || !unlockButton || !statusNode || !contentNode || !listNode || !refreshButton || !logoutAllButton) {
+    shell.remove();
+    return;
+  }
+
+  let unlockedPin = '';
+  let pollTimer: number | null = null;
+
+  const setLocalStatus = (message: string) => {
+    statusNode.textContent = message;
+  };
+
+  const forceLogoutCurrentDevice = async (message: string) => {
+    try {
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer);
+      }
+      await signOut();
+    } catch {
+      // no-op
+    }
+    showStatus(message);
+    window.location.href = 'admin.html';
+  };
+
+  const requestLogoutReason = (isCurrentDevice: boolean) =>
+    new Promise<string | null>((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'news-overlay';
+      overlay.innerHTML = `
+        <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Confirm device logout">
+          <h3>Confirm device logout</h3>
+          <p>${isCurrentDevice ? 'You are about to log out this device.' : 'You are about to log out another admin device.'}</p>
+          <form class="news-overlay-form" data-admin-logout-reason-form>
+            <label>
+              Reason (required)
+              <textarea rows="3" maxlength="240" data-admin-logout-reason-input placeholder="Example: device lost, finished editing, security cleanup" required></textarea>
+            </label>
+            <div class="news-overlay-actions">
+              <button type="button" data-admin-logout-reason-cancel>Cancel</button>
+              <button type="submit" class="btn btn-secondary">Confirm logout</button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      lockOverlayBackgroundScroll();
+      document.body.appendChild(overlay);
+
+      const form = overlay.querySelector('[data-admin-logout-reason-form]') as HTMLFormElement | null;
+      const reasonInput = overlay.querySelector('[data-admin-logout-reason-input]') as HTMLTextAreaElement | null;
+      const cancelButton = overlay.querySelector('[data-admin-logout-reason-cancel]') as HTMLButtonElement | null;
+
+      const close = (reason: string | null) => {
+        overlay.remove();
+        unlockOverlayBackgroundScroll();
+        resolve(reason);
+      };
+
+      if (!form || !reasonInput || !cancelButton) {
+        close(null);
+        return;
+      }
+
+      reasonInput.focus();
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const reason = reasonInput.value.trim();
+        if (!reason) {
+          reasonInput.focus();
+          return;
+        }
+        close(reason);
+      });
+
+      cancelButton.addEventListener('click', () => {
+        close(null);
+      });
+
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+    });
+
+  const renderSessionList = (sessions: InlineAdminSessionRow[]) => {
+    if (!sessions.length) {
+      listNode.innerHTML = '<li class="inline-admin-session-empty">No active admin devices found.</li>';
+      return;
+    }
+
+    listNode.innerHTML = sessions
+      .map((entry) => {
+        const safeAgent = (entry.userAgent || 'Unknown browser').replace(/</g, '&lt;');
+        const isCurrent = entry.sessionId === deviceSessionId;
+        return `
+          <li class="inline-admin-session-item">
+            <div>
+              <strong>${isCurrent ? 'This device' : 'Admin device'}</strong>
+              <p>${safeAgent}</p>
+              <p>Last active: ${toShortDateTime(entry.lastSeenAt)}</p>
+            </div>
+            <button type="button" class="btn btn-secondary" data-admin-session-logout-one="${entry.sessionId}">
+              Log out ${isCurrent ? 'this' : 'device'}
+            </button>
+          </li>
+        `;
+      })
+      .join('');
+  };
+
+  const loadSessions = async () => {
+    if (!unlockedPin) {
+      setLocalStatus('Enter the extra admin PIN to unlock this menu.');
+      return;
+    }
+
+    try {
+      setLocalStatus('Loading active admin devices...');
+      const response = await callInlineAdminSessionsApi('GET', accessToken, null, unlockedPin);
+      const sessions = Array.isArray(response.sessions) ? response.sessions : [];
+      const visible = sessions.filter((entry) => String(entry.email || '').toLowerCase() === currentEmail);
+      renderSessionList(visible);
+      setLocalStatus(`Loaded ${visible.length} active admin device${visible.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      setLocalStatus(error instanceof Error ? error.message : 'Could not load admin devices.');
+    }
+  };
+
+  const sendHeartbeat = async () => {
+    try {
+      const response = await callInlineAdminSessionsApi(
+        'POST',
+        accessToken,
+        {
+          action: 'heartbeat',
+          sessionId: deviceSessionId,
+          userAgent: navigator.userAgent || 'Unknown browser'
+        },
+        ''
+      );
+
+      if (response.revoked) {
+        await forceLogoutCurrentDevice('This device was logged out from the admin session control panel.');
+      }
+    } catch {
+      // no-op: heartbeat issues should not block editing flows
+    }
+  };
+
+  unlockButton.addEventListener('click', async () => {
+    const candidatePin = pinInput.value.trim();
+    if (!candidatePin) {
+      setLocalStatus('Enter the extra admin PIN first.');
+      return;
+    }
+
+    try {
+      unlockButton.disabled = true;
+      unlockedPin = candidatePin;
+      contentNode.classList.remove('is-hidden');
+      await loadSessions();
+      pinInput.value = '';
+    } finally {
+      unlockButton.disabled = false;
+    }
+  });
+
+  refreshButton.addEventListener('click', async () => {
+    await loadSessions();
+  });
+
+  logoutAllButton.addEventListener('click', async () => {
+    if (!unlockedPin) {
+      setLocalStatus('Unlock with the extra admin PIN first.');
+      return;
+    }
+
+    const confirmed = window.confirm('Log out all active admin devices, including this one?');
+    if (!confirmed) return;
+
+    try {
+      logoutAllButton.disabled = true;
+      await callInlineAdminSessionsApi('DELETE', accessToken, { scope: 'all' }, unlockedPin);
+      await forceLogoutCurrentDevice('All admin devices were logged out.');
+    } catch (error) {
+      setLocalStatus(error instanceof Error ? error.message : 'Could not log out all devices.');
+    } finally {
+      logoutAllButton.disabled = false;
+    }
+  });
+
+  listNode.addEventListener('click', async (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest('button[data-admin-session-logout-one]') as HTMLButtonElement | null;
+    if (!button) return;
+
+    const targetSessionId = String(button.dataset.adminSessionLogoutOne || '').trim();
+    if (!targetSessionId || !unlockedPin) return;
+
+    const isCurrentDevice = targetSessionId === deviceSessionId;
+    const reason = await requestLogoutReason(isCurrentDevice);
+    if (!reason) return;
+
+    try {
+      button.disabled = true;
+      await callInlineAdminSessionsApi(
+        'DELETE',
+        accessToken,
+        {
+          scope: 'one',
+          sessionId: targetSessionId,
+          reason
+        },
+        unlockedPin
+      );
+
+      if (targetSessionId === deviceSessionId) {
+        await forceLogoutCurrentDevice('This device was logged out from admin session control.');
+        return;
+      }
+
+      setLocalStatus('Selected admin device was logged out.');
+      await loadSessions();
+    } catch (error) {
+      setLocalStatus(error instanceof Error ? error.message : 'Could not log out selected device.');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  void sendHeartbeat();
+  pollTimer = window.setInterval(() => {
+    void sendHeartbeat();
+  }, ADMIN_SESSION_HEARTBEAT_MS);
+};
+
 let overlayScrollLockCount = 0;
 let overlayLockedScrollY = 0;
 
@@ -6903,6 +7274,7 @@ export const initInlinePublicAdmin = async () => {
   }
 
   document.body.classList.add('inline-admin-active');
+  initAdminSessionSideMenu(session);
   bindInlineActions();
   showStatus('Admin mode active. Use inline Edit/Save controls in each section.');
 };

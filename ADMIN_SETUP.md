@@ -23,6 +23,7 @@ These steps must be done in your Supabase account because they need your private
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_ADMIN_EMAILS` (comma-separated admin emails)
+   - `ADMIN_EXTRA_PIN` (server-side PIN for admin session control menu)
    - `VITE_OLLAMA_MODEL` (example: `qwen3:4b`)
    - `VITE_OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`)
 
@@ -64,6 +65,7 @@ In your Vercel project settings, add these environment variables:
 
 Important:
 - Keep secrets (`GOOGLE_API_KEY`, `AI_API_KEY`) server-side only (no `VITE_` prefix).
+- Keep `ADMIN_EXTRA_PIN` server-side only (no `VITE_` prefix).
 - After adding vars, redeploy on Vercel.
 - In production, the editor uses `/api/ai-rewrite` automatically when local Ollama URL is loopback.
 
