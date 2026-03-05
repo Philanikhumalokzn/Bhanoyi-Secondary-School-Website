@@ -6341,6 +6341,12 @@ const wireSportsHouseManagerInline = () => {
             anchor: 'left',
             name: houseManagerSignatureName,
             role: 'House Manager'
+          },
+          {
+            anchor: 'right',
+            name: 'Mr. B.C Dlamini',
+            role: 'Sports Committee Coordinator',
+            shiftColumns: 2
           }
         ],
         afterRows: ({ sheet, dataStartRow }) => {
