@@ -6541,7 +6541,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .map((option) => String(option.value || '').trim())
       .filter(Boolean);
 
-    return selected.length ? Array.from(new Set(selected)) : [...defaultFairnessRuleIds];
+    return Array.from(new Set(selected));
   };
 
   const fairnessRuleLabelById = (ruleId) => {
@@ -6596,10 +6596,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
         .map((entry) => String(entry || '').trim())
         .filter(Boolean)
     );
-    const fallback = requested.size ? requested : new Set(defaultFairnessRuleIds);
 
     Array.from(fairnessRulesSelect.options).forEach((option) => {
-      option.selected = fallback.has(String(option.value || '').trim());
+      option.selected = requested.has(String(option.value || '').trim());
     });
 
     refreshFairnessSummary();
@@ -8422,6 +8421,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
       .filter((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)
       .map((checkbox) => String(checkbox.value || '').trim())
       .filter(Boolean);
+
+    if (!selectedRuleIds.length) {
+      const allowNoRules = window.confirm(
+        'No fairness rules are selected. Continue without fairness checks? This may allow uneven or conflicting fixtures.'
+      );
+      if (!allowNoRules) {
+        return;
+      }
+    }
+
     setSelectedFairnessRuleIds(selectedRuleIds);
     closeFairnessModal();
     showSmartToast(
