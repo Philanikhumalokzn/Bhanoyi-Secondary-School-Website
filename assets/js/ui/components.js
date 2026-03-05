@@ -873,6 +873,31 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   </tbody>
                 </table>
               </div>
+              <div class="match-log-player-stats">
+                <h4>Player stats</h4>
+                <p class="match-log-status" data-match-player-stats-status aria-live="polite">No player stats yet.</p>
+                <div class="match-log-table-wrap">
+                  <table class="match-log-table match-log-player-stats-table">
+                    <thead>
+                      <tr>
+                        <th>Team</th>
+                        <th>Player</th>
+                        <th>Admission</th>
+                        <th>Goals</th>
+                        <th>Assists</th>
+                        <th>Yellow</th>
+                        <th>Red</th>
+                        <th>Events</th>
+                      </tr>
+                    </thead>
+                    <tbody data-match-player-stats-body>
+                      <tr>
+                        <td class="match-log-empty-cell" colspan="8">No player stats yet.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </section>
           <div class="match-log-modal is-hidden" data-match-modal>
@@ -1240,6 +1265,7 @@ const buildPlayerEventIndex = (events, fixture, playersByTeam) => {
         name: playerName || (resolved?.name || ''),
         admissionNo: String(event?.playerAdmissionNo || resolved?.admissionNo || '').trim(),
         totalEvents: 0,
+        assistCount: 0,
         eventTypes: {},
         lastEventAt: 0
       };
@@ -1254,6 +1280,33 @@ const buildPlayerEventIndex = (events, fixture, playersByTeam) => {
     }
 
     index.set(key, existing);
+
+    const assistName = String(event?.assistName || '').trim();
+    const assistId = String(event?.assistId || '').trim();
+    if (!assistName && !assistId) return;
+
+    const resolvedAssist = playerById.get(assistId) || null;
+    const assistKey = `${teamId}::${assistId || assistName.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+    const assistExisting =
+      index.get(assistKey) ||
+      {
+        key: assistKey,
+        teamId,
+        playerId: assistId || (resolvedAssist?.id || ''),
+        name: assistName || (resolvedAssist?.name || ''),
+        admissionNo: String(event?.assistAdmissionNo || resolvedAssist?.admissionNo || '').trim(),
+        totalEvents: 0,
+        assistCount: 0,
+        eventTypes: {},
+        lastEventAt: 0
+      };
+
+    assistExisting.assistCount += 1;
+    if (Number.isFinite(createdAt) && createdAt > assistExisting.lastEventAt) {
+      assistExisting.lastEventAt = createdAt;
+    }
+
+    index.set(assistKey, assistExisting);
   });
 
   return Array.from(index.values()).sort((left, right) => {
@@ -1340,6 +1393,8 @@ const hydrateMatchLog = (matchLogNode) => {
   const leftScoreNode = matchLogNode.querySelector('[data-left-team-score]');
   const rightScoreNode = matchLogNode.querySelector('[data-right-team-score]');
   const tableBodyNode = matchLogNode.querySelector('[data-match-table-body]');
+  const playerStatsBodyNode = matchLogNode.querySelector('[data-match-player-stats-body]');
+  const playerStatsStatusNode = matchLogNode.querySelector('[data-match-player-stats-status]');
   const matchDaySelect = matchLogNode.querySelector('[data-matchday-select]');
   const fixtureSelect = matchLogNode.querySelector('[data-match-fixture-select]');
   const modal = matchLogNode.querySelector('[data-match-modal]');
@@ -1813,6 +1868,12 @@ const hydrateMatchLog = (matchLogNode) => {
       if (tableBodyNode) {
         tableBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="3">Choose a fixture date and match to start logging.</td></tr>';
       }
+      if (playerStatsBodyNode) {
+        playerStatsBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="8">Choose a fixture to view player stats.</td></tr>';
+      }
+      if (playerStatsStatusNode) {
+        playerStatsStatusNode.textContent = 'Choose a fixture to view player stats.';
+      }
       if (statusNode) {
         statusNode.textContent = fixtureOptions.length
           ? 'No match selected yet.'
@@ -1881,6 +1942,65 @@ const hydrateMatchLog = (matchLogNode) => {
       statusNode.textContent = sortedEvents.length
         ? `${sortedEvents.length} event${sortedEvents.length === 1 ? '' : 's'} logged for selected fixture.`
         : 'No events logged for selected fixture.';
+    }
+
+    const playerStats = buildPlayerEventIndex(currentEvents, fixture, currentPlayersByTeam)
+      .map((entry) => {
+        const eventTypes = entry && typeof entry.eventTypes === 'object' ? entry.eventTypes : {};
+        const goals = Number(eventTypes.goal || 0) + Number(eventTypes.penalty_goal || 0);
+        const assists = Number(entry.assistCount || 0);
+        const yellowCards = Number(eventTypes.yellow_card || 0);
+        const redCards = Number(eventTypes.red_card || 0);
+        const events = Number(entry.totalEvents || 0);
+        return {
+          teamId: String(entry.teamId || '').trim(),
+          teamName: String(entry.teamId || '').trim() === fixture.awayId ? fixture.awayName : fixture.homeName,
+          playerName: String(entry.name || '').trim(),
+          admissionNo: String(entry.admissionNo || '').trim(),
+          goals,
+          assists,
+          yellowCards,
+          redCards,
+          events
+        };
+      })
+      .filter((entry) => entry.playerName)
+      .sort((left, right) => {
+        if (left.teamName !== right.teamName) return left.teamName.localeCompare(right.teamName);
+        if (left.goals !== right.goals) return right.goals - left.goals;
+        if (left.assists !== right.assists) return right.assists - left.assists;
+        return left.playerName.localeCompare(right.playerName);
+      });
+
+    if (playerStatsBodyNode) {
+      if (!playerStats.length) {
+        playerStatsBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="8">No player stats yet for this fixture.</td></tr>';
+      } else {
+        playerStatsBodyNode.innerHTML = playerStats
+          .map(
+            (entry) => `
+              <tr>
+                <td>${escapeHtmlText(entry.teamName)}</td>
+                <td>${escapeHtmlText(entry.playerName)}</td>
+                <td>${escapeHtmlText(entry.admissionNo || '—')}</td>
+                <td>${entry.goals}</td>
+                <td>${entry.assists}</td>
+                <td>${entry.yellowCards}</td>
+                <td>${entry.redCards}</td>
+                <td>${entry.events}</td>
+              </tr>
+            `
+          )
+          .join('');
+      }
+    }
+
+    if (playerStatsStatusNode) {
+      if (!playerStats.length) {
+        playerStatsStatusNode.textContent = 'No player stats yet for selected fixture.';
+      } else {
+        playerStatsStatusNode.textContent = `${playerStats.length} player${playerStats.length === 1 ? '' : 's'} with recorded stats.`;
+      }
     }
 
     openButtons.forEach((button) => {
