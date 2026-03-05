@@ -8569,7 +8569,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           { header: 'Away', key: 'away', width: 17, align: 'left' }
         ],
         rows: fixtureRows,
-        note: 'Notice: Fixture dates/times are synchronized with the school calendar. Share updates through official school channels.',
+        note: 'Important NB: Fixtures subject to change without prior notice.',
         signatures: [
           {
             anchor: 'right',
