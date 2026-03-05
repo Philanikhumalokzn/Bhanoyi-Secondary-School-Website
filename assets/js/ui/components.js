@@ -2008,6 +2008,10 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="netball">Netball</option>
                   </select>
                 </label>
+                <label>
+                  Matches per opponent per leg
+                  <input type="number" min="1" max="6" step="1" value="1" data-fixture-meetings-per-leg />
+                </label>
                 <div class="fixture-fairness-control" data-fixture-fairness-dropdown>
                   <span class="fixture-fairness-label">Fixture fairness rules</span>
                   <button
@@ -5331,9 +5335,10 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 };
 
-const buildSingleRoundRobin = (teamIds = []) => {
+const buildSingleRoundRobin = (teamIds = [], matchesPerOpponentPerLeg = 1) => {
   const normalized = teamIds.filter(Boolean);
   if (normalized.length < 2) return [];
+  const normalizedMatchesPerLeg = Math.min(6, Math.max(1, Number.parseInt(String(matchesPerOpponentPerLeg || '').trim(), 10) || 1));
 
   const rotation = [...normalized];
   if (rotation.length % 2 !== 0) {
@@ -5375,8 +5380,27 @@ const buildSingleRoundRobin = (teamIds = []) => {
     rotation[0] = fixed;
   }
 
-  const secondLegOffset = rounds;
-  const secondLeg = firstLeg.map((fixture) => ({
+  const firstLegRepeated = [];
+  for (let cycleIndex = 0; cycleIndex < normalizedMatchesPerLeg; cycleIndex += 1) {
+    const roundOffset = cycleIndex * rounds;
+    const invertOrientation = cycleIndex % 2 === 1;
+    firstLeg.forEach((fixture) => {
+      const homeId = invertOrientation ? fixture.awayId : fixture.homeId;
+      const awayId = invertOrientation ? fixture.homeId : fixture.awayId;
+      const nextRound = fixture.round + roundOffset;
+      firstLegRepeated.push({
+        ...fixture,
+        slotKey: `R${nextRound}M${fixture.match}`,
+        round: nextRound,
+        leg: 'First',
+        homeId,
+        awayId
+      });
+    });
+  }
+
+  const secondLegOffset = rounds * normalizedMatchesPerLeg;
+  const secondLeg = firstLegRepeated.map((fixture) => ({
     ...fixture,
     slotKey: `R${fixture.round + secondLegOffset}M${fixture.match}`,
     round: fixture.round + secondLegOffset,
@@ -5385,7 +5409,7 @@ const buildSingleRoundRobin = (teamIds = []) => {
     awayId: fixture.homeId
   }));
 
-  return [...firstLeg, ...secondLeg].sort((left, right) => {
+  return [...firstLegRepeated, ...secondLeg].sort((left, right) => {
     if (left.round === right.round) return left.match - right.match;
     return left.round - right.round;
   });
@@ -5485,6 +5509,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const netballQuarterMinutesInput = fixtureNode.querySelector('[data-fixture-netball-quarter-minutes]');
   const netballBreakMinutesInput = fixtureNode.querySelector('[data-fixture-netball-break-minutes]');
   const netballHalfTimeMinutesInput = fixtureNode.querySelector('[data-fixture-netball-half-time-minutes]');
+  const meetingsPerLegInput = fixtureNode.querySelector('[data-fixture-meetings-per-leg]');
   const statusNode = fixtureNode.querySelector('[data-fixture-status]');
   const bodyNode = fixtureNode.querySelector('[data-fixture-body]');
   const generateButton = fixtureNode.querySelector('[data-fixture-generate]');
@@ -5797,6 +5822,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!Number.isFinite(parsed) || parsed < 0) return fallback;
     return parsed;
   };
+
+  const parseMatchesPerOpponentPerLeg = (value, fallback = 1) => {
+    const normalizedFallback = fallback == null ? 1 : fallback;
+    const parsed = parsePositiveInt(value, normalizedFallback);
+    return Math.min(6, Math.max(1, parsed));
+  };
+
+  const configuredMatchesPerOpponentPerLeg = () =>
+    parseMatchesPerOpponentPerLeg(
+      meetingsPerLegInput instanceof HTMLInputElement ? meetingsPerLegInput.value : '',
+      1
+    );
 
   const activeRulesBucket = () => {
     const sportValue = String(sportSelect instanceof HTMLSelectElement ? sportSelect.value : '').trim();
@@ -6484,6 +6521,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       label: 'Soccer',
       readSetup: () => {
         const halves = 2;
+        const matchesPerOpponentPerLeg = configuredMatchesPerOpponentPerLeg();
         const minutesPerHalf = parsePositiveInt(
           soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
           40
@@ -6494,9 +6532,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
         );
         return {
           halves,
+          matchesPerOpponentPerLeg,
           minutesPerHalf,
           breakMinutes,
-          formatLabel: `${halves} x ${minutesPerHalf} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`})`
+          formatLabel: `${halves} x ${minutesPerHalf} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}) · ${matchesPerOpponentPerLeg}x per opponent per leg`
         };
       }
     },
@@ -6504,6 +6543,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       label: 'Netball',
       readSetup: () => {
         const quarters = 4;
+        const matchesPerOpponentPerLeg = configuredMatchesPerOpponentPerLeg();
         const minutesPerQuarter = parsePositiveInt(
           netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
           15
@@ -6518,10 +6558,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
         );
         return {
           quarters,
+          matchesPerOpponentPerLeg,
           minutesPerQuarter,
           breakMinutes,
           halfTimeMinutes,
-          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time' : `half-time ${halfTimeMinutes} min`})`
+          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time' : `half-time ${halfTimeMinutes} min`}) · ${matchesPerOpponentPerLeg}x per opponent per leg`
         };
       }
     }
@@ -6588,13 +6629,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     const setup = profile.readSetup();
+    const matchesPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1);
     const formatLabel = String(setup?.formatLabel || '').trim();
     const generationOrders = buildGenerationTeamOrders(teamIds, 40);
     const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teamIds);
     let lastFailureReason = '';
 
     const hasFeasibleCandidate = generationOrders.some((teamOrder) => {
-      const candidateFixtures = buildSingleRoundRobin(teamOrder).map((fixture) => ({
+      const candidateFixtures = buildSingleRoundRobin(teamOrder, matchesPerOpponentPerLeg).map((fixture) => ({
         ...fixture,
         sportKey: profile.key,
         sportLabel: profile.label,
@@ -6617,7 +6659,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const repairResult = repairRoundRobinFixtureSet({
         fixtures: constrainedFixtures,
         teamIds: teamOrder,
-        lockedIndexes: pinnedIndexes
+        lockedIndexes: pinnedIndexes,
+        matchesPerOpponentPerLeg
       });
       if (!repairResult.ok) {
         lastFailureReason = repairResult.message;
@@ -6767,8 +6810,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const readSportSetupValues = (sportKey) => {
+    const matchesPerOpponentPerLeg = configuredMatchesPerOpponentPerLeg();
     if (sportKey === 'soccer') {
       return {
+        matchesPerOpponentPerLeg,
         halfMinutes: parsePositiveInt(
           soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
           40
@@ -6782,6 +6827,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     if (sportKey === 'netball') {
       return {
+        matchesPerOpponentPerLeg,
         quarterMinutes: parsePositiveInt(
           netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
           15
@@ -6801,6 +6847,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const applySportSetupValues = (sportKey, setup = {}) => {
+    if (meetingsPerLegInput instanceof HTMLInputElement) {
+      meetingsPerLegInput.value = String(parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1));
+    }
+
     if (sportKey === 'soccer') {
       if (soccerHalfMinutesInput instanceof HTMLInputElement) {
         soccerHalfMinutesInput.value = String(parsePositiveInt(setup.halfMinutes, 40));
@@ -7281,7 +7331,34 @@ const hydrateFixtureCreator = (fixtureNode) => {
     };
   };
 
-  const validateNoDuplicatePairingsPerLeg = (fixtures, teamIds) => {
+  const inferMatchesPerOpponentPerLegFromFixtures = (fixtures, teamIds) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (normalizedTeams.length < 2) return 1;
+
+    const allUnorderedPairs = [];
+    normalizedTeams.forEach((homeId, leftIndex) => {
+      normalizedTeams.slice(leftIndex + 1).forEach((awayId) => {
+        const pairKey = unorderedPairKey(homeId, awayId);
+        if (pairKey) allUnorderedPairs.push(pairKey);
+      });
+    });
+    if (!allUnorderedPairs.length) return 1;
+
+    const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    if (!legLabels.length) return 1;
+
+    const legCounts = legLabels
+      .map((legLabel) => (fixtures || []).filter((entry) => String(entry.leg || '').trim() === legLabel).length)
+      .filter((count) => Number.isFinite(count) && count > 0);
+    if (!legCounts.length) return 1;
+
+    const inferred = legCounts[0] / allUnorderedPairs.length;
+    if (!Number.isInteger(inferred) || inferred <= 0) return 1;
+    const consistent = legCounts.every((count) => count === allUnorderedPairs.length * inferred);
+    return consistent ? inferred : 1;
+  };
+
+  const validateNoDuplicatePairingsPerLeg = (fixtures, teamIds, expectedMeetingsPerOpponentPerLeg = null) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
       return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
@@ -7295,7 +7372,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       });
     });
 
-    const expectedMatchesPerLeg = allUnorderedPairs.length;
+    const meetingsPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(
+      expectedMeetingsPerOpponentPerLeg,
+      inferMatchesPerOpponentPerLegFromFixtures(fixtures, normalizedTeams)
+    );
+    const expectedMatchesPerLeg = allUnorderedPairs.length * meetingsPerOpponentPerLeg;
     const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
     if (!legLabels.length) {
       return { ok: false, message: 'Fixture legs are missing; unable to validate leg pairing rules.' };
@@ -7310,7 +7391,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      const seenPairs = new Set();
+      const pairCounts = Object.fromEntries(allUnorderedPairs.map((pairKey) => [pairKey, 0]));
       for (const fixture of legFixtures) {
         if (!normalizedTeams.includes(fixture.homeId) || !normalizedTeams.includes(fixture.awayId)) {
           return { ok: false, message: 'Fixture teams must come from the selected team list.' };
@@ -7321,14 +7402,22 @@ const hydrateFixtureCreator = (fixtureNode) => {
           return { ok: false, message: 'Home and away teams must be different.' };
         }
 
-        if (seenPairs.has(pairKey)) {
+        if (!(pairKey in pairCounts)) {
           return {
             ok: false,
-            message: `${teamNameById(fixture.homeId)} and ${teamNameById(fixture.awayId)} appear more than once in ${legLabel} leg.`
+            message: `${teamNameById(fixture.homeId)} and ${teamNameById(fixture.awayId)} are not a valid pairing for ${legLabel} leg.`
           };
         }
+        pairCounts[pairKey] += 1;
+      }
 
-        seenPairs.add(pairKey);
+      const invalidPair = Object.entries(pairCounts).find(([, count]) => count !== meetingsPerOpponentPerLeg);
+      if (invalidPair) {
+        const { teamA, teamB } = splitUnorderedPairKey(invalidPair[0]);
+        return {
+          ok: false,
+          message: `${teamNameById(teamA)} and ${teamNameById(teamB)} appear ${invalidPair[1]} time(s) in ${legLabel} leg; expected ${meetingsPerOpponentPerLeg}.`
+        };
       }
     }
 
@@ -7506,8 +7595,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     saveFixtureCreatorState();
   };
 
-  const repairRoundRobinFixtureSet = ({ fixtures, teamIds, lockedIndexes = [] }) => {
+  const repairRoundRobinFixtureSet = ({ fixtures, teamIds, lockedIndexes = [], matchesPerOpponentPerLeg = 1 }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    const normalizedMatchesPerLeg = parseMatchesPerOpponentPerLeg(matchesPerOpponentPerLeg, 1);
     if (normalizedTeams.length < 2) {
       return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
     }
@@ -7525,7 +7615,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return { ok: false, message: 'Fixture legs are missing; cannot preserve leg rules.' };
     }
 
-    const expectedMatchesPerLeg = allUnorderedPairs.length;
+    const expectedMatchesPerLeg = allUnorderedPairs.length * normalizedMatchesPerLeg;
     if ((fixtures || []).length !== expectedMatchesPerLeg * legs.length) {
       return {
         ok: false,
@@ -7560,39 +7650,37 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      const availablePairs = new Set(allUnorderedPairs);
+      const availablePairCounts = Object.fromEntries(allUnorderedPairs.map((pairKey) => [pairKey, normalizedMatchesPerLeg]));
       const unresolvedIndexes = [];
-      const lockedPairKeys = new Set();
 
       for (const index of legIndexes) {
         if (!lockedIndexSet.has(index)) continue;
         const fixture = repairedFixtures[index];
         const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
-        if (!pairKey || !availablePairs.has(pairKey) || lockedPairKeys.has(pairKey)) {
+        if (!pairKey || !(pairKey in availablePairCounts) || availablePairCounts[pairKey] <= 0) {
           return { ok: false, message: 'Pinned fixtures conflict with each other in the same leg. Unpin or adjust one of them.' };
         }
-        availablePairs.delete(pairKey);
-        lockedPairKeys.add(pairKey);
+        availablePairCounts[pairKey] -= 1;
       }
 
       for (const index of legIndexes) {
         if (lockedIndexSet.has(index)) continue;
         const fixture = repairedFixtures[index];
         const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
-        if (pairKey && availablePairs.has(pairKey)) {
-          availablePairs.delete(pairKey);
+        if (pairKey && pairKey in availablePairCounts && availablePairCounts[pairKey] > 0) {
+          availablePairCounts[pairKey] -= 1;
           continue;
         }
         unresolvedIndexes.push(index);
       }
 
       for (const index of unresolvedIndexes) {
-        const nextPairKey = availablePairs.values().next().value || '';
+        const nextPairKey = Object.entries(availablePairCounts).find(([, remaining]) => remaining > 0)?.[0] || '';
         if (!nextPairKey) {
           return { ok: false, message: 'Could not auto-adjust fixtures to a valid round-robin schedule.' };
         }
 
-        availablePairs.delete(nextPairKey);
+        availablePairCounts[nextPairKey] -= 1;
         const { teamA, teamB } = splitUnorderedPairKey(nextPairKey);
         const current = repairedFixtures[index];
         let nextPair = { homeId: teamA, awayId: teamB };
@@ -7610,12 +7698,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      if (availablePairs.size) {
+      if (Object.values(availablePairCounts).some((remaining) => remaining > 0)) {
         return { ok: false, message: 'Round-robin auto-adjustment left unmatched fixture pairs.' };
       }
     }
 
-    const legValidation = validateNoDuplicatePairingsPerLeg(repairedFixtures, normalizedTeams);
+    const legValidation = validateNoDuplicatePairingsPerLeg(repairedFixtures, normalizedTeams, normalizedMatchesPerLeg);
     if (!legValidation.ok) {
       return legValidation;
     }
@@ -7643,7 +7731,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     nextHomeId,
     nextAwayId,
     lockedIndexes = [],
-    selectedRuleIds = []
+    selectedRuleIds = [],
+    matchesPerOpponentPerLeg = 1
   }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
@@ -7691,7 +7780,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const repairResult = repairRoundRobinFixtureSet({
       fixtures: repairedFixtures,
       teamIds: normalizedTeams,
-      lockedIndexes: effectiveLockedIndexes
+      lockedIndexes: effectiveLockedIndexes,
+      matchesPerOpponentPerLeg
     });
     if (!repairResult.ok) {
       return repairResult;
@@ -7924,6 +8014,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSportKey = profile.key;
     lastSportLabel = profile.label;
     lastFormatLabel = String(setup.formatLabel || '').trim();
+    const matchesPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1);
 
     const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teams);
     const selectedRules = selectedFairnessRuleIds();
@@ -7938,12 +8029,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
         sportLabel: profile.label,
         formatLabel: lastFormatLabel
       }));
+      const templateMeetingsPerLeg = inferMatchesPerOpponentPerLegFromFixtures(templateFixtures, teams);
       const templateTeamIds = Array.from(
         new Set(templateFixtures.flatMap((fixture) => [fixture.homeId, fixture.awayId]).filter(Boolean))
       ).sort();
       const selectedTeamSet = Array.from(new Set(teams)).sort();
       if (
         templateFixtures.length &&
+        templateMeetingsPerLeg === matchesPerOpponentPerLeg &&
         templateTeamIds.length === selectedTeamSet.length &&
         templateTeamIds.every((teamId, index) => teamId === selectedTeamSet[index])
       ) {
@@ -7965,7 +8058,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const teamOrder = Array.isArray(candidate.teamOrder) ? candidate.teamOrder : teams;
       const nextFixtures = Array.isArray(candidate.fixtures)
         ? candidate.fixtures.map((fixture) => ({ ...fixture }))
-        : buildSingleRoundRobin(teamOrder).map((fixture) => ({
+        : buildSingleRoundRobin(teamOrder, matchesPerOpponentPerLeg).map((fixture) => ({
             ...fixture,
             sportKey: profile.key,
             sportLabel: profile.label,
@@ -7988,7 +8081,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const pinRepairResult = repairRoundRobinFixtureSet({
         fixtures: constrainedFixtures,
         teamIds: teamOrder,
-        lockedIndexes: pinnedIndexes
+        lockedIndexes: pinnedIndexes,
+        matchesPerOpponentPerLeg
       });
 
       if (!pinRepairResult.ok) {
@@ -8008,7 +8102,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
         return false;
       }
 
-      const generationValidation = validateNoDuplicatePairingsPerLeg(fairnessEnforcement.fixtures, teamOrder);
+      const generationValidation = validateNoDuplicatePairingsPerLeg(
+        fairnessEnforcement.fixtures,
+        teamOrder,
+        matchesPerOpponentPerLeg
+      );
       if (!generationValidation.ok) {
         generationFailureReason = generationValidation.message;
         return false;
@@ -8108,7 +8206,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const teams = selectedTeamIds();
     const effectiveTeams = teams.length ? teams : fixtureTeamIds;
 
-    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, effectiveTeams);
+    const expectedSavedMeetings = parseMatchesPerOpponentPerLeg(saved?.setup?.matchesPerOpponentPerLeg, null);
+    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, effectiveTeams, expectedSavedMeetings);
     if (!integrity.ok) return false;
     const setup = profile.readSetup();
     lastSportKey = key;
@@ -8716,7 +8815,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
         nextHomeId: nextHome,
         nextAwayId: nextAway,
         lockedIndexes: getPinnedFixtureIndexes(lastFixtures),
-        selectedRuleIds: selectedFairnessRuleIds()
+        selectedRuleIds: selectedFairnessRuleIds(),
+        matchesPerOpponentPerLeg: configuredMatchesPerOpponentPerLeg()
       });
 
       if (!repairResult.ok) {
@@ -8765,7 +8865,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
         nextHomeId: nextHome,
         nextAwayId: nextAway,
         lockedIndexes: getPinnedFixtureIndexes(lastFixtures),
-        selectedRuleIds: selectedFairnessRuleIds()
+        selectedRuleIds: selectedFairnessRuleIds(),
+        matchesPerOpponentPerLeg: configuredMatchesPerOpponentPerLeg()
       });
 
       if (!repairResult.ok) {
@@ -9031,7 +9132,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     netballQuartersInput,
     netballQuarterMinutesInput,
     netballBreakMinutesInput,
-    netballHalfTimeMinutesInput
+    netballHalfTimeMinutesInput,
+    meetingsPerLegInput
   ].forEach((input) => {
     input?.addEventListener('change', () => {
       refreshSportPanelState();
