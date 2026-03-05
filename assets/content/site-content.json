@@ -250,6 +250,8 @@
           "type": "league-standings",
           "title": "League Standings Log",
           "subtitle": "District Schools League · U17 Division · 2026 Season",
+          "lastUpdated": "05 Mar 2026",
+          "sortNote": "Tie-break order: Pts > GD > GF",
           "items": [
             { "team": "Bhanoyi Secondary School", "mp": 12, "w": 9, "d": 2, "l": 1, "gf": 27, "ga": 8, "pts": 29 },
             { "team": "Nkandla High School", "mp": 12, "w": 8, "d": 2, "l": 2, "gf": 24, "ga": 11, "pts": 26 },

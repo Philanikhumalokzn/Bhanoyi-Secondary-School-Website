@@ -266,6 +266,8 @@ const parseStandingMetric = (value) => {
 
 const renderLeagueStandingsSection = (section, sectionIndex) => {
   const rows = Array.isArray(section.items) ? section.items : [];
+  const lastUpdated = (section.lastUpdated || '').trim();
+  const sortNote = (section.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF';
   const normalizedRows = rows
     .map((item, index) => {
       const mp = parseStandingMetric(item.mp);
@@ -342,6 +344,10 @@ const renderLeagueStandingsSection = (section, sectionIndex) => {
               </tbody>
             </table>
           </div>
+          <p class="standings-meta">
+            ${lastUpdated ? `<span>Last Updated: ${lastUpdated}</span>` : '<span>Last Updated: N/A</span>'}
+            <span>${sortNote}</span>
+          </p>
         </article>
       </div>
     </section>

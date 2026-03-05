@@ -479,6 +479,17 @@ h1 {
   border-bottom: 0;
 }
 
+.standings-meta {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .email-form-panel {
   display: grid;
   gap: 12px;
