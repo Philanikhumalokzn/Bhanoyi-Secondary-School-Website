@@ -3722,6 +3722,14 @@ body.match-log-workspace-open {
   font-weight: 500;
 }
 
+.fixture-fairness-option.is-disabled {
+  opacity: 0.55;
+}
+
+.fixture-fairness-option.is-disabled span {
+  text-decoration: line-through;
+}
+
 .fixture-fairness-option input[type='checkbox'] {
   margin-top: 2px;
 }

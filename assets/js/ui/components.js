@@ -2032,7 +2032,7 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                 <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
                 <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
                   <h3>Fixture Fairness Rules</h3>
-                  <p class="enrollment-class-modal-subtitle">Select rules, then click Apply (state only).</p>
+                  <p class="enrollment-class-modal-subtitle" data-fixture-fairness-subtitle>Select rules, then click Apply (state only).</p>
                   <div class="fixture-fairness-checklist">
                     <label class="fixture-fairness-option">
                       <input type="checkbox" data-fixture-fairness-check value="equal_matches_season" checked />
@@ -6552,6 +6552,130 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return match ? normalizeText(match.textContent || match.label || match.value, 160) : String(ruleId || '').trim();
   };
 
+  const fairnessModalSubtitleNode = fairnessModal instanceof HTMLElement
+    ? fairnessModal.querySelector('[data-fixture-fairness-subtitle]')
+    : null;
+
+  const selectedTeamIdsForFairnessChecks = () => {
+    const selected = Array.from(new Set(selectedTeamIds()));
+    if (selected.length) return selected;
+    return Array.from(new Set((lastFixtures || []).flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean)));
+  };
+
+  const evaluateFairnessRuleCompatibility = (ruleIds = []) => {
+    const normalizedRuleIds = Array.from(
+      new Set(
+        (Array.isArray(ruleIds) ? ruleIds : [])
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    const teamIds = selectedTeamIdsForFairnessChecks();
+    if (teamIds.length < 2) {
+      return {
+        ok: true,
+        reason: 'Select at least two teams to evaluate rule compatibility.'
+      };
+    }
+
+    let baselineFixtures = [];
+    if (Array.isArray(lastFixtures) && lastFixtures.length) {
+      baselineFixtures = lastFixtures.map((entry) => ({ ...entry }));
+    } else {
+      const profile = selectedSportProfile();
+      if (!profile) {
+        return {
+          ok: true,
+          reason: 'Choose a sport to evaluate fairness rule compatibility.'
+        };
+      }
+      const setup = profile.readSetup();
+      const formatLabel = String(setup?.formatLabel || '').trim();
+      baselineFixtures = buildSingleRoundRobin(teamIds).map((fixture) => ({
+        ...fixture,
+        sportKey: profile.key,
+        sportLabel: profile.label,
+        formatLabel
+      }));
+    }
+
+    if (!baselineFixtures.length) {
+      return {
+        ok: true,
+        reason: 'Generate fixtures first to validate these fairness constraints.'
+      };
+    }
+
+    const lockedIndexes = getPinnedFixtureIndexes(baselineFixtures);
+    const result = enforceSelectedFairnessRules({
+      fixtures: baselineFixtures,
+      teamIds,
+      selectedRuleIds: normalizedRuleIds,
+      lockedIndexes
+    });
+
+    return {
+      ok: result.ok === true,
+      reason: normalizeText(result?.message || '', 220)
+    };
+  };
+
+  const selectedFairnessRuleIdsFromModal = () =>
+    fairnessRuleCheckboxes
+      .filter((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+
+  const refreshFairnessRuleCompatibilityUi = () => {
+    if (!fairnessRuleCheckboxes.length) return;
+
+    const modalSelectedRuleIds = selectedFairnessRuleIdsFromModal();
+    const selectedSet = new Set(modalSelectedRuleIds);
+    const selectedCompatibility = evaluateFairnessRuleCompatibility(modalSelectedRuleIds);
+
+    fairnessRuleCheckboxes.forEach((checkbox) => {
+      if (!(checkbox instanceof HTMLInputElement)) return;
+      const ruleId = String(checkbox.value || '').trim();
+      const optionNode = checkbox.closest('.fixture-fairness-option');
+      if (!(optionNode instanceof HTMLElement)) return;
+
+      const clearIncompatibility = () => {
+        checkbox.disabled = false;
+        optionNode.classList.remove('is-disabled');
+        optionNode.removeAttribute('title');
+      };
+
+      if (!ruleId || selectedSet.has(ruleId)) {
+        clearIncompatibility();
+        return;
+      }
+
+      const candidateRuleIds = [...selectedSet, ruleId];
+      const compatibility = evaluateFairnessRuleCompatibility(candidateRuleIds);
+      if (compatibility.ok) {
+        clearIncompatibility();
+        return;
+      }
+
+      const reason = compatibility.reason || 'This rule conflicts with current selected rules and pinned/manual constraints.';
+      checkbox.disabled = true;
+      optionNode.classList.add('is-disabled');
+      optionNode.setAttribute('title', reason);
+    });
+
+    if (!(fairnessModalSubtitleNode instanceof HTMLElement)) return;
+    if (!modalSelectedRuleIds.length) {
+      fairnessModalSubtitleNode.textContent =
+        'No rules selected. Fixtures can be generated without fairness checks.';
+      return;
+    }
+
+    fairnessModalSubtitleNode.textContent = selectedCompatibility.ok
+      ? `Selected ${modalSelectedRuleIds.length} rule${modalSelectedRuleIds.length === 1 ? '' : 's'}. Incompatible options are disabled automatically.`
+      : `Current selected rules conflict with existing constraints: ${selectedCompatibility.reason || 'Unable to satisfy all selected fairness rules.'}`;
+  };
+
   const refreshFairnessSummary = () => {
     if (!(fairnessSummaryNode instanceof HTMLElement)) return;
     const labels = selectedFairnessRuleIds()
@@ -6575,6 +6699,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const ruleId = String(checkbox.value || '').trim();
       checkbox.checked = ruleId ? selected.has(ruleId) : false;
     });
+    refreshFairnessRuleCompatibilityUi();
   };
 
   const renderFairnessDropdownOptions = () => {
@@ -8381,6 +8506,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     syncFairnessCheckboxesFromState();
+    refreshFairnessRuleCompatibilityUi();
     modalNode.classList.remove('is-hidden');
     modalNode.style.display = 'grid';
     modalNode.style.visibility = 'visible';
@@ -8413,6 +8539,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!(button instanceof HTMLElement)) return;
     button.addEventListener('click', () => {
       closeFairnessModal();
+    });
+  });
+
+  fairnessRuleCheckboxes.forEach((checkbox) => {
+    if (!(checkbox instanceof HTMLInputElement)) return;
+    checkbox.addEventListener('change', () => {
+      refreshFairnessRuleCompatibilityUi();
     });
   });
 
