@@ -122,11 +122,12 @@ const renderCard = (item, clickable = false, context = {}) => {
 
   const hasImage = Boolean(primaryImageUrl);
   const cardClass = hasImage ? 'card card-has-media' : 'card';
+  const bodyText = context.concise ? toConcisePublicText(item.body, 90) : item.body;
   const content = `
     <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
     <div class="card-content">
       <h3>${item.title}</h3>
-      <p>${item.body}</p>
+      <p>${bodyText}</p>
     </div>
   `;
   if (clickable) {
@@ -143,6 +144,20 @@ const isAdminModeEnabled = () => {
 const isStaffModeEnabled = () => {
   if (typeof window === 'undefined') return false;
   return new URLSearchParams(window.location.search).get('staff') === '1';
+};
+
+const isPublicAudienceEnabled = () => !isAdminModeEnabled() && !isStaffModeEnabled();
+
+const toConcisePublicText = (value, maxChars = 110) => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  const sentenceMatch = text.match(/^(.{1,200}?[.!?])(?:\s|$)/);
+  const sentence = sentenceMatch ? sentenceMatch[1].trim() : text;
+  if (sentence.length <= maxChars) return sentence;
+
+  const clipped = sentence.slice(0, maxChars).trim().replace(/[\s,;:.!?-]+$/g, '');
+  return `${clipped}...`;
 };
 
 const withAudienceQuery = (href) => {
@@ -825,6 +840,7 @@ export const renderHero = (hero, pageKey, options = {}) => {
   }
 
   const notice = includeNotice ? renderHeroNoticeAside(hero.notice, pageKey) : '';
+  const leadText = isPublicAudienceEnabled() ? toConcisePublicText(hero.lead, 120) : hero.lead;
 
   return `
     <section class="hero">
@@ -832,7 +848,7 @@ export const renderHero = (hero, pageKey, options = {}) => {
         <div>
           <p class="eyebrow">${hero.eyebrow || ''}</p>
           <h1>${hero.title}</h1>
-          <p class="lead">${hero.lead}</p>
+          <p class="lead">${leadText}</p>
         </div>
         ${notice}
       </div>
@@ -12745,6 +12761,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   }
 
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const publicConcise = isPublicAudienceEnabled();
   const effectiveSection = resolveAudienceSectionCopy(
     resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context),
     context
@@ -12785,7 +12802,8 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
               .map((item, index) =>
                 renderCard(item, effectiveSection.clickable, {
                   sectionKey: fallbackSectionKey,
-                  sortOrder: index
+                  sortOrder: index,
+                  concise: publicConcise
                 })
               )
               .join('')}
@@ -12804,13 +12822,17 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
         <div class="container section-grid">
           <div>
             <h2>${effectiveSection.title}</h2>
-            <p>${effectiveSection.body}</p>
-            ${effectiveSection.list ? `<ul class="list">${effectiveSection.list.map((entry) => `<li>${entry}</li>`).join('')}</ul>` : ''}
+            <p>${publicConcise ? toConcisePublicText(effectiveSection.body, 120) : effectiveSection.body}</p>
+            ${effectiveSection.list
+              ? `<ul class="list">${effectiveSection.list
+                  .map((entry) => `<li>${publicConcise ? toConcisePublicText(entry, 88) : entry}</li>`)
+                  .join('')}</ul>`
+              : ''}
           </div>
           <aside class="panel">
             <img class="split-panel-image ${hasPanelImage ? '' : 'is-hidden'}" src="${hasPanelImage ? panelImageUrl : ''}" alt="${effectiveSection.panel.title}" loading="lazy" />
             <h3>${effectiveSection.panel.title}</h3>
-            <p>${effectiveSection.panel.body}</p>
+            <p>${publicConcise ? toConcisePublicText(effectiveSection.panel.body, 110) : effectiveSection.panel.body}</p>
             ${effectiveSection.panel.link ? `<a href="${effectiveSection.panel.link.href}">${effectiveSection.panel.link.label}</a>` : ''}
           </aside>
         </div>
@@ -12828,7 +12850,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
           <div class="contact-grid">
             ${effectiveSection.items
               .map(
-                (item, index) => `<article class="panel" data-contact-index="${index}"><h3>${item.title}</h3><p>${item.body}</p></article>`
+                (item, index) => `<article class="panel" data-contact-index="${index}"><h3>${item.title}</h3><p>${publicConcise ? toConcisePublicText(item.body, 90) : item.body}</p></article>`
               )
               .join('')}
           </div>
@@ -12853,7 +12875,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
                       ${item.tag ? `<span class="notice-tag">${item.tag}</span>` : ''}
                     </div>
                     <h3 class="notice-title">${item.title}</h3>
-                    <p class="notice-body">${item.body}</p>
+                    <p class="notice-body">${publicConcise ? toConcisePublicText(item.body, 100) : item.body}</p>
                   </article>
                 `
               )
@@ -12876,7 +12898,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
                 `
                   <article class="panel download-item" data-editable-download="true" data-download-id="${item.id || ''}" data-sort-order="${index}">
                     <h3>${item.title}</h3>
-                    <p>${item.body}</p>
+                    <p>${publicConcise ? toConcisePublicText(item.body, 95) : item.body}</p>
                     <a class="btn btn-secondary download-link" href="${item.href}">${item.linkLabel || 'Download'}</a>
                   </article>
                 `

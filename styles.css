@@ -57,7 +57,7 @@ html,
 body {
   margin: 0;
   padding: 0;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color: var(--text);
   background: var(--bg);
   line-height: 1.5;
@@ -5248,8 +5248,27 @@ body.match-log-workspace-open {
     display: inline-flex;
     align-items: center;
     padding: 10px 12px;
-    border: 1px solid var(--border);
-    background: var(--surface-alt);
+    border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+    background: color-mix(in srgb, var(--surface-alt) 85%, #dce9f8 15%);
+    color: var(--primary-strong);
+  }
+
+  body[data-audience='public'] .primary-nav a[aria-current='page'] {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+  }
+
+  body[data-audience='public'] .site-header.has-header-bg .primary-nav a {
+    background: rgba(8, 28, 48, 0.45);
+    color: #f0f6ff;
+    border-color: rgba(230, 240, 255, 0.24);
+  }
+
+  body[data-audience='public'] .site-header.has-header-bg .primary-nav a[aria-current='page'] {
+    background: #f0f6ff;
+    color: #0b3f72;
+    border-color: #f0f6ff;
   }
 
   body[data-audience='public'] .cards,
