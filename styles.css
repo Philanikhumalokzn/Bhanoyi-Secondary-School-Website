@@ -569,6 +569,13 @@ h1 {
   font-weight: 700;
 }
 
+.standings-export-btn {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
 .standings-table-wrap {
   overflow-x: auto;
 }
