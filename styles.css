@@ -539,6 +539,36 @@ h1 {
   overflow: hidden;
 }
 
+.standings-sport-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.standings-sport-tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: none;
+}
+
+.standings-sport-tab.is-active {
+  color: var(--primary-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.standings-sport-separator {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .standings-table-wrap {
   overflow-x: auto;
 }

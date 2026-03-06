@@ -461,8 +461,17 @@ const getSortedStandingsRows = (rows) =>
     })
     .map((entry, index) => ({ ...entry, position: index + 1 }));
 
+const normalizeStandingsSportCode = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('football') || raw.includes('soccer')) return 'football';
+  if (raw.includes('netball')) return 'netball';
+  return '';
+};
+
 const computeStandingsViewModel = (section, context = {}) => {
   const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const selectedSport = normalizeStandingsSportCode(context.selectedSport || section.defaultSport || 'football') || 'football';
   const houseOptions = normalizeStandingsTeamOptions(section, context);
   const teamStats = new Map(
     houseOptions.map((team) => [
@@ -490,6 +499,8 @@ const computeStandingsViewModel = (section, context = {}) => {
 
   Object.entries(fixtureCatalog).forEach(([fixtureId, fixtureData]) => {
     const fixture = fixtureData && typeof fixtureData === 'object' ? fixtureData : {};
+    const fixtureSport = normalizeStandingsSportCode(fixture.sport || '');
+    if (selectedSport && fixtureSport && fixtureSport !== selectedSport) return;
     const stamp = splitFixtureStampGlobal(fixtureDateMap[fixtureId]);
     if (!stamp.date) return;
 
@@ -608,6 +619,7 @@ const computeStandingsViewModel = (section, context = {}) => {
 
   return {
     fixtureSectionKey,
+    selectedSport,
     rows: sortedRows,
     lastUpdated: computedLastUpdated || sectionLastUpdated || 'N/A',
     sortNote: (section.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
@@ -639,6 +651,7 @@ const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
   const viewModel = computeStandingsViewModel(section, context);
   const standingsConfig = {
     fixtureSectionKey: viewModel.fixtureSectionKey,
+    selectedSport: viewModel.selectedSport,
     houseOptions: viewModel.houseOptions,
     items: Array.isArray(section.items) ? section.items : [],
     lastUpdated: String(section.lastUpdated || '').trim(),
@@ -651,6 +664,11 @@ const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
         <h2>${section.title}</h2>
         ${section.subtitle ? `<p class="standings-subtitle">${section.subtitle}</p>` : ''}
         <article class="panel standings-panel">
+          <div class="standings-sport-switch" role="tablist" aria-label="Select sport">
+            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'football' ? 'is-active' : ''}" data-standings-sport-tab="football" aria-selected="${viewModel.selectedSport === 'football' ? 'true' : 'false'}">Football</button>
+            <span class="standings-sport-separator" aria-hidden="true">/</span>
+            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'netball' ? 'is-active' : ''}" data-standings-sport-tab="netball" aria-selected="${viewModel.selectedSport === 'netball' ? 'true' : 'false'}">Netball</button>
+          </div>
           <div class="standings-table-wrap" role="region" aria-label="League standings" tabindex="0">
             <table class="standings-table">
               <thead>
@@ -698,16 +716,26 @@ const hydrateLeagueStandings = (standingsNode) => {
   const bodyNode = standingsNode.querySelector('[data-standings-body]');
   const lastUpdatedNode = standingsNode.querySelector('[data-standings-last-updated]');
   const sortNoteNode = standingsNode.querySelector('[data-standings-sort-note]');
+  const sportTabs = Array.from(standingsNode.querySelectorAll('[data-standings-sport-tab]'));
   if (!(bodyNode instanceof HTMLElement)) return;
 
   const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
   const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
   const matchLogStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+  let selectedSport = normalizeStandingsSportCode(section.selectedSport || 'football') || 'football';
 
   const refresh = () => {
-    const viewModel = computeStandingsViewModel(section, {});
+    const viewModel = computeStandingsViewModel(section, { selectedSport });
     bodyNode.innerHTML = renderStandingsRowsMarkup(viewModel.rows);
+    selectedSport = viewModel.selectedSport;
+    sportTabs.forEach((tab) => {
+      if (!(tab instanceof HTMLButtonElement)) return;
+      const tabSport = normalizeStandingsSportCode(tab.dataset.standingsSportTab || '');
+      const active = tabSport === selectedSport;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
     if (lastUpdatedNode instanceof HTMLElement) {
       lastUpdatedNode.textContent = `Last Updated: ${viewModel.lastUpdated}`;
     }
@@ -715,6 +743,16 @@ const hydrateLeagueStandings = (standingsNode) => {
       sortNoteNode.textContent = viewModel.sortNote;
     }
   };
+
+  sportTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      if (!(tab instanceof HTMLButtonElement)) return;
+      const nextSport = normalizeStandingsSportCode(tab.dataset.standingsSportTab || '');
+      if (!nextSport || nextSport === selectedSport) return;
+      selectedSport = nextSport;
+      refresh();
+    });
+  });
 
   window.addEventListener('storage', (event) => {
     if (!event.key) return;
