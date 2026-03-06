@@ -5184,6 +5184,58 @@ body.match-log-workspace-open {
 }
 
 @media (max-width: 859px) {
+  body[data-audience='public'] .container {
+    width: min(1100px, 94%);
+  }
+
+  body[data-audience='public'] .hero {
+    padding: 22px 0;
+  }
+
+  body[data-audience='public'] .section {
+    padding: 20px 0;
+  }
+
+  body[data-audience='public'] .lead {
+    font-size: 0.98rem;
+    line-height: 1.58;
+  }
+
+  body[data-audience='public'] .panel,
+  body[data-audience='public'] .card,
+  body[data-audience='public'] .alert-box {
+    padding: 14px;
+  }
+
+  body[data-audience='public'] .btn {
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  body[data-audience='public'] .primary-nav ul {
+    gap: 8px;
+    padding: 8px 4%;
+  }
+
+  body[data-audience='public'] .primary-nav a {
+    min-height: 42px;
+    display: inline-flex;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+  }
+
+  body[data-audience='public'] .cards,
+  body[data-audience='public'] .three-col,
+  body[data-audience='public'] .contact-grid,
+  body[data-audience='public'] .notice-grid,
+  body[data-audience='public'] .download-grid {
+    gap: 12px;
+  }
+
   .header-inner {
     display: flex;
     flex-direction: column;
@@ -5224,6 +5276,78 @@ body.match-log-workspace-open {
     padding: 6px 3.5%;
     overflow-x: auto;
     max-width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  body[data-audience='public'] .container {
+    width: min(1100px, 95%);
+  }
+
+  body[data-audience='public'] .brand {
+    font-size: clamp(1.12rem, 5vw, 1.45rem);
+  }
+
+  body[data-audience='public'] .brand-logo {
+    width: 56px;
+    height: 56px;
+  }
+
+  body[data-audience='public'] .primary-nav ul {
+    padding: 8px 3%;
+    scroll-snap-type: x proximity;
+  }
+
+  body[data-audience='public'] .primary-nav li {
+    scroll-snap-align: start;
+  }
+
+  body[data-audience='public'] .primary-nav a {
+    font-size: 0.88rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  body[data-audience='public'] .hero {
+    padding: 18px 0;
+  }
+
+  body[data-audience='public'] h1 {
+    margin-bottom: 8px;
+  }
+
+  body[data-audience='public'] .lead {
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  body[data-audience='public'] .panel,
+  body[data-audience='public'] .card,
+  body[data-audience='public'] .alert-box {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  body[data-audience='public'] .card-image {
+    height: 148px;
+  }
+
+  body[data-audience='public'] .card.card-has-media .card-content {
+    margin: -28px 0 0;
+    padding: 12px;
+  }
+
+  body[data-audience='public'] .section-assets-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  body[data-audience='public'] .section-asset-thumb {
+    height: 82px;
+  }
+
+  body[data-audience='public'] .footer-grid {
+    gap: 12px;
   }
 }
 

@@ -210,6 +210,11 @@ const initCollapsiblePageSections = (pageKey) => {
 };
 
 export const renderSite = (siteContent, page) => {
+  const params = new URLSearchParams(window.location.search);
+  const adminMode = params.get('admin') === '1';
+  const staffMode = !adminMode && params.get('staff') === '1';
+  document.body.dataset.audience = adminMode ? 'admin' : staffMode ? 'staff' : 'public';
+
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
   upsertFavicon(siteContent.school.logoPath);
