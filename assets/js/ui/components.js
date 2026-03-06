@@ -3638,13 +3638,13 @@ const renderPublicFixtureBoardSection = (section, sectionIndex) => {
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="fixture-board" data-section-key="${fallbackSectionKey}">
       <div class="container">
-        <h2>${section.title || 'Fixtures'}</h2>
+        <h2>Upcoming Matches</h2>
         ${section.body ? `<p class="lead">${section.body}</p>` : ''}
         <article class="panel public-fixture-board" data-public-fixture-board="true" data-public-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
           <header class="public-fixture-head">
             <div>
               <p class="public-fixture-meta"><strong>${escapeHtmlText(config.sport || 'Sport')}</strong>${config.competition ? ` · ${escapeHtmlText(config.competition)}` : ''}</p>
-              <p class="public-fixture-status" data-public-fixture-status aria-live="polite">Choose a day to view fixtures.</p>
+              <p class="public-fixture-status" data-public-fixture-status aria-live="polite">Showing the next scheduled fixtures.</p>
             </div>
             <label>
               Match day
@@ -13707,12 +13707,17 @@ const hydratePublicFixtureBoard = (boardNode) => {
 
   const render = () => {
     const allFixtures = readFixtures();
+    const now = Date.now();
     const dates = Array.from(new Set(allFixtures.map((entry) => entry.date))).sort((left, right) => {
       return parseDateTimeStamp(`${left}T00:00`) - parseDateTimeStamp(`${right}T00:00`);
     });
 
+    const nextUpcomingFixture = allFixtures.find((entry) => parseDateTimeStamp(entry.stamp) >= now) || null;
+    const nextUpcomingDate = nextUpcomingFixture?.date || '';
+    const fallbackDate = nextUpcomingDate || dates[dates.length - 1] || '';
+
     if (!selectedDate || !dates.includes(selectedDate)) {
-      selectedDate = dates[0] || '';
+      selectedDate = fallbackDate;
     }
 
     dateSelect.innerHTML = [

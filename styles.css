@@ -549,6 +549,22 @@ h1 {
   min-width: 720px;
 }
 
+body[data-audience='public'] .standings-table {
+  width: max-content;
+  min-width: 0;
+  table-layout: auto;
+}
+
+body[data-audience='public'] .standings-table th,
+body[data-audience='public'] .standings-table td {
+  padding: 8px 9px;
+  font-size: 0.9rem;
+}
+
+body[data-audience='public'] .standings-table thead th {
+  font-size: 0.76rem;
+}
+
 .standings-table th,
 .standings-table td {
   padding: 10px 12px;
@@ -590,6 +606,14 @@ h1 {
   gap: 8px 14px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+@media (max-width: 640px) {
+  body[data-audience='public'] .standings-table th,
+  body[data-audience='public'] .standings-table td {
+    padding: 7px 8px;
+    font-size: 0.84rem;
+  }
 }
 
 .email-form-panel {
