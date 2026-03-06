@@ -235,6 +235,7 @@
       "key": "sports",
       "metaTitle": "Sports | Bhanoyi Secondary School",
       "metaDescription": "Sports programmes, teams, fixtures, and learner development through athletics at Bhanoyi Secondary School.",
+      "sectionOrder": [2, 1, 3, 4, 0],
       "hero": {
         "eyebrow": "Athletics and teamwork",
         "title": "Sports",

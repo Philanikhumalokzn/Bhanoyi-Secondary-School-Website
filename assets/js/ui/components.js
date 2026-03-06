@@ -731,8 +731,14 @@ const hydrateLeagueStandings = (standingsNode) => {
 export const renderHeader = (siteContent, pageKey) => {
   const adminMode = isAdminModeEnabled();
   const staffMode = !adminMode && isStaffModeEnabled();
+  const publicNavKeys = new Set(['home', 'about', 'academics', 'sports', 'admissions', 'policies', 'contact']);
 
   const links = siteContent.navigation
+    .filter((item) => {
+      if (adminMode || staffMode) return true;
+      const key = String(item?.key || '').trim().toLowerCase();
+      return publicNavKeys.has(key);
+    })
     .flatMap((item) => {
       if (!item) return [];
 
@@ -949,7 +955,7 @@ const resolveAudienceSectionCopy = (section, context = {}) => {
 
 const isAdminOnlySectionForPublic = (section) => {
   const type = String(section?.type || '').trim().toLowerCase();
-  return type === 'match-log' || type === 'fixture-creator';
+  return type === 'match-log';
 };
 
 const getOrderedSectionEntries = (sections, context = {}) => {
@@ -3613,6 +3619,54 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               </div>
             </div>
           </section>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const renderPublicFixtureBoardSection = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const fixtureSectionKey = String(section.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const config = {
+    sectionKey: fallbackSectionKey,
+    fixtureSectionKey,
+    sport: String(section.sport || '').trim(),
+    competition: String(section.competition || '').trim()
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="fixture-board" data-section-key="${fallbackSectionKey}">
+      <div class="container">
+        <h2>${section.title || 'Fixtures'}</h2>
+        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel public-fixture-board" data-public-fixture-board="true" data-public-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <header class="public-fixture-head">
+            <div>
+              <p class="public-fixture-meta"><strong>${escapeHtmlText(config.sport || 'Sport')}</strong>${config.competition ? ` · ${escapeHtmlText(config.competition)}` : ''}</p>
+              <p class="public-fixture-status" data-public-fixture-status aria-live="polite">Choose a day to view fixtures.</p>
+            </div>
+            <label>
+              Match day
+              <select data-public-fixture-date>
+                <option value="">Select fixture date</option>
+              </select>
+            </label>
+          </header>
+          <div class="public-fixture-leg-grid">
+            <section class="public-fixture-leg-card">
+              <h3>First Leg</h3>
+              <ul class="public-fixture-list" data-public-fixture-first-leg>
+                <li class="public-fixture-empty">No first-leg fixtures for this day.</li>
+              </ul>
+            </section>
+            <section class="public-fixture-leg-card">
+              <h3>Second Leg (Return)</h3>
+              <ul class="public-fixture-list" data-public-fixture-return-leg>
+                <li class="public-fixture-empty">No return fixtures for this day.</li>
+              </ul>
+            </section>
+          </div>
         </article>
       </div>
     </section>
@@ -12701,6 +12755,9 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   }
 
   if (effectiveSection.type === 'fixture-creator') {
+    if (!isAdminModeEnabled()) {
+      return renderPublicFixtureBoardSection(effectiveSection, sectionIndex);
+    }
     return renderFixtureCreatorSection(effectiveSection, sectionIndex, context);
   }
 
@@ -13534,6 +13591,192 @@ export const initLatestNewsReaders = () => {
 export const initMatchEventLogs = () => {
   const logs = Array.from(document.querySelectorAll('[data-match-log="true"]'));
   logs.forEach((log) => hydrateMatchLog(log));
+};
+
+const hydratePublicFixtureBoard = (boardNode) => {
+  const rawConfig = String(boardNode?.dataset?.publicFixtureConfig || '').trim();
+  if (!rawConfig) return;
+
+  let config;
+  try {
+    config = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
+  const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
+
+  const statusNode = boardNode.querySelector('[data-public-fixture-status]');
+  const dateSelect = boardNode.querySelector('[data-public-fixture-date]');
+  const firstLegList = boardNode.querySelector('[data-public-fixture-first-leg]');
+  const returnLegList = boardNode.querySelector('[data-public-fixture-return-leg]');
+
+  if (!(dateSelect instanceof HTMLSelectElement) || !(firstLegList instanceof HTMLElement) || !(returnLegList instanceof HTMLElement)) {
+    return;
+  }
+
+  let selectedDate = '';
+  let fixtureCatalog = {};
+  let fixtureDateMap = {};
+
+  const parseDateTimeStamp = (stamp) => {
+    const normalized = normalizeFixtureStampGlobal(stamp);
+    if (!normalized) return Number.MAX_SAFE_INTEGER;
+    const parsed = splitFixtureStampGlobal(normalized);
+    const candidate = parsed.time ? `${parsed.date}T${parsed.time}` : `${parsed.date}T23:59`;
+    const epoch = new Date(candidate).getTime();
+    return Number.isFinite(epoch) ? epoch : Number.MAX_SAFE_INTEGER;
+  };
+
+  const formatDateLabel = (dateValue) => {
+    const normalized = normalizeFixtureDateOnlyGlobal(dateValue);
+    if (!normalized) return 'Unknown date';
+    const parsed = new Date(`${normalized}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return normalized;
+    return parsed.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+  };
+
+  const formatTimeLabel = (value) => {
+    const normalized = normalizeFixtureTimeOnlyGlobal(value);
+    return normalized || 'TBD';
+  };
+
+  const resolveLegBucket = (fixture) => {
+    const raw = String(fixture?.leg || fixture?.legLabel || '').trim().toLowerCase();
+    if (/(return|second|leg\s*2|\b2\b)/i.test(raw)) return 'return';
+    if (/(first|leg\s*1|\b1\b)/i.test(raw)) return 'first';
+    return 'first';
+  };
+
+  const readFixtures = () => {
+    const rows = Object.entries(fixtureCatalog)
+      .map(([fixtureId, fixtureData]) => {
+        const fixture = fixtureData && typeof fixtureData === 'object' ? fixtureData : {};
+        const stamp = splitFixtureStampGlobal(fixtureDateMap[fixtureId]);
+        if (!stamp.date) return null;
+
+        const homeName = String(fixture.homeName || fixture.homeId || 'Home').trim() || 'Home';
+        const awayName = String(fixture.awayName || fixture.awayId || 'Away').trim() || 'Away';
+        if (!homeName || !awayName) return null;
+
+        return {
+          fixtureId,
+          date: stamp.date,
+          time: stamp.time,
+          legBucket: resolveLegBucket(fixture),
+          homeName,
+          awayName,
+          stamp: normalizeFixtureStampGlobal(fixtureDateMap[fixtureId])
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftStamp = parseDateTimeStamp(left.stamp);
+        const rightStamp = parseDateTimeStamp(right.stamp);
+        if (leftStamp !== rightStamp) return leftStamp - rightStamp;
+        return left.fixtureId.localeCompare(right.fixtureId);
+      });
+
+    return rows;
+  };
+
+  const renderFixtures = (targetNode, fixtures, emptyText) => {
+    if (!fixtures.length) {
+      targetNode.innerHTML = `<li class="public-fixture-empty">${escapeHtmlText(emptyText)}</li>`;
+      return;
+    }
+
+    targetNode.innerHTML = fixtures
+      .map(
+        (fixture) => `
+          <li class="public-fixture-item">
+            <p class="public-fixture-time">${escapeHtmlText(formatTimeLabel(fixture.time))}</p>
+            <p class="public-fixture-teams">${escapeHtmlText(fixture.homeName)} <span aria-hidden="true">vs</span> ${escapeHtmlText(fixture.awayName)}</p>
+          </li>
+        `
+      )
+      .join('');
+  };
+
+  const render = () => {
+    const allFixtures = readFixtures();
+    const dates = Array.from(new Set(allFixtures.map((entry) => entry.date))).sort((left, right) => {
+      return parseDateTimeStamp(`${left}T00:00`) - parseDateTimeStamp(`${right}T00:00`);
+    });
+
+    if (!selectedDate || !dates.includes(selectedDate)) {
+      selectedDate = dates[0] || '';
+    }
+
+    dateSelect.innerHTML = [
+      '<option value="">Select fixture date</option>',
+      ...dates.map((dateValue) => {
+        const label = formatDateLabel(dateValue);
+        return `<option value="${escapeHtmlAttribute(dateValue)}"${dateValue === selectedDate ? ' selected' : ''}>${escapeHtmlText(label)}</option>`;
+      })
+    ].join('');
+
+    const fixturesForDay = allFixtures.filter((entry) => entry.date === selectedDate);
+    const firstLegFixtures = fixturesForDay.filter((entry) => entry.legBucket === 'first');
+    const returnLegFixtures = fixturesForDay.filter((entry) => entry.legBucket === 'return');
+
+    renderFixtures(firstLegList, firstLegFixtures, 'No first-leg fixtures for this day.');
+    renderFixtures(returnLegList, returnLegFixtures, 'No return fixtures for this day.');
+
+    if (statusNode) {
+      if (!allFixtures.length) {
+        statusNode.textContent = 'No fixtures published yet.';
+      } else if (!selectedDate) {
+        statusNode.textContent = 'Choose a day to view fixtures.';
+      } else {
+        statusNode.textContent = `${fixturesForDay.length} fixture${fixturesForDay.length === 1 ? '' : 's'} on ${formatDateLabel(selectedDate)}.`;
+      }
+    }
+  };
+
+  const refresh = () => {
+    fixtureCatalog = readLocalStorageObject(fixtureCatalogStorageKey);
+    fixtureDateMap = readLocalStorageObject(fixtureDateStorageKey);
+    render();
+  };
+
+  dateSelect.addEventListener('change', () => {
+    selectedDate = String(dateSelect.value || '').trim();
+    render();
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (!event.key) return;
+    if (event.key !== fixtureCatalogStorageKey && event.key !== fixtureDateStorageKey) return;
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:fixtures-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.sectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  void Promise.all([
+    syncLocalStoreFromRemote(fixtureCatalogStorageKey),
+    syncLocalStoreFromRemote(fixtureDateStorageKey)
+  ])
+    .catch(() => null)
+    .finally(() => {
+      refresh();
+    });
+};
+
+export const initPublicFixtureBoards = () => {
+  const boards = Array.from(document.querySelectorAll('[data-public-fixture-board="true"]'));
+  boards.forEach((board) => hydratePublicFixtureBoard(board));
 };
 
 export const initFixtureCreators = () => {

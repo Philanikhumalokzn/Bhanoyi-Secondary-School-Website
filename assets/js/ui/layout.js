@@ -1,5 +1,6 @@
 import {
   initFixtureCreators,
+  initPublicFixtureBoards,
   initEnrollmentManagers,
   initLeagueStandings,
   initMatchEventLogs,
@@ -285,6 +286,7 @@ export const renderSite = (siteContent, page) => {
   initLatestNewsReaders();
   initMatchEventLogs();
   initFixtureCreators();
+  initPublicFixtureBoards();
   initLeagueStandings();
   initSchoolCalendars();
   initEnrollmentManagers();
