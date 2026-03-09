@@ -14,7 +14,7 @@ const bootstrap = async () => {
 	}
 	const pageConfig = getPageConfig(siteContent, pageKey);
 
-	renderSite(siteContent, pageConfig);
+	await renderSite(siteContent, pageConfig);
 	initPageEmailForms();
 	initGeminiApiTester();
 	await initInlinePublicAdmin();

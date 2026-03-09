@@ -1,18 +1,12 @@
-import {
-  initFixtureCreators,
-  initPublicFixtureBoards,
-  initEnrollmentManagers,
-  initLeagueStandings,
-  initMatchEventLogs,
-  initSchoolCalendars,
-  initLatestNewsReaders,
-  initLatestNewsRotators,
-  renderFooter,
-  renderHeader,
-  renderSectionByIndex,
-  renderPageEmailForms,
-  renderSectionsWithContext
-} from './components.js';
+let componentsModulePromise;
+
+const loadComponentsModule = () => {
+  if (!componentsModulePromise) {
+    componentsModulePromise = import('./components.js');
+  }
+
+  return componentsModulePromise;
+};
 
 const upsertDescriptionMeta = (content) => {
   let element = document.querySelector('meta[name="description"]');
@@ -209,7 +203,23 @@ const initCollapsiblePageSections = (pageKey) => {
   }
 };
 
-export const renderSite = (siteContent, page) => {
+export const renderSite = async (siteContent, page) => {
+  const {
+    initFixtureCreators,
+    initPublicFixtureBoards,
+    initEnrollmentManagers,
+    initLeagueStandings,
+    initMatchEventLogs,
+    initSchoolCalendars,
+    initLatestNewsReaders,
+    initLatestNewsRotators,
+    renderFooter,
+    renderHeader,
+    renderSectionByIndex,
+    renderPageEmailForms,
+    renderSectionsWithContext
+  } = await loadComponentsModule();
+
   const params = new URLSearchParams(window.location.search);
   const adminMode = params.get('admin') === '1';
   const staffMode = !adminMode && params.get('staff') === '1';

@@ -3,7 +3,23 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   build: {
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@fullcalendar/')) {
+            return 'fullcalendar';
+          }
+
+          if (id.includes('node_modules/exceljs/')) {
+            return 'exceljs';
+          }
+
+          if (id.includes('node_modules/xlsx/')) {
+            return 'xlsx';
+          }
+        }
+      },
       input: {
         home: resolve(__dirname, 'index.html'),
         about: resolve(__dirname, 'about.html'),

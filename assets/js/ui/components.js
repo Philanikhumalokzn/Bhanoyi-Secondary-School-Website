@@ -8489,6 +8489,19 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const saveFixtureCatalog = (fixtures) => {
+    const normalizeStoredSportKey = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      if (raw === 'soccer' || raw === 'football') return 'soccer';
+      if (raw === 'netball') return 'netball';
+      return '';
+    };
+
+    const resolveCatalogEntrySportKey = (fixtureId, entry) => {
+      const parts = String(fixtureId || '').split(':');
+      return normalizeStoredSportKey(parts[1]) || normalizeStoredSportKey(entry?.sportKey || entry?.sport || '');
+    };
+
+    const activeSportKey = normalizeStoredSportKey(fixtures[0]?.sportKey || selectedSportKey());
     const catalog = {};
     fixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
@@ -8504,6 +8517,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         homeName: teamNameById(fixture.homeId),
         awayName: teamNameById(fixture.awayId),
         title: `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`,
+        sportKey: fixture.sportKey,
         sport: sportProfile?.label || '',
         competition: String(config.competition || '').trim(),
         venue: String(config.venue || '').trim(),
@@ -8513,8 +8527,28 @@ const hydrateFixtureCreator = (fixtureNode) => {
     });
 
     try {
-      localStorage.setItem(fixtureCatalogStorageKey, JSON.stringify(catalog));
-      void persistLocalStore(fixtureCatalogStorageKey, catalog);
+      const rawCatalog = localStorage.getItem(fixtureCatalogStorageKey);
+      const parsedCatalog = rawCatalog ? JSON.parse(rawCatalog) : {};
+      const existingCatalog = parsedCatalog && typeof parsedCatalog === 'object' ? parsedCatalog : {};
+      const nextCatalog = {};
+
+      Object.entries(existingCatalog).forEach(([fixtureId, entry]) => {
+        if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) {
+          nextCatalog[fixtureId] = entry;
+          return;
+        }
+
+        if (activeSportKey && resolveCatalogEntrySportKey(fixtureId, entry) === activeSportKey) {
+          return;
+        }
+
+        nextCatalog[fixtureId] = entry;
+      });
+
+      Object.assign(nextCatalog, catalog);
+
+      localStorage.setItem(fixtureCatalogStorageKey, JSON.stringify(nextCatalog));
+      void persistLocalStore(fixtureCatalogStorageKey, nextCatalog);
 
       const rawDates = localStorage.getItem(fixtureDateStorageKey);
       const parsedDates = rawDates ? JSON.parse(rawDates) : {};
@@ -8524,6 +8558,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       Object.keys(fixtureDatesMap).forEach((fixtureId) => {
         if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return;
+        if (activeSportKey && resolveCatalogEntrySportKey(fixtureId, existingCatalog[fixtureId]) !== activeSportKey) {
+          return;
+        }
         if (!catalogIds.has(fixtureId)) {
           delete fixtureDatesMap[fixtureId];
           datesChanged = true;
@@ -10774,10 +10811,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
     approvedWithUnfairness = false;
     refreshCurrentUnfairnessReport(lastFixtures);
     persistActiveSportState();
+    saveFixtureCatalog(lastFixtures);
     renderFixtures(lastFixtures);
 
     if (statusNode instanceof HTMLElement) {
-      statusNode.textContent = `Template loaded (${lastFixtures.length} fixtures). Review/edit then finalize & sync when ready.`;
+      statusNode.textContent = `Template loaded and synced (${lastFixtures.length} fixtures). Calendar and standings now follow this ${targetSportLabel.toLowerCase()} fixture set until another ${targetSportLabel.toLowerCase()} save or template replaces it.`;
     }
   });
 
