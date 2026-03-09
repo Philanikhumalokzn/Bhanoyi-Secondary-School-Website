@@ -3638,6 +3638,10 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <input type="checkbox" data-fixture-auto-fill />
                     <span>Auto-fill dates (use rules)</span>
                   </label>
+                  <label class="fixture-autofill-toggle">
+                    <input type="checkbox" data-fixture-force-shared />
+                    <span>Force same Soccer/Netball fixtures</span>
+                  </label>
                   <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate live fixtures</button>
                   <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
                   <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
@@ -7195,6 +7199,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const teamPickInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-team]'));
   const autoFillToggle = fixtureNode.querySelector('[data-fixture-auto-fill]');
+  const forceSharedFixturesToggle = fixtureNode.querySelector('[data-fixture-force-shared]');
   const rulesPanel = fixtureNode.querySelector('[data-fixture-date-rules]');
   const rulesStatusNode = fixtureNode.querySelector('[data-fixture-rules-status]');
   const ruleStartDateInput = fixtureNode.querySelector('[data-fixture-rule-start-date]');
@@ -7325,6 +7330,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
   if (autoFillToggle instanceof HTMLInputElement) {
     autoFillToggle.disabled = !isAdminMode;
     autoFillToggle.checked = false;
+  }
+  if (forceSharedFixturesToggle instanceof HTMLInputElement) {
+    forceSharedFixturesToggle.checked = false;
   }
 
   const loadFixtureDates = () => {
@@ -7559,8 +7567,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     );
   };
 
-  const replaceActiveSportFixtureDates = (fixtures, nextSnapshot = {}, { persist = true } = {}) => {
-    const activeSportKey = normalizeFixtureStoredSportKey(fixtures?.[0]?.sportKey || selectedSportKey());
+  const replaceFixtureDatesForSport = (sportKey, fixtures, nextSnapshot = {}, { persist = true } = {}) => {
+    const activeSportKey = normalizeFixtureStoredSportKey(sportKey || fixtures?.[0]?.sportKey || selectedSportKey());
     const keptEntries = Object.entries(fixtureDates).filter(([fixtureId]) => {
       if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return true;
       const fixtureSportKey = normalizeFixtureStoredSportKey(String(fixtureId).split(':')[1] || '');
@@ -7575,6 +7583,29 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
 
     return scopedSnapshot;
+  };
+
+  const replaceActiveSportFixtureDates = (fixtures, nextSnapshot = {}, { persist = true } = {}) =>
+    replaceFixtureDatesForSport('', fixtures, nextSnapshot, { persist });
+
+  const mapFixtureDateSnapshotBySlot = (sourceFixtures, targetFixtures, sourceSnapshot = {}) => {
+    const sourceDateBySlot = {};
+    (Array.isArray(sourceFixtures) ? sourceFixtures : []).forEach((fixture) => {
+      const slotKey = fixtureSlotKey(fixture);
+      const fixtureId = getFixtureId(fixture);
+      const stamp = normalizeFixtureStamp(sourceSnapshot[fixtureId]);
+      if (!slotKey || !stamp) return;
+      sourceDateBySlot[slotKey] = stamp;
+    });
+
+    const targetSnapshot = {};
+    (Array.isArray(targetFixtures) ? targetFixtures : []).forEach((fixture) => {
+      const slotKey = fixtureSlotKey(fixture);
+      if (!slotKey || !sourceDateBySlot[slotKey]) return;
+      targetSnapshot[getFixtureId(fixture)] = sourceDateBySlot[slotKey];
+    });
+
+    return targetSnapshot;
   };
 
   const autoFillFixtureDatesSilently = (fixtures) => {
@@ -9415,32 +9446,57 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   };
 
-  const persistActiveSportState = () => {
-    const activeSport = selectedSportKey();
-    if (!activeSport) return;
+  const persistSportState = ({
+    sportKey,
+    fixtures,
+    selectedTeamIds: selectedIdsInput = [],
+    fairnessRuleIds = selectedFairnessRuleIds(),
+    pinnedSlotKeys = [],
+    formatLabel = '',
+    generatedAt = Date.now()
+  } = {}) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return;
 
-    const selectedIds = selectedTeamIds();
+    const normalizedFixtures = Array.isArray(fixtures) ? fixtures.map((entry) => ({ ...entry })) : [];
+    const selectedIds = Array.isArray(selectedIdsInput)
+      ? selectedIdsInput.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
     const fallbackIds = Array.from(
       new Set(
-        lastFixtures
+        normalizedFixtures
           .flatMap((entry) => [String(entry.homeId || '').trim(), String(entry.awayId || '').trim()])
           .filter(Boolean)
       )
     );
     const persistedTeamIds = selectedIds.length ? selectedIds : fallbackIds;
 
-    fixtureCreatorState.lastSport = activeSport;
-    fixtureCreatorState.sports[activeSport] = {
+    fixtureCreatorState.lastSport = key;
+    fixtureCreatorState.sports[key] = {
       selectedTeamIds: persistedTeamIds,
-      fairnessRuleIds: selectedFairnessRuleIds(),
-      fixtures: lastFixtures.map((entry) => ({ ...entry })),
-      fixtureDates: getFixtureDateSnapshot(lastFixtures),
-      pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
-      setup: readSportSetupValues(activeSport),
-      formatLabel: String(lastFormatLabel || '').trim(),
-      generatedAt: Date.now()
+      fairnessRuleIds: Array.isArray(fairnessRuleIds) ? fairnessRuleIds : [],
+      fixtures: normalizedFixtures,
+      fixtureDates: getFixtureDateSnapshot(normalizedFixtures),
+      pinnedSlotKeys: normalizePinnedSlotKeys(pinnedSlotKeys),
+      setup: readSportSetupValues(key),
+      formatLabel: String(formatLabel || '').trim(),
+      generatedAt: Number.isFinite(Number(generatedAt)) ? Number(generatedAt) : Date.now()
     };
     saveFixtureCreatorState();
+  };
+
+  const persistActiveSportState = () => {
+    const activeSport = selectedSportKey();
+    if (!activeSport) return;
+    persistSportState({
+      sportKey: activeSport,
+      fixtures: lastFixtures,
+      selectedTeamIds: selectedTeamIds(),
+      fairnessRuleIds: selectedFairnessRuleIds(),
+      pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+      formatLabel: lastFormatLabel,
+      generatedAt: Date.now()
+    });
   };
 
   const repairRoundRobinFixtureSet = ({ fixtures, teamIds, lockedIndexes = [], matchesPerOpponentPerLeg = 1 }) => {
@@ -9844,7 +9900,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     refreshFixtureApprovalUi();
   };
 
-  const generateFixtures = ({ autoFillDates = false } = {}) => {
+  const generateFixtures = ({ autoFillDates = false, forceSharedAcrossSports = false } = {}) => {
     refreshSportPanelState();
     const profile = selectedSportProfile();
     if (!profile) {
@@ -9862,6 +9918,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSportKey = profile.key;
     lastSportLabel = profile.label;
     lastFormatLabel = String(setup.formatLabel || '').trim();
+    const shouldForceShared = Boolean(forceSharedAcrossSports);
+    const mirroredSportKey = profile.key === 'soccer' ? 'netball' : 'soccer';
     const matchesPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1);
 
     const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teams);
@@ -9976,7 +10034,31 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
-    lastFixtures = successfulGeneration.fixtures;
+    const buildFixturesForSport = (sportKey, sourceFixtures) => {
+      const sportProfile = sportProfiles[sportKey] || null;
+      const sportSetup = sportProfile?.readSetup?.() || {};
+      const targetLabel = sportProfile?.label || (sportKey === 'netball' ? 'Netball' : 'Soccer');
+      const targetFormatLabel = String(sportSetup.formatLabel || '').trim();
+      return (Array.isArray(sourceFixtures) ? sourceFixtures : []).map((fixture) => ({
+        ...fixture,
+        sportKey,
+        sportLabel: targetLabel,
+        formatLabel: targetFormatLabel
+      }));
+    };
+
+    const generatedFixturesBySport = {
+      [profile.key]: buildFixturesForSport(profile.key, successfulGeneration.fixtures)
+    };
+
+    if (shouldForceShared) {
+      generatedFixturesBySport[mirroredSportKey] = buildFixturesForSport(
+        mirroredSportKey,
+        successfulGeneration.fixtures
+      );
+    }
+
+    lastFixtures = generatedFixturesBySport[profile.key] || [];
     pinnedFixtureSlotKeys = new Set(
       successfulGeneration.pinnedIndexes
         .map((index) => fixtureSlotKey(lastFixtures[index]))
@@ -9988,37 +10070,116 @@ const hydrateFixtureCreator = (fixtureNode) => {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
       saveFixtureCatalog(lastFixtures);
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        saveFixtureCatalog(generatedFixturesBySport[mirroredSportKey]);
+      }
       replaceActiveSportFixtureDates(lastFixtures, {}, { persist: false });
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        replaceFixtureDatesForSport(mirroredSportKey, generatedFixturesBySport[mirroredSportKey], {}, { persist: false });
+      }
       const appliedDates = autoFillDates ? autoFillFixtureDates(lastFixtures) : autoFillFixtureDatesSilently(lastFixtures);
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        const primaryDateSnapshot = getFixtureDateSnapshot(lastFixtures);
+        const mirroredDateSnapshot = mapFixtureDateSnapshotBySlot(
+          lastFixtures,
+          generatedFixturesBySport[mirroredSportKey],
+          primaryDateSnapshot
+        );
+        replaceFixtureDatesForSport(
+          mirroredSportKey,
+          generatedFixturesBySport[mirroredSportKey],
+          mirroredDateSnapshot,
+          { persist: false }
+        );
+      }
       if (!appliedDates) {
+        persistFixtureDatesToStorage();
+      } else if (shouldForceShared) {
         persistFixtureDatesToStorage();
       }
       loadFixtureDates();
-      persistActiveSportState();
+      persistSportState({
+        sportKey: profile.key,
+        fixtures: lastFixtures,
+        selectedTeamIds: teams,
+        fairnessRuleIds: selectedRules,
+        pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+        formatLabel: lastFormatLabel,
+        generatedAt: Date.now()
+      });
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        const mirroredFormatLabel = String(generatedFixturesBySport[mirroredSportKey][0]?.formatLabel || '').trim();
+        persistSportState({
+          sportKey: mirroredSportKey,
+          fixtures: generatedFixturesBySport[mirroredSportKey],
+          selectedTeamIds: teams,
+          fairnessRuleIds: selectedRules,
+          pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+          formatLabel: mirroredFormatLabel,
+          generatedAt: Date.now()
+        });
+      }
       addFixtureHistorySnapshot(profile.key, lastFixtures);
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        addFixtureHistorySnapshot(mirroredSportKey, generatedFixturesBySport[mirroredSportKey]);
+      }
       renderFixtures(lastFixtures);
       if (statusNode) {
+        const sharedPrefix = shouldForceShared
+          ? 'Soccer and Netball fixtures generated together with matching pairings.'
+          : 'Fixtures generated and synced live.';
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Fixtures generated and synced live with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+          ? `${sharedPrefix} Fairness concerns remain in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
           : appliedDates
-            ? 'Fixtures generated and synced live. Calendar, log views, and standings are up to date.'
-            : 'Fixtures generated and synced live. Calendar events will appear after dates are assigned.';
+            ? `${sharedPrefix} Calendar, log views, and standings are up to date.`
+            : `${sharedPrefix} Calendar events will appear after dates are assigned.`;
       }
-      showSmartToast('Fixtures generated and synced live.', { tone: 'success' });
+      showSmartToast(
+        shouldForceShared
+          ? 'Generated matching Soccer and Netball fixtures in one pass.'
+          : 'Fixtures generated and synced live.',
+        { tone: 'success' }
+      );
       return;
     }
 
     pendingFixtureApproval = false;
     approvedWithUnfairness = false;
     saveFixtureCatalog(lastFixtures);
+    if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+      saveFixtureCatalog(generatedFixturesBySport[mirroredSportKey]);
+    }
     addFixtureHistorySnapshot(profile.key, lastFixtures);
+    if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+      addFixtureHistorySnapshot(mirroredSportKey, generatedFixturesBySport[mirroredSportKey]);
+    }
     loadFixtureDates();
     if (autoFillDates && isAdminMode) {
       autoFillFixtureDates(lastFixtures);
       loadFixtureDates();
     }
 
-    persistActiveSportState();
+    persistSportState({
+      sportKey: profile.key,
+      fixtures: lastFixtures,
+      selectedTeamIds: teams,
+      fairnessRuleIds: selectedRules,
+      pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+      formatLabel: lastFormatLabel,
+      generatedAt: Date.now()
+    });
+    if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+      const mirroredFormatLabel = String(generatedFixturesBySport[mirroredSportKey][0]?.formatLabel || '').trim();
+      persistSportState({
+        sportKey: mirroredSportKey,
+        fixtures: generatedFixturesBySport[mirroredSportKey],
+        selectedTeamIds: teams,
+        fairnessRuleIds: selectedRules,
+        pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+        formatLabel: mirroredFormatLabel,
+        generatedAt: Date.now()
+      });
+    }
 
     renderFixtures(lastFixtures);
   };
@@ -10507,7 +10668,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   generateButton.addEventListener('click', () => {
     const wantsAutoFill = isAdminMode && autoFillToggle instanceof HTMLInputElement && autoFillToggle.checked;
-    generateFixtures({ autoFillDates: wantsAutoFill });
+    const wantsSharedFixtures =
+      forceSharedFixturesToggle instanceof HTMLInputElement && forceSharedFixturesToggle.checked;
+    generateFixtures({ autoFillDates: wantsAutoFill, forceSharedAcrossSports: wantsSharedFixtures });
     workflowSteps?.expandStep('review-fixtures');
     const statusMessage = String(statusNode?.textContent || '').trim();
     if (statusMessage) {
