@@ -4447,6 +4447,20 @@ body.match-log-workspace-open {
   gap: 12px;
 }
 
+.school-calendar-shell.is-public-view {
+  gap: 10px;
+}
+
+.school-calendar-public-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.school-calendar-root-public {
+  padding: 8px;
+}
+
 .calendar-workflow-step {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -4812,6 +4826,28 @@ body.match-log-workspace-open {
   color: var(--text);
 }
 
+.school-calendar-shell.is-public-view .fc .fc-toolbar.fc-header-toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.school-calendar-shell.is-public-view .fc .fc-daygrid-day-number {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.school-calendar-shell.is-public-view .fc .fc-col-header-cell-cushion {
+  font-size: 0.78rem;
+  padding: 4px 2px;
+}
+
+.school-calendar-shell.is-public-view .fc .fc-daygrid-event {
+  margin: 1px 0;
+}
+
+.school-calendar-shell.is-public-view .calendar-event-title {
+  font-size: 0.74rem;
+}
+
 .fc .fc-button {
   background: var(--primary);
   border-color: var(--primary);
@@ -5126,6 +5162,62 @@ body.match-log-workspace-open {
   .school-calendar-actions .btn {
     width: 100%;
     text-align: center;
+  }
+
+  .school-calendar-shell.is-public-view {
+    gap: 8px;
+  }
+
+  .school-calendar-root-public {
+    padding: 4px;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-header-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-toolbar-title {
+    font-size: 0.98rem;
+    text-align: center;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-toolbar-chunk {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-button {
+    padding: 0.32rem 0.55rem;
+    font-size: 0.76rem;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-col-header-cell-cushion {
+    font-size: 0.68rem;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-daygrid-day-number {
+    font-size: 0.72rem;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-daygrid-day-frame {
+    min-height: 72px;
+  }
+
+  .school-calendar-shell.is-public-view .fc .fc-daygrid-event {
+    font-size: 0.68rem;
+    border-radius: 6px;
+  }
+
+  .school-calendar-shell.is-public-view .calendar-event-time {
+    display: none;
+  }
+
+  .school-calendar-shell.is-public-view .calendar-event-title {
+    font-size: 0.68rem;
   }
 
   .calendar-day-event-row {

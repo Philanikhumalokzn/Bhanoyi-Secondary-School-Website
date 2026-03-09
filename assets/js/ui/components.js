@@ -916,7 +916,7 @@ const hydrateLeagueStandings = (standingsNode) => {
 export const renderHeader = (siteContent, pageKey) => {
   const adminMode = isAdminModeEnabled();
   const staffMode = !adminMode && isStaffModeEnabled();
-  const publicNavKeys = new Set(['home', 'about', 'academics', 'sports', 'admissions', 'policies', 'contact']);
+  const publicNavKeys = new Set(['home', 'about', 'academics', 'sports', 'calendar', 'admissions', 'policies', 'contact']);
 
   const links = siteContent.navigation
     .filter((item) => {
@@ -11058,18 +11058,29 @@ const hydrateFixtureCreator = (fixtureNode) => {
 const renderSchoolCalendarSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const adminMode = isAdminModeEnabled();
+  const publicAudience = isPublicAudienceEnabled();
   const config = {
     sectionKey: fallbackSectionKey,
-    fixtureSectionKey: (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'
+    fixtureSectionKey: (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator',
+    publicAudience
   };
 
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="calendar" data-section-key="${fallbackSectionKey}">
       <div class="container">
         <h2>${section.title || 'View School Calendar'}</h2>
-        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        ${section.body && !publicAudience ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel school-calendar-shell ${publicAudience ? 'is-public-view' : ''}" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          ${
+            publicAudience
+              ? '<p class="school-calendar-public-note">Browse term dates, fixtures, and school events. Tap any date to view details.</p>'
+              : ''
+          }
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
+          ${
+            publicAudience
+              ? '<div class="school-calendar-root school-calendar-root-public" data-school-calendar></div>'
+              : `
           <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step data-calendar-default-open>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="true">
               <span>View Calendar Month</span>
@@ -11077,7 +11088,8 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
             <div class="calendar-workflow-body" data-calendar-workflow-body>
               <div class="school-calendar-root" data-school-calendar></div>
             </div>
-          </section>
+          </section>`
+          }
           ${
             adminMode
               ? `
@@ -11295,6 +11307,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
   if (!calendarRoot) return;
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  const isStaffMode = new URLSearchParams(window.location.search).get('staff') === '1';
+  const isPublicCalendarView = !isAdminMode && !isStaffMode && config.publicAudience === true;
+  const isCompactPublicCalendar = isPublicCalendarView && window.matchMedia('(max-width: 760px)').matches;
   if (adminPanel) {
     adminPanel.classList.toggle('is-hidden', !isAdminMode);
   }
@@ -12401,7 +12416,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
     plugins: [dayGridPlugin, interactionPlugin],
     initialView: 'dayGridMonth',
     height: 'auto',
-    dayMaxEvents: 3,
+    dayMaxEvents: isCompactPublicCalendar ? 2 : 3,
+    fixedWeekCount: !isCompactPublicCalendar,
+    showNonCurrentDates: !isCompactPublicCalendar,
+    headerToolbar: isCompactPublicCalendar
+      ? { left: 'prev,next', center: 'title', right: '' }
+      : { left: 'prev,next today', center: 'title', right: '' },
     eventOrder: 'start,-duration,allDay,title',
     editable: isAdminMode,
     eventStartEditable: isAdminMode,
