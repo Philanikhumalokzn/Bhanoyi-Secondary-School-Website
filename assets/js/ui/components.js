@@ -7238,7 +7238,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
           id: String(entry.id || '').trim(),
           sportKey: String(entry.sportKey || '').trim(),
           createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
-          fixtures: Array.isArray(entry.fixtures) ? entry.fixtures : []
+          fixtures: Array.isArray(entry.fixtures) ? entry.fixtures : [],
+          fixtureDates:
+            entry.fixtureDates && typeof entry.fixtureDates === 'object' && !Array.isArray(entry.fixtureDates)
+              ? entry.fixtureDates
+              : {}
         }))
         .filter((entry) => entry.id && (entry.sportKey === 'soccer' || entry.sportKey === 'netball'))
         .sort((left, right) => right.createdAt - left.createdAt);
@@ -7251,6 +7255,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const payload = fixtureTemplateHistory.slice(0, 60);
     localStorage.setItem(fixtureHistoryStorageKey, JSON.stringify(payload));
     void persistLocalStore(fixtureHistoryStorageKey, payload);
+  };
+
+  const normalizeFixtureStoredSportKey = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'soccer' || raw === 'football') return 'soccer';
+    if (raw === 'netball') return 'netball';
+    return '';
   };
 
   const fixtureTemplateSignature = (fixtures) =>
@@ -7310,8 +7321,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!sanitized.length) return;
 
     const nextSignature = fixtureTemplateSignature(sanitized);
+    const nextFixtureDates = getFixtureDateSnapshot(sanitized);
     const latestSameSport = fixtureTemplateHistory.find((entry) => entry.sportKey === normalizedSport);
     if (latestSameSport && fixtureTemplateSignature(latestSameSport.fixtures) === nextSignature) {
+      latestSameSport.createdAt = Date.now();
+      latestSameSport.fixtures = sanitized;
+      latestSameSport.fixtureDates = nextFixtureDates;
+      fixtureTemplateHistory = [
+        latestSameSport,
+        ...fixtureTemplateHistory.filter((entry) => entry !== latestSameSport)
+      ].slice(0, 60);
+      saveFixtureTemplateHistory();
+      renderFixtureTemplateOptions();
       return;
     }
 
@@ -7319,7 +7340,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sportKey: normalizedSport,
       createdAt: Date.now(),
-      fixtures: sanitized
+      fixtures: sanitized,
+      fixtureDates: nextFixtureDates
     });
     fixtureTemplateHistory = fixtureTemplateHistory.slice(0, 60);
     saveFixtureTemplateHistory();
@@ -7344,6 +7366,47 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const getFixtureId = (fixture) =>
     `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
+
+  const getFixtureDateSnapshot = (fixtures, sourceMap = fixtureDates) => {
+    const ids = new Set((Array.isArray(fixtures) ? fixtures : []).map((fixture) => getFixtureId(fixture)).filter(Boolean));
+    const source = sourceMap && typeof sourceMap === 'object' ? sourceMap : {};
+
+    return Object.fromEntries(
+      Object.entries(source)
+        .filter(([fixtureId, value]) => ids.has(fixtureId) && Boolean(normalizeFixtureStamp(value)))
+        .map(([fixtureId, value]) => [fixtureId, normalizeFixtureStamp(value)])
+    );
+  };
+
+  const replaceActiveSportFixtureDates = (fixtures, nextSnapshot = {}, { persist = true } = {}) => {
+    const activeSportKey = normalizeFixtureStoredSportKey(fixtures?.[0]?.sportKey || selectedSportKey());
+    const keptEntries = Object.entries(fixtureDates).filter(([fixtureId]) => {
+      if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return true;
+      const fixtureSportKey = normalizeFixtureStoredSportKey(String(fixtureId).split(':')[1] || '');
+      return !activeSportKey || fixtureSportKey !== activeSportKey;
+    });
+
+    const scopedSnapshot = getFixtureDateSnapshot(fixtures, nextSnapshot);
+    fixtureDates = Object.fromEntries([...keptEntries, ...Object.entries(scopedSnapshot)]);
+
+    if (persist) {
+      persistFixtureDatesToStorage();
+    }
+
+    return scopedSnapshot;
+  };
+
+  const autoFillFixtureDatesSilently = (fixtures) => {
+    const result = buildAutoFillDateMap(fixtures);
+    if (!result.ok) return false;
+
+    fixtureDates = {
+      ...fixtureDates,
+      ...result.dateMap
+    };
+    persistFixtureDatesToStorage();
+    return true;
+  };
 
   const fixtureSignature = (fixtures) => fixtures.map((fixture) => getFixtureId(fixture)).join('|');
 
@@ -9182,9 +9245,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       selectedTeamIds: persistedTeamIds,
       fairnessRuleIds: selectedFairnessRuleIds(),
       fixtures: lastFixtures.map((entry) => ({ ...entry })),
+      fixtureDates: getFixtureDateSnapshot(lastFixtures),
       pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
       setup: readSportSetupValues(activeSport),
-      formatLabel: String(lastFormatLabel || '').trim()
+      formatLabel: String(lastFormatLabel || '').trim(),
+      generatedAt: Date.now()
     };
     saveFixtureCreatorState();
   };
@@ -9730,22 +9795,25 @@ const hydrateFixtureCreator = (fixtureNode) => {
     );
 
     refreshCurrentUnfairnessReport(lastFixtures);
-    addFixtureHistorySnapshot(profile.key, lastFixtures);
     if (isAdminMode) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
       saveFixtureCatalog(lastFixtures);
-      loadFixtureDates();
-      if (autoFillDates) {
-        autoFillFixtureDates(lastFixtures);
-        loadFixtureDates();
+      replaceActiveSportFixtureDates(lastFixtures, {}, { persist: false });
+      const appliedDates = autoFillDates ? autoFillFixtureDates(lastFixtures) : autoFillFixtureDatesSilently(lastFixtures);
+      if (!appliedDates) {
+        persistFixtureDatesToStorage();
       }
+      loadFixtureDates();
       persistActiveSportState();
+      addFixtureHistorySnapshot(profile.key, lastFixtures);
       renderFixtures(lastFixtures);
       if (statusNode) {
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
           ? `Fixtures generated and synced live with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
-          : 'Fixtures generated and synced live. Calendar, log views, and standings are up to date.';
+          : appliedDates
+            ? 'Fixtures generated and synced live. Calendar, log views, and standings are up to date.'
+            : 'Fixtures generated and synced live. Calendar events will appear after dates are assigned.';
       }
       showSmartToast('Fixtures generated and synced live.', { tone: 'success' });
       return;
@@ -9754,6 +9822,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     pendingFixtureApproval = false;
     approvedWithUnfairness = false;
     saveFixtureCatalog(lastFixtures);
+    addFixtureHistorySnapshot(profile.key, lastFixtures);
     loadFixtureDates();
     if (autoFillDates && isAdminMode) {
       autoFillFixtureDates(lastFixtures);
@@ -9827,6 +9896,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
 
     saveFixtureCatalog(lastFixtures);
+    replaceActiveSportFixtureDates(lastFixtures, saved.fixtureDates || {});
     loadFixtureDates();
     renderFixtures(lastFixtures);
 
@@ -10789,12 +10859,22 @@ const hydrateFixtureCreator = (fixtureNode) => {
     pendingFixtureApproval = true;
     approvedWithUnfairness = false;
     refreshCurrentUnfairnessReport(lastFixtures);
+    replaceActiveSportFixtureDates(lastFixtures, {}, { persist: false });
     persistActiveSportState();
     saveFixtureCatalog(lastFixtures);
+    const restoredTemplateDates = replaceActiveSportFixtureDates(lastFixtures, templateEntry.fixtureDates || {});
+    if (!Object.keys(restoredTemplateDates).length) {
+      autoFillFixtureDatesSilently(lastFixtures);
+    }
+    loadFixtureDates();
+    persistActiveSportState();
     renderFixtures(lastFixtures);
 
     if (statusNode instanceof HTMLElement) {
-      statusNode.textContent = `Template loaded and synced (${lastFixtures.length} fixtures). Calendar and standings now follow this ${targetSportLabel.toLowerCase()} fixture set until another ${targetSportLabel.toLowerCase()} save or template replaces it.`;
+      const hasTemplateDates = Object.keys(getFixtureDateSnapshot(lastFixtures)).length > 0;
+      statusNode.textContent = hasTemplateDates
+        ? `Template loaded and synced (${lastFixtures.length} fixtures). Calendar and standings now follow this ${targetSportLabel.toLowerCase()} fixture set.`
+        : `Template loaded and synced (${lastFixtures.length} fixtures). Standings and logs are live; calendar events will appear after dates are assigned.`;
     }
   });
 
