@@ -12381,7 +12381,9 @@ const hydrateSchoolCalendar = (calendarShell) => {
         const eventTypeWithIcon = escapeHtmlText(
           sportLabel ? formatSportCodeWithEmoji(sportLabel) : formatEventTypeWithIcon(eventType)
         );
-        const title = escapeHtmlText(String(entry.title || 'Untitled event'));
+        const rawTitle = String(entry.title || 'Untitled event');
+        const visibleTitle = sportLabel ? stripFixtureSportPrefix(rawTitle) : rawTitle;
+        const title = escapeHtmlText(visibleTitle);
         const eventId = escapeHtmlAttribute(String(entry.id || ''));
         const timeLabel = escapeHtmlText(formatTimeLabel(entry));
         const detailMarkup = `
