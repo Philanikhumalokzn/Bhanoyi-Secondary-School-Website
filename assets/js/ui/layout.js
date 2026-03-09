@@ -58,6 +58,77 @@ const bindMobileNav = () => {
   });
 };
 
+const installPublicCrudSurfaceGuard = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('admin') === '1' || params.get('staff') === '1') return;
+  if (document.body.dataset.publicCrudGuardInstalled === 'true') return;
+
+  const sensitiveSelectors = [
+    '[data-post-news]',
+    '[data-standings-export]',
+    '[data-standings-export-combined]',
+    '[data-match-export]',
+    '[data-match-reset]',
+    '[data-match-clock-start]',
+    '[data-match-pause]',
+    '[data-match-resume]',
+    '[data-match-open-event-side]',
+    '[data-match-save-log]',
+    '[data-match-edit-event]',
+    '[data-match-delete-event]',
+    '[data-fixture-generate]',
+    '[data-fixture-export]',
+    '[data-fixture-export-csv]',
+    '[data-fixture-open-fairness-modal]',
+    '[data-fixture-rules-preview]',
+    '[data-fixture-rules-save]',
+    '[data-fixture-approve-resolved]',
+    '[data-fixture-approve-anyway]',
+    '[data-fixture-save-draft]',
+    '[data-enrollment-admin-only]',
+    '[data-enrollment-add-staff]',
+    '[data-enrollment-open-add-grade]',
+    '[data-enrollment-import-learners]',
+    '[data-enrollment-bulk-import-learners]',
+    '[data-enrollment-add-learner]',
+    '[data-calendar-admin-only]',
+    '[data-calendar-save]',
+    '[data-calendar-new]',
+    '[data-calendar-delete]',
+    '[data-event-type-add]',
+    '[data-event-types-save]',
+    '[data-terms-save]',
+    '[data-calendar-day-event-delete]',
+    '.calendar-color-popover'
+  ];
+
+  const sanitize = (root = document) => {
+    sensitiveSelectors.forEach((selector) => {
+      root.querySelectorAll(selector).forEach((node) => node.remove());
+    });
+
+    root.querySelectorAll('[data-editable-card], [data-editable-section]').forEach((node) => {
+      node.removeAttribute('data-editable-card');
+      node.removeAttribute('data-editable-section');
+    });
+  };
+
+  sanitize(document);
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        sanitize(node);
+      });
+    });
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+  document.body.dataset.publicCrudGuardInstalled = 'true';
+};
+
 const initCollapsiblePageSections = (pageKey) => {
   const key = String(pageKey || '').trim().toLowerCase();
   if (key !== 'sports') return;
@@ -305,4 +376,5 @@ export const renderSite = async (siteContent, page) => {
   initLeagueStandings();
   initSchoolCalendars();
   initEnrollmentManagers();
+  installPublicCrudSurfaceGuard();
 };

@@ -11079,7 +11079,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
           ${
             publicAudience
-              ? '<div class="school-calendar-root school-calendar-root-public" data-school-calendar></div><section class="school-calendar-inline-day-panel is-hidden" data-calendar-inline-day-panel><div class="calendar-day-overlay-header school-calendar-inline-day-header"><h3 data-calendar-inline-day-title>Events</h3><button type="button" class="btn btn-secondary" data-calendar-inline-day-close>Clear</button></div><div class="calendar-day-overlay-list" data-calendar-inline-day-list></div></section>'
+              ? '<div class="school-calendar-root school-calendar-root-public" data-school-calendar></div><section class="school-calendar-inline-day-panel is-hidden" data-calendar-inline-day-panel><div class="calendar-day-overlay-header school-calendar-inline-day-header"><h3 data-calendar-inline-day-title>Events</h3><button type="button" class="btn btn-secondary" data-calendar-inline-day-close>Hide details</button></div><div class="calendar-day-overlay-list" data-calendar-inline-day-list></div></section>'
               : `
           <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step data-calendar-default-open>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="true">
@@ -12283,13 +12283,20 @@ const hydrateSchoolCalendar = (calendarShell) => {
         const title = escapeHtmlText(String(entry.title || 'Untitled event'));
         const eventId = escapeHtmlAttribute(String(entry.id || ''));
         const timeLabel = escapeHtmlText(formatTimeLabel(entry));
-        return `
-          <div class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
-            <button type="button" class="calendar-day-event-open" data-calendar-day-event-open="${eventId}">
+        const detailMarkup = `
               <span class="calendar-day-event-time">${timeLabel}</span>
               <span class="calendar-day-event-title">${title}</span>
-              <span class="calendar-day-event-type">${eventTypeWithIcon}</span>
-            </button>
+              <span class="calendar-day-event-type">${eventTypeWithIcon}</span>`;
+        const eventMarkup = isAdminMode
+          ? `<button type="button" class="calendar-day-event-open" data-calendar-day-event-open="${eventId}">
+${detailMarkup}
+            </button>`
+          : `<div class="calendar-day-event-open calendar-day-event-display" role="group" aria-label="${title}">
+${detailMarkup}
+            </div>`;
+        return `
+          <div class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
+            ${eventMarkup}
             ${
               isAdminMode
                 ? `<button type="button" class="btn btn-secondary calendar-day-event-delete" data-calendar-day-event-delete="${eventId}" aria-label="Delete ${title}">Delete</button>`
