@@ -694,7 +694,7 @@ body[data-audience='public'] .standings-table thead th {
   body[data-audience='public'] .standings-table td:nth-child(2),
   body[data-audience='public'] .standings-table tbody th[scope='row'] {
     text-align: left;
-    white-space: normal;
+    white-space: nowrap;
     overflow: visible;
     text-overflow: clip;
     word-break: normal;
@@ -714,12 +714,12 @@ body[data-audience='public'] .standings-table thead th {
 
   body[data-audience='public'] .standings-table th:nth-child(2),
   body[data-audience='public'] .standings-table td:nth-child(2) {
-    width: 14%;
+    width: 16%;
   }
 
   body[data-audience='public'] .standings-table th:nth-child(n + 3):nth-child(-n + 10),
   body[data-audience='public'] .standings-table td:nth-child(n + 3):nth-child(-n + 10) {
-    width: 9.625%;
+    width: 9.375%;
   }
 
   body[data-audience='public'] .standings-meta {
