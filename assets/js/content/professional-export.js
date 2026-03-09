@@ -117,14 +117,20 @@ export const exportProfessionalWorkbook = async ({
         .filter((entry) => entry.columns.length)
     : [];
 
-  sheet.columns = safeColumns.map((entry, index) => ({
+  const effectiveColumns = safeTableSections.length
+    ? safeTableSections.reduce((widest, entry) => {
+        return entry.columns.length > widest.length ? entry.columns : widest;
+      }, safeColumns)
+    : safeColumns;
+
+  sheet.columns = effectiveColumns.map((entry, index) => ({
     header: entry.header || `Column ${index + 1}`,
     key: entry.key || `col_${index + 1}`,
     width: Math.max(8, Number(entry.width) || 16)
   }));
 
   const theme = { ...defaultTheme };
-  const endColumnLabel = toColumnLabel(safeColumns.length);
+  const endColumnLabel = toColumnLabel(effectiveColumns.length);
 
   sheet.mergeCells(`A1:${endColumnLabel}1`);
   sheet.mergeCells(`A2:${endColumnLabel}2`);

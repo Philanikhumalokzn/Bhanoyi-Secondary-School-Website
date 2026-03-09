@@ -7275,6 +7275,30 @@ const hydrateFixtureCreator = (fixtureNode) => {
     }
   };
 
+  const getSavedSelectedTemplateIdForSport = (sportKey) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return '';
+    const savedSportState = fixtureCreatorState.sports?.[key];
+    if (!savedSportState || typeof savedSportState !== 'object') return '';
+    return String(savedSportState.selectedTemplateId || '').trim();
+  };
+
+  const setSavedSelectedTemplateIdForSport = (sportKey, templateId) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return;
+
+    const nextTemplateId = String(templateId || '').trim();
+    const currentSportState = fixtureCreatorState.sports?.[key];
+    fixtureCreatorState.sports[key] = {
+      ...(currentSportState && typeof currentSportState === 'object' ? currentSportState : {}),
+      selectedTemplateId: nextTemplateId
+    };
+    if (!fixtureCreatorState.lastSport) {
+      fixtureCreatorState.lastSport = key;
+    }
+    saveFixtureCreatorState();
+  };
+
   const loadFixtureTemplateHistory = () => {
     try {
       const raw = localStorage.getItem(fixtureHistoryStorageKey);
@@ -7335,6 +7359,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const renderFixtureTemplateOptions = () => {
     if (!(fixtureTemplateSelect instanceof HTMLSelectElement)) return;
     const activeSport = selectedSportKey();
+    const savedTemplateId = getSavedSelectedTemplateIdForSport(activeSport);
+    if (savedTemplateId && savedTemplateId !== selectedFixtureTemplateId) {
+      selectedFixtureTemplateId = savedTemplateId;
+    }
     const options = fixtureTemplateHistory
       .filter((entry) => !activeSport || entry.sportKey === activeSport)
       .map((entry) => {
@@ -7364,17 +7392,20 @@ const hydrateFixtureCreator = (fixtureNode) => {
     } else {
       selectedFixtureTemplateId = '';
       fixtureTemplateSelect.value = '';
+      if (activeSport) {
+        setSavedSelectedTemplateIdForSport(activeSport, '');
+      }
     }
   };
 
   const addFixtureHistorySnapshot = (sportKey, fixtures) => {
     const normalizedSport = String(sportKey || '').trim();
     if ((normalizedSport !== 'soccer' && normalizedSport !== 'netball') || !Array.isArray(fixtures) || !fixtures.length) {
-      return;
+      return '';
     }
 
     const sanitized = sanitizeStoredFixturesForSport(normalizedSport, fixtures);
-    if (!sanitized.length) return;
+    if (!sanitized.length) return '';
 
     const nextSignature = fixtureTemplateSignature(sanitized);
     const nextFixtureDates = getFixtureDateSnapshot(sanitized);
@@ -7389,19 +7420,21 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ].slice(0, 60);
       saveFixtureTemplateHistory();
       renderFixtureTemplateOptions();
-      return;
+      return latestSameSport.id;
     }
 
-    fixtureTemplateHistory.unshift({
+    const nextEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sportKey: normalizedSport,
       createdAt: Date.now(),
       fixtures: sanitized,
       fixtureDates: nextFixtureDates
-    });
+    };
+    fixtureTemplateHistory.unshift(nextEntry);
     fixtureTemplateHistory = fixtureTemplateHistory.slice(0, 60);
     saveFixtureTemplateHistory();
     renderFixtureTemplateOptions();
+    return nextEntry.id;
   };
 
   const dispatchFixtureSyncEvent = () => {
