@@ -587,8 +587,8 @@ h1 {
 }
 
 body[data-audience='public'] .standings-table {
-  width: max-content;
-  min-width: 0;
+  width: 100%;
+  min-width: 720px;
   table-layout: auto;
 }
 
@@ -646,10 +646,36 @@ body[data-audience='public'] .standings-table thead th {
 }
 
 @media (max-width: 640px) {
+  body[data-audience='public'] .standings-panel {
+    width: min(100%, 560px);
+    margin-inline: auto;
+  }
+
+  body[data-audience='public'] .standings-sport-switch {
+    padding: 7px 8px;
+    gap: 4px;
+  }
+
+  body[data-audience='public'] .standings-sport-tab,
+  body[data-audience='public'] .standings-sport-separator {
+    font-size: 0.88rem;
+  }
+
+  body[data-audience='public'] .standings-table {
+    width: max-content;
+    min-width: 520px;
+  }
+
   body[data-audience='public'] .standings-table th,
   body[data-audience='public'] .standings-table td {
     padding: 7px 8px;
     font-size: 0.84rem;
+  }
+
+  body[data-audience='public'] .standings-meta {
+    padding: 8px;
+    gap: 6px 10px;
+    font-size: 0.8rem;
   }
 }
 
