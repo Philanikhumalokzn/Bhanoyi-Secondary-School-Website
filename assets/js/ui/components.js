@@ -109,6 +109,8 @@ const renderCard = (item, clickable = false, context = {}) => {
   const imageUrls = parseCardImageUrls(item.imageUrl || '');
   const primaryImageUrl = imageUrls[0] || '';
   const imageData = serializeCardImageUrls(imageUrls);
+  const title = String(item.title || '').trim();
+  const displayTitle = context.sectionKey === 'sporting_codes' ? formatSportCodeWithEmoji(title) : title;
   const attrs = [
     'data-editable-card="true"',
     context.sectionKey ? `data-section-key="${context.sectionKey}"` : '',
@@ -124,9 +126,9 @@ const renderCard = (item, clickable = false, context = {}) => {
   const cardClass = hasImage ? 'card card-has-media' : 'card';
   const bodyText = context.concise ? toConcisePublicText(item.body, 90) : item.body;
   const content = `
-    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
+    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${title}" loading="lazy" />
     <div class="card-content">
-      <h3>${item.title}</h3>
+      <h3>${displayTitle}</h3>
       <p>${bodyText}</p>
     </div>
   `;
@@ -726,6 +728,8 @@ const renderStandingsRowsMarkup = (rows) =>
 
 const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
   const viewModel = computeStandingsViewModel(section, context);
+  const footballLabel = formatSportCodeWithEmoji('football');
+  const netballLabel = formatSportCodeWithEmoji('netball');
   const standingsConfig = {
     fixtureSectionKey: viewModel.fixtureSectionKey,
     selectedSport: viewModel.selectedSport,
@@ -742,9 +746,9 @@ const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
         ${section.subtitle ? `<p class="standings-subtitle">${section.subtitle}</p>` : ''}
         <article class="panel standings-panel">
           <div class="standings-sport-switch" role="tablist" aria-label="Select sport">
-            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'football' ? 'is-active' : ''}" data-standings-sport-tab="football" aria-selected="${viewModel.selectedSport === 'football' ? 'true' : 'false'}">Football</button>
+            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'football' ? 'is-active' : ''}" data-standings-sport-tab="football" aria-selected="${viewModel.selectedSport === 'football' ? 'true' : 'false'}">${footballLabel}</button>
             <span class="standings-sport-separator" aria-hidden="true">/</span>
-            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'netball' ? 'is-active' : ''}" data-standings-sport-tab="netball" aria-selected="${viewModel.selectedSport === 'netball' ? 'true' : 'false'}">Netball</button>
+            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'netball' ? 'is-active' : ''}" data-standings-sport-tab="netball" aria-selected="${viewModel.selectedSport === 'netball' ? 'true' : 'false'}">${netballLabel}</button>
             ${isAdminModeEnabled() ? '<button type="button" class="btn btn-secondary standings-export-btn" data-standings-export>Export standings</button><button type="button" class="btn btn-secondary standings-export-btn" data-standings-export-combined>Export both standings</button>' : ''}
           </div>
           <div class="standings-table-wrap" role="region" aria-label="League standings" tabindex="0">
@@ -893,6 +897,7 @@ const hydrateLeagueStandings = (standingsNode) => {
     }
 
     const sportLabel = selectedSport === 'netball' ? 'Netball' : 'Football';
+    const sportLabelWithEmoji = formatSportCodeWithEmoji(sportLabel);
     const subtitle = String(section.subtitle || '').trim();
 
     const rows = toStandingsExportRows(viewModel.rows);
@@ -901,8 +906,8 @@ const hydrateLeagueStandings = (standingsNode) => {
       await exportProfessionalWorkbook({
         fileName: `${buildStandingsExportBaseName(sportLabel)}.xlsx`,
         sheetName: `${sportLabel} Standings`,
-        title: 'Official League Standings',
-        contextLine: subtitle ? `${subtitle} • ${sportLabel}` : `Inter-House League • ${sportLabel}`,
+        title: `Official ${sportLabelWithEmoji} Standings`,
+        contextLine: subtitle ? `${subtitle} • ${sportLabelWithEmoji}` : `Inter-House League • ${sportLabelWithEmoji}`,
         metaLine: `Last Updated: ${viewModel.lastUpdated}`,
         columns: buildStandingsColumns(),
         rows,
@@ -921,6 +926,8 @@ const hydrateLeagueStandings = (standingsNode) => {
     const subtitle = String(section.subtitle || '').trim();
     const netballViewModel = computeStandingsViewModel(section, { selectedSport: 'netball' });
     const footballViewModel = computeStandingsViewModel(section, { selectedSport: 'football' });
+    const netballLabel = formatSportCodeWithEmoji('netball');
+    const footballLabel = formatSportCodeWithEmoji('football');
     const netballRows = toStandingsExportRows(netballViewModel.rows);
     const footballRows = toStandingsExportRows(footballViewModel.rows);
 
@@ -936,11 +943,11 @@ const hydrateLeagueStandings = (standingsNode) => {
         fileName: `inter-house-netball-football-standings-${stamp}.xlsx`,
         sheetName: 'Combined Standings',
         title: 'Official League Standings',
-        contextLine: subtitle ? `${subtitle} • Netball then Football` : 'Inter-House League • Netball then Football',
-        metaLine: `Netball Updated: ${netballViewModel.lastUpdated} • Football Updated: ${footballViewModel.lastUpdated}`,
+        contextLine: subtitle ? `${subtitle} • ${netballLabel} then ${footballLabel}` : `Inter-House League • ${netballLabel} then ${footballLabel}`,
+        metaLine: `${netballLabel} Updated: ${netballViewModel.lastUpdated} • ${footballLabel} Updated: ${footballViewModel.lastUpdated}`,
         tableSections: [
           {
-            title: 'Netball Standings',
+            title: `${netballLabel} Standings`,
             metaLine: `Last Updated: ${netballViewModel.lastUpdated}`,
             columns: buildStandingsColumns(),
             rows: netballRows,
@@ -948,7 +955,7 @@ const hydrateLeagueStandings = (standingsNode) => {
             afterRows: emphasizeLeadingRow
           },
           {
-            title: 'Football Standings',
+            title: `${footballLabel} Standings`,
             metaLine: `Last Updated: ${footballViewModel.lastUpdated}`,
             columns: buildStandingsColumns(),
             rows: footballRows,
@@ -4546,8 +4553,9 @@ const hydrateEnrollmentManager = (managerNode) => {
   const formatSportingCodesSummary = (codes) => {
     const normalizedCodes = Array.isArray(codes) ? codes.map((entry) => normalizeText(entry, 80)).filter(Boolean) : [];
     if (!normalizedCodes.length) return 'No sporting code selected';
-    if (normalizedCodes.length <= 2) return normalizedCodes.join(', ');
-    return `${normalizedCodes.slice(0, 2).join(', ')} +${normalizedCodes.length - 2} more`;
+    const labeledCodes = normalizedCodes.map((entry) => formatSportCodeWithEmoji(entry));
+    if (labeledCodes.length <= 2) return labeledCodes.join(', ');
+    return `${labeledCodes.slice(0, 2).join(', ')} +${labeledCodes.length - 2} more`;
   };
 
   const houseSportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
