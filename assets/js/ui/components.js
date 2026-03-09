@@ -5868,6 +5868,9 @@ const hydrateEnrollmentManager = (managerNode) => {
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
         const assignedSportsLabel = formatSportingCodesSummary(sportingCodes);
         const defaultSportCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
+        const defaultSportChipLabel = defaultSportCode === 'No default code'
+          ? defaultSportCode
+          : formatSportCodeWithEmoji(defaultSportCode);
         const topGenderLabel = learner.gender || 'Unspecified';
 
         const houseOptionsMarkup = schoolHouseOptions
@@ -5901,7 +5904,7 @@ const hydrateEnrollmentManager = (managerNode) => {
                     class="enrollment-learner-sport-chip"
                     data-enrollment-open-learner-sports-index="${index}"
                     title="Assigned: ${escapeHtmlAttribute(assignedSportsLabel)}"
-                  >${escapeHtmlText(defaultSportCode)}</button>
+                  >${escapeHtmlText(defaultSportChipLabel)}</button>
                 </div>
               </div>
               <div class="enrollment-house-row">
