@@ -69,6 +69,7 @@ export const exportProfessionalWorkbook = async ({
   signatures,
   footerSections,
   managementSection,
+  tableSections,
   logoUrl = '/branding/bhanoyi-logo.png',
   afterRows
 }) => {
@@ -102,6 +103,19 @@ export const exportProfessionalWorkbook = async ({
     ? columns
     : [{ key: 'value', header: 'Value', width: 32, align: 'left', wrapText: true }];
   const safeRows = Array.isArray(rows) ? rows : [];
+  const safeTableSections = Array.isArray(tableSections)
+    ? tableSections
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+          title: String(entry.title || '').trim(),
+          metaLine: String(entry.metaLine || '').trim(),
+          note: String(entry.note || '').trim(),
+          columns: Array.isArray(entry.columns) && entry.columns.length ? entry.columns : safeColumns,
+          rows: Array.isArray(entry.rows) ? entry.rows : [],
+          afterRows: typeof entry.afterRows === 'function' ? entry.afterRows : null
+        }))
+        .filter((entry) => entry.columns.length)
+    : [];
 
   sheet.columns = safeColumns.map((entry, index) => ({
     header: entry.header || `Column ${index + 1}`,
@@ -228,6 +242,101 @@ export const exportProfessionalWorkbook = async ({
 
   let headerRowNumber = 7;
 
+  const styleHeaderRow = (row, columnsForRow) => {
+    row.values = columnsForRow.map((entry) => entry.header || '');
+    row.height = 20;
+    row.eachCell((cell) => {
+      cell.font = {
+        name: 'Calibri',
+        size: 10.5,
+        bold: true,
+        color: { argb: `FF${theme.white}` }
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${theme.headerBlue}` }
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        bottom: { style: 'medium', color: { argb: `FF${theme.borderColor}` } },
+        right: { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
+      };
+    });
+  };
+
+  const renderTableBlock = ({ startRow, sectionTitle, sectionMetaLine, sectionColumns, sectionRows, sectionNote, sectionAfterRows }) => {
+    let currentRow = startRow;
+    const endLabel = toColumnLabel(sectionColumns.length);
+
+    if (sectionTitle) {
+      sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+      const titleCell = sheet.getCell(`A${currentRow}`);
+      titleCell.value = sectionTitle;
+      titleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+      titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+      titleCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${theme.metaBlue}` }
+      };
+      currentRow += 1;
+    }
+
+    if (sectionMetaLine) {
+      sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+      const metaCell = sheet.getCell(`A${currentRow}`);
+      metaCell.value = sectionMetaLine;
+      metaCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+      metaCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+      currentRow += 1;
+    }
+
+    const headerRow = sheet.getRow(currentRow);
+    styleHeaderRow(headerRow, sectionColumns);
+
+    const dataStartRowForSection = currentRow + 1;
+    sectionRows.forEach((rowValue, rowIndex) => {
+      const row = sheet.getRow(dataStartRowForSection + rowIndex);
+      row.height = 18;
+
+      sectionColumns.forEach((column, columnIndex) => {
+        const key = String(column.key || `col_${columnIndex + 1}`);
+        const cell = row.getCell(columnIndex + 1);
+        cell.value = rowValue && typeof rowValue === 'object' ? rowValue[key] ?? '' : '';
+        applyDataRowCellStyle(cell, column, rowIndex, theme);
+      });
+    });
+
+    if (typeof sectionAfterRows === 'function') {
+      sectionAfterRows({
+        workbook,
+        sheet,
+        dataStartRow: dataStartRowForSection,
+        rowCount: sectionRows.length,
+        columnCount: sectionColumns.length
+      });
+    }
+
+    currentRow = dataStartRowForSection + sectionRows.length;
+
+    if (sectionNote) {
+      sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+      const noteCell = sheet.getCell(`A${currentRow}`);
+      noteCell.value = sectionNote;
+      noteCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+      noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+      currentRow += 1;
+    }
+
+    return {
+      nextRow: currentRow,
+      headerRow: currentRow - sectionRows.length - (sectionNote ? 1 : 0) - 1
+    };
+  };
+
   if (managementRows.length) {
     const blockStartRow = 7;
     const blockTitleRow = blockStartRow;
@@ -325,30 +434,45 @@ export const exportProfessionalWorkbook = async ({
     headerRowNumber = blockEndRow + 2;
   }
 
+  if (safeTableSections.length) {
+    let currentRow = headerRowNumber;
+    let frozenHeaderRow = headerRowNumber;
+
+    safeTableSections.forEach((section, index) => {
+      if (index > 0) {
+        currentRow += 2;
+      }
+
+      const titleRowCount = section.title ? 1 : 0;
+      const metaRowCount = section.metaLine ? 1 : 0;
+      const { nextRow } = renderTableBlock({
+        startRow: currentRow,
+        sectionTitle: section.title,
+        sectionMetaLine: section.metaLine,
+        sectionColumns: section.columns,
+        sectionRows: section.rows,
+        sectionNote: section.note,
+        sectionAfterRows: section.afterRows
+      });
+
+      if (index === 0) {
+        frozenHeaderRow = currentRow + titleRowCount + metaRowCount;
+      }
+
+      currentRow = nextRow;
+    });
+
+    sheet.views = [{ state: 'frozen', ySplit: frozenHeaderRow + 1 }];
+
+    const normalizedFileName = String(fileName || 'export.xlsx').trim() || 'export.xlsx';
+    const withExtension = normalizedFileName.toLowerCase().endsWith('.xlsx') ? normalizedFileName : `${normalizedFileName}.xlsx`;
+    await downloadWorkbook(workbook, withExtension);
+    return;
+  }
+
   sheet.views = [{ state: 'frozen', ySplit: headerRowNumber + 1 }];
   const headerRow = sheet.getRow(headerRowNumber);
-  headerRow.values = safeColumns.map((entry) => entry.header || '');
-  headerRow.height = 20;
-  headerRow.eachCell((cell) => {
-    cell.font = {
-      name: 'Calibri',
-      size: 10.5,
-      bold: true,
-      color: { argb: `FF${theme.white}` }
-    };
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: `FF${theme.headerBlue}` }
-    };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = {
-      top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
-      left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
-      bottom: { style: 'medium', color: { argb: `FF${theme.borderColor}` } },
-      right: { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
-    };
-  });
+  styleHeaderRow(headerRow, safeColumns);
 
   const dataStartRow = headerRowNumber + 1;
   safeRows.forEach((rowValue, rowIndex) => {

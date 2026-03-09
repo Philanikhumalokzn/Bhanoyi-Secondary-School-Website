@@ -668,7 +668,7 @@ const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
             <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'football' ? 'is-active' : ''}" data-standings-sport-tab="football" aria-selected="${viewModel.selectedSport === 'football' ? 'true' : 'false'}">Football</button>
             <span class="standings-sport-separator" aria-hidden="true">/</span>
             <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'netball' ? 'is-active' : ''}" data-standings-sport-tab="netball" aria-selected="${viewModel.selectedSport === 'netball' ? 'true' : 'false'}">Netball</button>
-            ${isAdminModeEnabled() ? '<button type="button" class="btn btn-secondary standings-export-btn" data-standings-export>Export standings</button>' : ''}
+            ${isAdminModeEnabled() ? '<button type="button" class="btn btn-secondary standings-export-btn" data-standings-export>Export standings</button><button type="button" class="btn btn-secondary standings-export-btn" data-standings-export-combined>Export both standings</button>' : ''}
           </div>
           <div class="standings-table-wrap" role="region" aria-label="League standings" tabindex="0">
             <table class="standings-table">
@@ -719,6 +719,7 @@ const hydrateLeagueStandings = (standingsNode) => {
   const sortNoteNode = standingsNode.querySelector('[data-standings-sort-note]');
   const sportTabs = Array.from(standingsNode.querySelectorAll('[data-standings-sport-tab]'));
   const exportButton = standingsNode.querySelector('[data-standings-export]');
+  const exportCombinedButton = standingsNode.querySelector('[data-standings-export-combined]');
   if (!(bodyNode instanceof HTMLElement)) return;
 
   const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
@@ -728,6 +729,44 @@ const hydrateLeagueStandings = (standingsNode) => {
   let selectedSport = normalizeStandingsSportCode(section.selectedSport || 'football') || 'football';
 
   const currentViewModel = () => computeStandingsViewModel(section, { selectedSport });
+
+  const buildStandingsColumns = () => ([
+    { header: 'Pos', key: 'pos', width: 7, align: 'center' },
+    { header: 'Team', key: 'team', width: 22, align: 'left' },
+    { header: 'MP', key: 'mp', width: 7, align: 'center' },
+    { header: 'W', key: 'w', width: 7, align: 'center' },
+    { header: 'D', key: 'd', width: 7, align: 'center' },
+    { header: 'L', key: 'l', width: 7, align: 'center' },
+    { header: 'GF', key: 'gf', width: 7, align: 'center' },
+    { header: 'GA', key: 'ga', width: 7, align: 'center' },
+    { header: 'GD', key: 'gd', width: 7, align: 'center' },
+    { header: 'Pts', key: 'pts', width: 7, align: 'center' }
+  ]);
+
+  const toStandingsExportRows = (rows) =>
+    (Array.isArray(rows) ? rows : []).map((row) => ({
+      pos: Number(row.position || 0),
+      team: String(row.team || '').trim(),
+      mp: Number(row.mp || 0),
+      w: Number(row.w || 0),
+      d: Number(row.d || 0),
+      l: Number(row.l || 0),
+      gf: Number(row.gf || 0),
+      ga: Number(row.ga || 0),
+      gd: Number(row.gd || 0),
+      pts: Number(row.pts || 0)
+    }));
+
+  const emphasizeLeadingRow = ({ sheet, dataStartRow, rowCount }) => {
+    if (!rowCount) return;
+    ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((columnLabel) => {
+      const cell = sheet.getCell(`${columnLabel}${dataStartRow}`);
+      cell.font = {
+        ...(cell.font || {}),
+        bold: true
+      };
+    });
+  };
 
   const buildStandingsExportBaseName = (sportLabel) => {
     const safeSport = String(sportLabel || 'football')
@@ -779,18 +818,7 @@ const hydrateLeagueStandings = (standingsNode) => {
     const sportLabel = selectedSport === 'netball' ? 'Netball' : 'Football';
     const subtitle = String(section.subtitle || '').trim();
 
-    const rows = viewModel.rows.map((row) => ({
-      pos: Number(row.position || 0),
-      team: String(row.team || '').trim(),
-      mp: Number(row.mp || 0),
-      w: Number(row.w || 0),
-      d: Number(row.d || 0),
-      l: Number(row.l || 0),
-      gf: Number(row.gf || 0),
-      ga: Number(row.ga || 0),
-      gd: Number(row.gd || 0),
-      pts: Number(row.pts || 0)
-    }));
+    const rows = toStandingsExportRows(viewModel.rows);
 
     try {
       await exportProfessionalWorkbook({
@@ -799,34 +827,62 @@ const hydrateLeagueStandings = (standingsNode) => {
         title: 'Official League Standings',
         contextLine: subtitle ? `${subtitle} • ${sportLabel}` : `Inter-House League • ${sportLabel}`,
         metaLine: `Last Updated: ${viewModel.lastUpdated}`,
-        columns: [
-          { header: 'Pos', key: 'pos', width: 7, align: 'center' },
-          { header: 'Team', key: 'team', width: 22, align: 'left' },
-          { header: 'MP', key: 'mp', width: 7, align: 'center' },
-          { header: 'W', key: 'w', width: 7, align: 'center' },
-          { header: 'D', key: 'd', width: 7, align: 'center' },
-          { header: 'L', key: 'l', width: 7, align: 'center' },
-          { header: 'GF', key: 'gf', width: 7, align: 'center' },
-          { header: 'GA', key: 'ga', width: 7, align: 'center' },
-          { header: 'GD', key: 'gd', width: 7, align: 'center' },
-          { header: 'Pts', key: 'pts', width: 7, align: 'center' }
-        ],
+        columns: buildStandingsColumns(),
         rows,
         note: String(viewModel.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
-        afterRows: ({ sheet, dataStartRow }) => {
-          const topRow = dataStartRow;
-          ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((columnLabel) => {
-            const cell = sheet.getCell(`${columnLabel}${topRow}`);
-            cell.font = {
-              ...(cell.font || {}),
-              bold: true
-            };
-          });
-        }
+        afterRows: emphasizeLeadingRow
       });
       showSmartToast('Standings exported (.xlsx).', { tone: 'success' });
     } catch {
       showSmartToast('Could not export standings right now.', { tone: 'error' });
+    }
+  });
+
+  exportCombinedButton?.addEventListener('click', async () => {
+    if (!isAdminModeEnabled()) return;
+
+    const subtitle = String(section.subtitle || '').trim();
+    const netballViewModel = computeStandingsViewModel(section, { selectedSport: 'netball' });
+    const footballViewModel = computeStandingsViewModel(section, { selectedSport: 'football' });
+    const netballRows = toStandingsExportRows(netballViewModel.rows);
+    const footballRows = toStandingsExportRows(footballViewModel.rows);
+
+    if (!netballRows.length && !footballRows.length) {
+      showSmartToast('No football or netball standings data to export yet.', { tone: 'info' });
+      return;
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    try {
+      await exportProfessionalWorkbook({
+        fileName: `inter-house-netball-football-standings-${stamp}.xlsx`,
+        sheetName: 'Combined Standings',
+        title: 'Official League Standings',
+        contextLine: subtitle ? `${subtitle} • Netball then Football` : 'Inter-House League • Netball then Football',
+        metaLine: `Netball Updated: ${netballViewModel.lastUpdated} • Football Updated: ${footballViewModel.lastUpdated}`,
+        tableSections: [
+          {
+            title: 'Netball Standings',
+            metaLine: `Last Updated: ${netballViewModel.lastUpdated}`,
+            columns: buildStandingsColumns(),
+            rows: netballRows,
+            note: String(netballViewModel.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+            afterRows: emphasizeLeadingRow
+          },
+          {
+            title: 'Football Standings',
+            metaLine: `Last Updated: ${footballViewModel.lastUpdated}`,
+            columns: buildStandingsColumns(),
+            rows: footballRows,
+            note: String(footballViewModel.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+            afterRows: emphasizeLeadingRow
+          }
+        ]
+      });
+      showSmartToast('Combined football and netball standings exported (.xlsx).', { tone: 'success' });
+    } catch {
+      showSmartToast('Could not export combined standings right now.', { tone: 'error' });
     }
   });
 
