@@ -687,6 +687,13 @@ body[data-audience='public'] .standings-table thead th {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-align: center;
+  }
+
+  body[data-audience='public'] .standings-table th:nth-child(2),
+  body[data-audience='public'] .standings-table td:nth-child(2),
+  body[data-audience='public'] .standings-table tbody th[scope='row'] {
+    text-align: left;
   }
 
   body[data-audience='public'] .standings-table th,
