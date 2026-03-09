@@ -3498,12 +3498,12 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <input type="checkbox" data-fixture-auto-fill />
                     <span>Auto-fill dates (use rules)</span>
                   </label>
-                  <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate draft fixtures</button>
+                  <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate live fixtures</button>
                   <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
                   <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
                 </div>
               </header>
-              <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
+              <p class="fixture-creator-flow">Workflow: 1) Generate live fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Review fairness and confirm.</p>
               <div class="fixture-creator-sport-grid">
                 <label>
                   Sport code (required)
@@ -8027,20 +8027,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ...result.dateMap
     };
 
-    const isDraftOnly = isAdminMode && pendingFixtureApproval;
-    if (!isDraftOnly) {
-      persistFixtureDatesToStorage();
-    }
+    persistFixtureDatesToStorage();
 
     if (statusNode) {
-      statusNode.textContent = isDraftOnly
-        ? `Draft fixtures updated: ${fixtures.length} dates auto-filled (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync calendar.`
-        : `Fixtures generated and ${fixtures.length} dates auto-filled using rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      statusNode.textContent = `Fixtures updated live: ${fixtures.length} dates auto-filled (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = isDraftOnly
-        ? `Auto-fill completed in draft mode (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync.`
-        : `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      rulesStatusNode.textContent = `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Calendar events refreshed.`;
     }
     renderAutoFillPreview(fixtures, result.dateMap, result.matchesPerDay);
     workflowSteps?.expandStep('review-fixtures');
@@ -8068,20 +8061,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ...lastPreviewDateMap
     };
 
-    const isDraftOnly = isAdminMode && pendingFixtureApproval;
-    if (!isDraftOnly) {
-      persistFixtureDatesToStorage();
-    }
+    persistFixtureDatesToStorage();
 
     if (statusNode) {
-      statusNode.textContent = isDraftOnly
-        ? `Draft dates applied to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync calendar.`
-        : `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      statusNode.textContent = `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = isDraftOnly
-        ? `Previewed dates applied in draft mode (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync.`
-        : `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      rulesStatusNode.textContent = `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Calendar events refreshed.`;
     }
     renderFixtures(lastFixtures);
     workflowSteps?.expandStep('review-fixtures');
@@ -9164,9 +9150,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!shouldShow) return;
 
     if (currentUnfairnessReport.hasUnfairness) {
-      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) violate selected fairness rules. Resolve highlighted rows before finalizing sync.`;
+      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) violate selected fairness rules. Resolve highlighted rows while the live calendar and standings stay in sync.`;
     } else {
-      approvalStatusNode.textContent = 'Draft is ready. Use Finalize & sync to publish fixtures to the calendar.';
+      approvalStatusNode.textContent = 'Live fixture draft is synced. Use the confirmation step only to validate fairness after review.';
     }
 
     if (approveResolvedButton instanceof HTMLButtonElement) {
@@ -9592,8 +9578,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (statusNode) {
       if (isAdminMode && pendingFixtureApproval) {
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Draft only (not synced): ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows and finalize when ready.`
-          : 'Draft only (not synced): fairness checks passed. Click "Finalize & sync" to publish fixtures to calendar.';
+          ? `Live draft synced: ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows and review them.`
+          : 'Live draft synced: fairness checks passed and calendar/log views are up to date.';
       } else if (isAdminMode && approvedWithUnfairness && currentUnfairnessReport.hasUnfairness) {
         statusNode.textContent = `Fixtures approved with fairness warnings (${currentUnfairnessReport.affectedFixtureCount} highlighted fixture${currentUnfairnessReport.affectedFixtureCount === 1 ? '' : 's'}).`;
       } else {
@@ -9748,18 +9734,20 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (isAdminMode) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
+      saveFixtureCatalog(lastFixtures);
       loadFixtureDates();
       if (autoFillDates) {
         autoFillFixtureDates(lastFixtures);
+        loadFixtureDates();
       }
       persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Draft generated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-          : 'Draft generated. Review/edit fixtures, then click Finalize & sync to publish to calendar.';
+          ? `Fixtures generated and synced live with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+          : 'Fixtures generated and synced live. Calendar, log views, and standings are up to date.';
       }
-      showSmartToast('Draft fixtures generated. Calendar sync happens only on Finalize & sync.', { tone: 'info' });
+      showSmartToast('Fixtures generated and synced live.', { tone: 'success' });
       return;
     }
 
@@ -10482,9 +10470,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
-      } else {
-        persistFixtureDatesToStorage();
       }
+      persistFixtureDatesToStorage();
       renderFixtures(lastFixtures);
       return;
     }
@@ -10503,9 +10490,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
-      } else {
-        persistFixtureDatesToStorage();
       }
+      persistFixtureDatesToStorage();
       renderFixtures(lastFixtures);
       return;
     }
@@ -10536,21 +10522,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       lastFixtures = repairResult.fixtures;
       refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode) {
-        pendingFixtureApproval = true;
-        approvedWithUnfairness = false;
-      } else {
-        pendingFixtureApproval = false;
-        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-        saveFixtureCatalog(lastFixtures);
-        persistActiveSportState();
-      }
+      pendingFixtureApproval = isAdminMode;
+      approvedWithUnfairness = !isAdminMode && currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+      persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
         if (pendingFixtureApproval) {
           statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+            ? `Live fixture draft updated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+            : 'Live fixture draft updated and synced.';
         } else {
           statusNode.textContent = repairResult.affectedOtherCount > 0
             ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
@@ -10586,21 +10567,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       lastFixtures = repairResult.fixtures;
       refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode) {
-        pendingFixtureApproval = true;
-        approvedWithUnfairness = false;
-      } else {
-        pendingFixtureApproval = false;
-        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-        saveFixtureCatalog(lastFixtures);
-        persistActiveSportState();
-      }
+      pendingFixtureApproval = isAdminMode;
+      approvedWithUnfairness = !isAdminMode && currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+      persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
         if (pendingFixtureApproval) {
           statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+            ? `Live fixture draft updated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+            : 'Live fixture draft updated and synced.';
         } else {
           statusNode.textContent = repairResult.affectedOtherCount > 0
             ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
@@ -10660,6 +10636,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
       }
+      saveFixtureCatalog(lastFixtures);
       persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
@@ -10746,11 +10723,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return;
     }
 
+    saveFixtureCatalog(lastFixtures);
     persistActiveSportState();
+    persistFixtureDatesToStorage();
     if (statusNode) {
-      statusNode.textContent = 'Fixture draft saved. Use Finalize & sync when you are ready to publish to calendar.';
+      statusNode.textContent = 'Fixture draft saved and kept live for calendar, match logs, and standings.';
     }
-    showSmartToast('Fixture draft saved.', { tone: 'success' });
+    showSmartToast('Fixture draft saved and synced live.', { tone: 'success' });
   });
 
   fixtureTemplateSelect?.addEventListener('change', () => {
