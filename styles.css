@@ -702,12 +702,12 @@ body[data-audience='public'] .standings-table thead th {
 
   body[data-audience='public'] .standings-table th:nth-child(2),
   body[data-audience='public'] .standings-table td:nth-child(2) {
-    width: 28%;
+    width: 22%;
   }
 
   body[data-audience='public'] .standings-table th:nth-child(n + 3):nth-child(-n + 10),
   body[data-audience='public'] .standings-table td:nth-child(n + 3):nth-child(-n + 10) {
-    width: 7.875%;
+    width: 8.625%;
   }
 
   body[data-audience='public'] .standings-meta {
@@ -5594,6 +5594,21 @@ body.match-log-workspace-open {
   body[data-audience='public'] .alert-box {
     padding: 12px;
     border-radius: 10px;
+  }
+
+  body[data-audience='public'] .panel.standings-panel {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+  }
+
+  body[data-audience='public'] .standings-sport-switch,
+  body[data-audience='public'] .standings-table-wrap,
+  body[data-audience='public'] .standings-meta {
+    width: 100%;
+    margin-inline: 0;
   }
 
   body[data-audience='public'] .card-image {
