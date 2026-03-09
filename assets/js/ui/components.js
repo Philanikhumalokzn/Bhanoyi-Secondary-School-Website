@@ -943,7 +943,7 @@ const hydrateLeagueStandings = (standingsNode) => {
         fileName: `inter-house-netball-football-standings-${stamp}.xlsx`,
         sheetName: 'Combined Standings',
         title: 'Official League Standings',
-        contextLine: subtitle ? `${subtitle} • ${netballLabel} then ${footballLabel}` : `Inter-House League • ${netballLabel} then ${footballLabel}`,
+        contextLine: subtitle ? `${subtitle} • ${netballLabel}/${footballLabel}` : `Inter-House League • ${netballLabel}/${footballLabel}`,
         metaLine: `${netballLabel} Updated: ${netballViewModel.lastUpdated} • ${footballLabel} Updated: ${footballViewModel.lastUpdated}`,
         tableSections: [
           {
@@ -964,7 +964,7 @@ const hydrateLeagueStandings = (standingsNode) => {
           }
         ]
       });
-      showSmartToast('Combined football and netball standings exported (.xlsx).', { tone: 'success' });
+      showSmartToast('Combined Netball/Football standings exported (.xlsx).', { tone: 'success' });
     } catch {
       showSmartToast('Could not export combined standings right now.', { tone: 'error' });
     }

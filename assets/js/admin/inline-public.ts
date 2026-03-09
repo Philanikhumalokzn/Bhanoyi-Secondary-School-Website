@@ -6746,7 +6746,7 @@ const wireFixtureCreatorInline = (section: Element) => {
     editorWrap = document.createElement('div');
     editorWrap.className = 'inline-admin-controls';
 
-    const sportEditor = createTextEditor('Sport label', readState.sport || 'Football / Netball');
+    const sportEditor = createTextEditor('Sport label', readState.sport || 'Netball/Football');
     sportInput = sportEditor.input;
     sportEditor.wrapper.classList.add('inline-match-house-editor');
     editorWrap.appendChild(sportEditor.wrapper);
