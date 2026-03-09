@@ -647,7 +647,7 @@ body[data-audience='public'] .standings-table thead th {
 
 @media (max-width: 640px) {
   body[data-audience='public'] .standings-panel {
-    width: min(100%, 560px);
+    width: 100%;
     margin-inline: auto;
   }
 
@@ -661,15 +661,42 @@ body[data-audience='public'] .standings-table thead th {
     font-size: 0.88rem;
   }
 
+  body[data-audience='public'] .standings-table-wrap {
+    overflow-x: clip;
+  }
+
   body[data-audience='public'] .standings-table {
-    width: max-content;
-    min-width: 520px;
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
   }
 
   body[data-audience='public'] .standings-table th,
   body[data-audience='public'] .standings-table td {
-    padding: 7px 8px;
-    font-size: 0.84rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body[data-audience='public'] .standings-table th,
+  body[data-audience='public'] .standings-table td {
+    padding: 6px 4px;
+    font-size: 0.76rem;
+  }
+
+  body[data-audience='public'] .standings-table th:nth-child(1),
+  body[data-audience='public'] .standings-table td:nth-child(1) {
+    width: 9%;
+  }
+
+  body[data-audience='public'] .standings-table th:nth-child(2),
+  body[data-audience='public'] .standings-table td:nth-child(2) {
+    width: 28%;
+  }
+
+  body[data-audience='public'] .standings-table th:nth-child(n + 3):nth-child(-n + 10),
+  body[data-audience='public'] .standings-table td:nth-child(n + 3):nth-child(-n + 10) {
+    width: 7.875%;
   }
 
   body[data-audience='public'] .standings-meta {
