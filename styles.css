@@ -702,12 +702,12 @@ body[data-audience='public'] .standings-table thead th {
 
   body[data-audience='public'] .standings-table th:nth-child(2),
   body[data-audience='public'] .standings-table td:nth-child(2) {
-    width: 18%;
+    width: 14%;
   }
 
   body[data-audience='public'] .standings-table th:nth-child(n + 3):nth-child(-n + 10),
   body[data-audience='public'] .standings-table td:nth-child(n + 3):nth-child(-n + 10) {
-    width: 9.125%;
+    width: 9.625%;
   }
 
   body[data-audience='public'] .standings-meta {
