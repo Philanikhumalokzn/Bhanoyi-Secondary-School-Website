@@ -4461,6 +4461,20 @@ body.match-log-workspace-open {
   padding: 8px;
 }
 
+.school-calendar-inline-day-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.school-calendar-inline-day-header {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
 .calendar-workflow-step {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -5172,6 +5186,11 @@ body.match-log-workspace-open {
     padding: 4px;
   }
 
+  .school-calendar-inline-day-panel {
+    padding: 8px;
+    border-radius: 8px;
+  }
+
   .school-calendar-shell.is-public-view .fc .fc-header-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -5218,6 +5237,16 @@ body.match-log-workspace-open {
 
   .school-calendar-shell.is-public-view .calendar-event-title {
     font-size: 0.68rem;
+  }
+
+  .school-calendar-inline-day-panel .calendar-day-event-open {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .school-calendar-inline-day-panel .calendar-day-event-type {
+    justify-self: start;
   }
 
   .calendar-day-event-row {

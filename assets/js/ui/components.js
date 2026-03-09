@@ -11079,7 +11079,7 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
           ${
             publicAudience
-              ? '<div class="school-calendar-root school-calendar-root-public" data-school-calendar></div>'
+              ? '<div class="school-calendar-root school-calendar-root-public" data-school-calendar></div><section class="school-calendar-inline-day-panel is-hidden" data-calendar-inline-day-panel><div class="calendar-day-overlay-header school-calendar-inline-day-header"><h3 data-calendar-inline-day-title>Events</h3><button type="button" class="btn btn-secondary" data-calendar-inline-day-close>Clear</button></div><div class="calendar-day-overlay-list" data-calendar-inline-day-list></div></section>'
               : `
           <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step data-calendar-default-open>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="true">
@@ -11282,6 +11282,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const dayOverlayTitle = calendarShell.querySelector('[data-calendar-day-title]');
   const dayOverlayList = calendarShell.querySelector('[data-calendar-day-list]');
   const dayOverlayCloseButton = calendarShell.querySelector('[data-calendar-day-close]');
+  const inlineDayPanel = calendarShell.querySelector('[data-calendar-inline-day-panel]');
+  const inlineDayTitle = calendarShell.querySelector('[data-calendar-inline-day-title]');
+  const inlineDayList = calendarShell.querySelector('[data-calendar-inline-day-list]');
+  const inlineDayCloseButton = calendarShell.querySelector('[data-calendar-inline-day-close]');
   const sportsOverlay = calendarShell.querySelector('[data-calendar-sports-overlay]');
   const sportsOverlayCloseButton = calendarShell.querySelector('[data-calendar-sports-close]');
   const sportsOverlayActions = calendarShell.querySelector('[data-calendar-sports-actions]');
@@ -11310,6 +11314,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const isStaffMode = new URLSearchParams(window.location.search).get('staff') === '1';
   const isPublicCalendarView = !isAdminMode && !isStaffMode && config.publicAudience === true;
   const isCompactPublicCalendar = isPublicCalendarView && window.matchMedia('(max-width: 760px)').matches;
+  const useInlineDayPanel = isCompactPublicCalendar;
   if (adminPanel) {
     adminPanel.classList.toggle('is-hidden', !isAdminMode);
   }
@@ -12258,8 +12263,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
     sportsOverlayHandledForCurrentSelection = true;
   };
 
-  const renderDayOverlayList = (dateString) => {
-    if (!(dayOverlayList instanceof HTMLElement)) return;
+  const renderDayEventList = (targetNode, dateString) => {
+    if (!(targetNode instanceof HTMLElement)) return;
 
     const dayEvents = calendar
       .getEvents()
@@ -12267,11 +12272,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
       .sort((left, right) => eventStartStamp(left) - eventStartStamp(right));
 
     if (!dayEvents.length) {
-      dayOverlayList.innerHTML = '<p class="calendar-day-empty">No events on this day.</p>';
+      targetNode.innerHTML = '<p class="calendar-day-empty">No events on this day.</p>';
       return;
     }
 
-    dayOverlayList.innerHTML = dayEvents
+    targetNode.innerHTML = dayEvents
       .map((entry) => {
         const eventType = escapeHtmlText(String(entry.extendedProps?.eventType || 'General'));
         const eventTypeWithIcon = escapeHtmlText(formatEventTypeWithIcon(eventType));
@@ -12296,10 +12301,43 @@ const hydrateSchoolCalendar = (calendarShell) => {
       .join('');
   };
 
+  const renderDayOverlayList = (dateString) => {
+    renderDayEventList(dayOverlayList, dateString);
+  };
+
+  const renderInlineDayList = (dateString) => {
+    renderDayEventList(inlineDayList, dateString);
+  };
+
+  const hideInlineDayPanel = () => {
+    activeOverlayDate = '';
+    if (inlineDayPanel instanceof HTMLElement) {
+      inlineDayPanel.classList.add('is-hidden');
+    }
+  };
+
   const showDayOverlay = (dateString) => {
     const normalized = normalizeDateString(dateString);
-    if (!(dayOverlay instanceof HTMLElement) || !normalized) return;
+    if (!normalized) return;
     activeOverlayDate = normalized;
+    if (useInlineDayPanel) {
+      if (inlineDayTitle instanceof HTMLElement) {
+        inlineDayTitle.textContent = `Events • ${formatOverlayDateTitle(normalized)}`;
+      }
+      renderInlineDayList(normalized);
+      if (inlineDayPanel instanceof HTMLElement) {
+        inlineDayPanel.classList.remove('is-hidden');
+        inlineDayPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      const firstInlineRow = inlineDayPanel?.querySelector('[data-calendar-day-event-open]');
+      if (firstInlineRow instanceof HTMLButtonElement) {
+        firstInlineRow.focus();
+      } else if (inlineDayCloseButton instanceof HTMLButtonElement) {
+        inlineDayCloseButton.focus();
+      }
+      return;
+    }
+    if (!(dayOverlay instanceof HTMLElement)) return;
     if (dayOverlayTitle instanceof HTMLElement) {
       dayOverlayTitle.textContent = `Events • ${formatOverlayDateTitle(normalized)}`;
     }
@@ -12315,6 +12353,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   const refreshDayOverlay = () => {
     if (!activeOverlayDate) return;
+    if (useInlineDayPanel) {
+      renderInlineDayList(activeOverlayDate);
+      return;
+    }
     renderDayOverlayList(activeOverlayDate);
   };
 
@@ -12608,6 +12650,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
     hideDayOverlay();
   });
 
+  inlineDayCloseButton?.addEventListener('click', () => {
+    hideInlineDayPanel();
+  });
+
   dayOverlay?.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -12658,6 +12704,22 @@ const hydrateSchoolCalendar = (calendarShell) => {
         writeEventToForm(eventEntry);
         hideDayOverlay();
       }
+    }
+  });
+
+  inlineDayPanel?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const openButton = target.closest('[data-calendar-day-event-open]');
+    if (!(openButton instanceof HTMLButtonElement)) return;
+    const eventId = String(openButton.dataset.calendarDayEventOpen || '').trim();
+    if (!eventId) return;
+    const eventEntry = calendar.getEventById(eventId);
+    if (!eventEntry) return;
+    if (isAdminMode) {
+      writeEventToForm(eventEntry);
+      hideInlineDayPanel();
     }
   });
 
