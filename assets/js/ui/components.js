@@ -469,6 +469,83 @@ const normalizeStandingsSportCode = (value) => {
   return '';
 };
 
+const ENTITY_EMOJI_REGISTRY = Object.freeze({
+  eventTypes: Object.freeze({
+    sports: '🏆',
+    religious: '🕊️',
+    cultural: '🎭',
+    entertainment: '🎉',
+    academic: '📘',
+    meeting: '🗓️',
+    assembly: '📣',
+    exam: '📝',
+    holiday: '🌴',
+    community: '🤝'
+  }),
+  sportCodes: Object.freeze({
+    soccer: Object.freeze({
+      key: 'soccer',
+      label: 'Football',
+      emoji: '⚽',
+      aliases: Object.freeze(['soccer', 'football'])
+    }),
+    netball: Object.freeze({
+      key: 'netball',
+      label: 'Netball',
+      emoji: '🏐',
+      aliases: Object.freeze(['netball'])
+    }),
+    athletics: Object.freeze({
+      key: 'athletics',
+      label: 'Athletics',
+      emoji: '🏃',
+      aliases: Object.freeze(['athletics', 'track', 'track and field'])
+    })
+  })
+});
+
+const resolveSportCodeDefinition = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  return Object.values(ENTITY_EMOJI_REGISTRY.sportCodes).find((entry) =>
+    entry.aliases.some((alias) => raw === alias || raw.includes(alias))
+  ) || null;
+};
+
+const formatSportCodeWithEmoji = (value) => {
+  const definition = resolveSportCodeDefinition(value);
+  if (!definition) {
+    const label = String(value || '').trim();
+    return label ? `🏅 ${label}` : '🏅 Sport';
+  }
+  return `${definition.emoji} ${definition.label}`;
+};
+
+const formatFixtureCalendarTitle = ({ homeName = '', awayName = '', sportKey = '', sportLabel = '', fallbackTitle = '' } = {}) => {
+  const home = String(homeName || '').trim();
+  const away = String(awayName || '').trim();
+  const matchup = home && away ? `${home} vs ${away}` : String(fallbackTitle || '').trim();
+  const definition = resolveSportCodeDefinition(sportKey || sportLabel);
+  if (!definition) return matchup || 'Fixture';
+  return matchup ? `${definition.emoji} ${definition.label}: ${matchup}` : `${definition.emoji} ${definition.label}`;
+};
+
+const stripFixtureSportPrefix = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const matchedDefinition = Object.values(ENTITY_EMOJI_REGISTRY.sportCodes).find((entry) =>
+    raw.startsWith(`${entry.emoji} ${entry.label}: `) || raw.startsWith(`${entry.label}: `)
+  );
+
+  if (!matchedDefinition) return raw;
+
+  return raw
+    .replace(`${matchedDefinition.emoji} ${matchedDefinition.label}: `, '')
+    .replace(`${matchedDefinition.label}: `, '')
+    .trim();
+};
+
 const computeStandingsViewModel = (section, context = {}) => {
   const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const selectedSport = normalizeStandingsSportCode(context.selectedSport || section.defaultSport || 'football') || 'football';
@@ -4425,10 +4502,14 @@ const hydrateEnrollmentManager = (managerNode) => {
       )
     );
     const effectiveTitles = titles.length ? titles : fallbackTitles;
-    return effectiveTitles.map((title, index) => ({
-      id: toSportCodeId(title, index),
-      title
-    }));
+    return effectiveTitles.map((title, index) => {
+      const definition = resolveSportCodeDefinition(title);
+      return {
+        id: toSportCodeId(title, index),
+        title,
+        emoji: definition?.emoji || '🏅'
+      };
+    });
   };
 
   const findSportingCodeTitle = (matcher) => {
@@ -8645,6 +8726,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const fixtureId = getFixtureId(fixture);
       const sportProfile = sportProfiles[fixture.sportKey] || null;
       const setup = sportProfile?.readSetup?.() || {};
+      const sportLabel = sportProfile?.label || '';
+      const homeName = teamNameById(fixture.homeId);
+      const awayName = teamNameById(fixture.awayId);
       catalog[fixtureId] = {
         id: fixtureId,
         round: fixture.round,
@@ -8652,11 +8736,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
         match: fixture.match,
         homeId: fixture.homeId,
         awayId: fixture.awayId,
-        homeName: teamNameById(fixture.homeId),
-        awayName: teamNameById(fixture.awayId),
-        title: `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`,
+        homeName,
+        awayName,
+        title: formatFixtureCalendarTitle({
+          homeName,
+          awayName,
+          sportKey: fixture.sportKey,
+          sportLabel
+        }),
         sportKey: fixture.sportKey,
-        sport: sportProfile?.label || '',
+        sport: sportLabel,
         competition: String(config.competition || '').trim(),
         venue: String(config.venue || '').trim(),
         format: String(setup.formatLabel || '').trim(),
@@ -11504,18 +11593,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     return raw.replace(/\s+/g, ' ');
   };
 
-  const eventTypeIconMap = {
-    sports: '🏆',
-    religious: '🕊️',
-    cultural: '🎭',
-    entertainment: '🎉',
-    academic: '📘',
-    meeting: '🗓️',
-    assembly: '📣',
-    exam: '📝',
-    holiday: '🌴',
-    community: '🤝'
-  };
+  const eventTypeIconMap = ENTITY_EMOJI_REGISTRY.eventTypes;
 
   const resolveEventTypeIcon = (value) => {
     const normalized = normalizeEventTypeLabel(value).toLowerCase();
@@ -11902,11 +11980,16 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const buildFixtureEventTitle = (fixtureId, fixtureCatalog) => {
     const entry = fixtureCatalog?.[fixtureId];
     if (entry && typeof entry === 'object') {
-      const title = String(entry.title || '').trim();
-      if (title) return title;
       const home = String(entry.homeName || '').trim();
       const away = String(entry.awayName || '').trim();
-      if (home && away) return `${home} vs ${away}`;
+      const title = formatFixtureCalendarTitle({
+        homeName: home,
+        awayName: away,
+        sportKey: entry.sportKey || '',
+        sportLabel: entry.sport || '',
+        fallbackTitle: String(entry.title || '').trim()
+      });
+      if (title) return title;
     }
     const [section, round, leg, match, homeId, awayId] = String(fixtureId || '').split(':');
     if (section && round && leg && match && homeId && awayId) {
@@ -12056,6 +12139,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
         const isTimedFixture = Boolean(fixtureTime);
 
         const existingStyle = existingStyleByFixtureId.get(fixtureId) || {};
+        const fixtureDefinition = fixtureCatalog?.[fixtureId] && typeof fixtureCatalog[fixtureId] === 'object'
+          ? fixtureCatalog[fixtureId]
+          : {};
+        const sportDefinition = resolveSportCodeDefinition(fixtureDefinition.sportKey || fixtureDefinition.sport || '');
 
         const newEntry = calendar.addEvent({
           id: `${fixtureId}:event`,
@@ -12068,6 +12155,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
           extendedProps: {
             eventType: existingStyle.eventType || 'Sports',
             fixtureId,
+            sportKey: sportDefinition?.key || '',
+            sportLabel: sportDefinition?.label || String(fixtureDefinition.sport || '').trim(),
             notes: existingStyle.notes || '',
             fixtureAuto: true
           }
@@ -12119,13 +12208,14 @@ const hydrateSchoolCalendar = (calendarShell) => {
     const fixtureId = String(eventEntry?.extendedProps?.fixtureId || '').trim();
 
     if (fixtureId) {
-      const matched = rawTitle.match(/^(.+?)\s+(?:vs|v\.?|versus)\s+(.+)$/i);
+      const fixtureTitle = stripFixtureSportPrefix(rawTitle);
+      const matched = fixtureTitle.match(/^(.+?)\s+(?:vs|v\.?|versus)\s+(.+)$/i);
       if (matched) {
         const homeCode = shortFixtureTeamCode(matched[1]);
         const awayCode = shortFixtureTeamCode(matched[2]);
         return `${homeCode} vs ${awayCode}`;
       }
-      return truncateCalendarTitle(rawTitle, 13);
+      return truncateCalendarTitle(fixtureTitle || rawTitle, 13);
     }
 
     return truncateCalendarTitle(rawTitle, 20);
@@ -12278,8 +12368,11 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
     targetNode.innerHTML = dayEvents
       .map((entry) => {
-        const eventType = escapeHtmlText(String(entry.extendedProps?.eventType || 'General'));
-        const eventTypeWithIcon = escapeHtmlText(formatEventTypeWithIcon(eventType));
+        const sportLabel = String(entry.extendedProps?.sportLabel || entry.extendedProps?.sportKey || '').trim();
+        const eventType = sportLabel || String(entry.extendedProps?.eventType || 'General');
+        const eventTypeWithIcon = escapeHtmlText(
+          sportLabel ? formatSportCodeWithEmoji(sportLabel) : formatEventTypeWithIcon(eventType)
+        );
         const title = escapeHtmlText(String(entry.title || 'Untitled event'));
         const eventId = escapeHtmlAttribute(String(entry.id || ''));
         const timeLabel = escapeHtmlText(formatTimeLabel(entry));
@@ -12478,7 +12571,10 @@ ${detailMarkup}
     eventContent: (arg) => {
       if (arg.event.display === 'background') return true;
       const typeLabel = normalizeEventTypeLabel(arg.event.extendedProps?.eventType || 'General');
-      const icon = resolveEventTypeIcon(typeLabel);
+      const fixtureSport = resolveSportCodeDefinition(
+        arg.event.extendedProps?.sportKey || arg.event.extendedProps?.sportLabel || ''
+      );
+      const icon = fixtureSport?.emoji || resolveEventTypeIcon(typeLabel);
       const compactTitle = compactCalendarEventTitle(arg.event);
 
       const wrapper = document.createElement('div');
