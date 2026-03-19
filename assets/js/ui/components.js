@@ -2125,6 +2125,12 @@ const loadEnrollmentStaffByHouse = (homeId, awayId) => {
 
 const MAX_MATCH_STARTERS = 11;
 const MAX_MATCH_SUBSTITUTES = 6;
+const DEFAULT_MATCH_DISCIPLINE_POLICY = {
+  straightRedSuspensionMatches: 1,
+  secondYellowSuspensionMatches: 1,
+  yellowAccumulationThreshold: 2,
+  yellowAccumulationSuspensionMatches: 1
+};
 
 const createEmptyMatchTeamSheet = () => ({
   starters: [],
@@ -2197,6 +2203,18 @@ const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) =
       return { starters, substitutes };
     })()
   };
+};
+
+const buildMatchParticipantKeySet = (participant) => {
+  if (!participant || typeof participant !== 'object') return new Set();
+
+  const keys = [
+    String(participant.id || '').trim(),
+    String(participant.admissionNo || '').trim(),
+    String(participant.name || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  ].filter(Boolean);
+
+  return new Set(keys);
 };
 
 const normalizeFixturePlayersByTeam = (fixture, storedPlayersByTeam, fallbackPlayersByTeam = null) => {
@@ -3054,6 +3072,97 @@ const hydrateMatchLog = (matchLogNode) => {
       getPlayersForTeam(teamId).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) ||
       null
     );
+  };
+
+  const eventMatchesParticipant = (event, participantKeySet, teamId) => {
+    if (!event || typeof event !== 'object') return false;
+    if (String(event.scope || '').trim() === 'match') return false;
+    if (String(event.teamId || '').trim() !== String(teamId || '').trim()) return false;
+    if (String(event.playerType || '').trim() === 'staff') return false;
+
+    const eventKeys = [
+      String(event.playerId || '').trim(),
+      String(event.playerAdmissionNo || '').trim(),
+      normalizeMatchSearchValue(event.playerName)
+    ].filter(Boolean);
+
+    return eventKeys.some((key) => participantKeySet.has(key));
+  };
+
+  const getPlayerDisciplinaryStatus = (teamId, player) => {
+    const fixture = getCurrentFixture();
+    if (!fixture || !player || player.participantType === 'staff') {
+      return {
+        activeSuspension: false,
+        suspensionMatchesRemaining: 0,
+        cautionCarry: 0,
+        reasons: []
+      };
+    }
+
+    const participantKeys = buildMatchParticipantKeySet(player);
+    if (!participantKeys.size) {
+      return {
+        activeSuspension: false,
+        suspensionMatchesRemaining: 0,
+        cautionCarry: 0,
+        reasons: []
+      };
+    }
+
+    const relevantFixtures = fixtureOptions.filter((entry) => {
+      if (!entry || entry.fixtureId === fixture.fixtureId) return false;
+      if (parseDateTimeStamp(entry.stamp) >= parseDateTimeStamp(fixture.stamp)) return false;
+      return entry.homeId === teamId || entry.awayId === teamId;
+    });
+
+    let suspensionMatchesRemaining = 0;
+    let cautionCarry = 0;
+    const reasons = [];
+
+    relevantFixtures.forEach((entry) => {
+      if (suspensionMatchesRemaining > 0) {
+        suspensionMatchesRemaining = Math.max(0, suspensionMatchesRemaining - 1);
+      }
+
+      const stored = logsByFixture[entry.fixtureId];
+      const events = Array.isArray(stored?.events) ? stored.events : [];
+      const yellowCards = events.filter(
+        (event) => String(event.type || '').trim() === 'yellow_card' && eventMatchesParticipant(event, participantKeys, teamId)
+      ).length;
+      const redCards = events.filter(
+        (event) => String(event.type || '').trim() === 'red_card' && eventMatchesParticipant(event, participantKeys, teamId)
+      ).length;
+
+      if (redCards > 0) {
+        suspensionMatchesRemaining += DEFAULT_MATCH_DISCIPLINE_POLICY.straightRedSuspensionMatches;
+        reasons.push(`Red card in ${entry.homeName} vs ${entry.awayName}`);
+        return;
+      }
+
+      if (yellowCards >= 2) {
+        suspensionMatchesRemaining += DEFAULT_MATCH_DISCIPLINE_POLICY.secondYellowSuspensionMatches;
+        cautionCarry = 0;
+        reasons.push(`Second caution suspension from ${entry.homeName} vs ${entry.awayName}`);
+        return;
+      }
+
+      if (yellowCards > 0) {
+        cautionCarry += 1;
+        if (cautionCarry >= DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationThreshold) {
+          suspensionMatchesRemaining += DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationSuspensionMatches;
+          cautionCarry = 0;
+          reasons.push(`Yellow-card accumulation suspension triggered after ${entry.homeName} vs ${entry.awayName}`);
+        }
+      }
+    });
+
+    return {
+      activeSuspension: suspensionMatchesRemaining > 0,
+      suspensionMatchesRemaining,
+      cautionCarry,
+      reasons
+    };
   };
 
   const computeScores = (fixture) => {
@@ -4127,6 +4236,28 @@ const hydrateMatchLog = (matchLogNode) => {
       if ([...current.starters, ...current.substitutes].some((player) => player.id === candidate.id)) {
         showSmartToast(`${candidate.name} is already in this team list.`, { tone: 'error' });
         return;
+      }
+
+      const discipline = getPlayerDisciplinaryStatus(teamId, candidate);
+      if (discipline.activeSuspension || discipline.cautionCarry > 0) {
+        const warningParts = [];
+        if (discipline.activeSuspension) {
+          warningParts.push(
+            `${candidate.name} appears to have an active suspension with ${discipline.suspensionMatchesRemaining} match${discipline.suspensionMatchesRemaining === 1 ? '' : 'es'} still to serve.`
+          );
+        }
+        if (discipline.cautionCarry > 0) {
+          warningParts.push(
+            `${candidate.name} also carries ${discipline.cautionCarry} caution${discipline.cautionCarry === 1 ? '' : 's'} under the current FIFA-style accumulation default.`
+          );
+        }
+        if (discipline.reasons.length) {
+          warningParts.push(`Source: ${discipline.reasons.join('; ')}.`);
+        }
+        warningParts.push('Add the player anyway?');
+
+        const confirmed = window.confirm(warningParts.join(' '));
+        if (!confirmed) return;
       }
 
       if (group === 'starters' && current.starters.length >= MAX_MATCH_STARTERS) {
