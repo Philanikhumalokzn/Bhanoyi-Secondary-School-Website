@@ -1560,6 +1560,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
                 </div>
                 <div class="match-log-header-actions">
                   <button type="button" class="btn btn-secondary" data-match-export>Export workbook</button>
+                  <button type="button" class="btn btn-secondary" data-match-export-template>Print team sheet template</button>
                   <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
                 </div>
               </header>
@@ -2517,6 +2518,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const teamLabel = matchLogNode.querySelector('[data-match-modal-team]');
   const modalTeamSelect = matchLogNode.querySelector('[data-match-modal-team-select]');
   const exportButton = matchLogNode.querySelector('[data-match-export]');
+  const exportTemplateButton = matchLogNode.querySelector('[data-match-export-template]');
   const saveLogButton = matchLogNode.querySelector('[data-match-save-log]');
   const saveStatusNode = matchLogNode.querySelector('[data-match-save-status]');
   const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
@@ -3705,6 +3707,368 @@ const hydrateMatchLog = (matchLogNode) => {
     });
   };
 
+  const buildPrintableLineItems = (count, label) =>
+    Array.from({ length: count }, (_, index) => `
+      <tr>
+        <td class="team-sheet-slot">${index + 1}</td>
+        <td class="team-sheet-line"></td>
+        <td class="team-sheet-jersey"></td>
+        <td class="team-sheet-notes"></td>
+      </tr>
+    `).join('');
+
+  const buildPrintableStaffItems = (labels) =>
+    labels
+      .map(
+        (label) => `
+          <tr>
+            <td class="team-sheet-staff-label">${escapeHtmlText(label)}</td>
+            <td class="team-sheet-line"></td>
+            <td class="team-sheet-notes"></td>
+          </tr>
+        `
+      )
+      .join('');
+
+  const buildPrintableTeamSheetSection = (teamName) => `
+    <section class="team-sheet-card">
+      <header class="team-sheet-card-head">
+        <div>
+          <h2>${escapeHtmlText(teamName)}</h2>
+          <p>Starting lineup, substitutes, and team officials</p>
+        </div>
+      </header>
+
+      <div class="team-sheet-block">
+        <div class="team-sheet-block-head">
+          <h3>Starting Lineup</h3>
+          <span>11 players</span>
+        </div>
+        <table class="team-sheet-table">
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>Player Name</th>
+              <th>Jersey</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${buildPrintableLineItems(MAX_MATCH_STARTERS, 'Starter')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="team-sheet-block">
+        <div class="team-sheet-block-head">
+          <h3>Substitutes</h3>
+          <span>6 players</span>
+        </div>
+        <table class="team-sheet-table">
+          <thead>
+            <tr>
+              <th>No.</th>
+              <th>Player Name</th>
+              <th>Jersey</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${buildPrintableLineItems(MAX_MATCH_SUBSTITUTES, 'Substitute')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="team-sheet-block">
+        <div class="team-sheet-block-head">
+          <h3>Team Officials</h3>
+          <span>Fill by hand</span>
+        </div>
+        <table class="team-sheet-table team-sheet-table-staff">
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Name</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${buildPrintableStaffItems(['Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'])}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="team-sheet-signoff">
+        <p><strong>Captain:</strong> ______________________________</p>
+        <p><strong>Coach Signature:</strong> ______________________________</p>
+      </div>
+    </section>
+  `;
+
+  const buildMatchTeamSheetTemplateHtml = (fixture) => {
+    const title = `${fixture.homeName} vs ${fixture.awayName} Team Sheet Template`;
+    const fixtureDate = fixture.date ? formatDateLabel(fixture.date) : 'TBC';
+    const kickoff = fixture.time || 'TBC';
+    const venue = fixture.venue || config.venue || 'TBC';
+    const sportLabel = fixture.sport || config.sport || 'Match';
+    const competitionLabel = fixture.competition || config.competition || '';
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtmlText(title)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #122033;
+        --muted: #5c6a7d;
+        --border: #c8d1dc;
+        --panel: #f5f7fa;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: var(--ink);
+        background: #eef2f6;
+      }
+
+      .team-sheet-page {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .team-sheet-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .team-sheet-toolbar button {
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 16px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        color: white;
+        background: #143d6b;
+      }
+
+      .team-sheet-document {
+        background: white;
+        border-radius: 18px;
+        box-shadow: 0 18px 50px rgba(10, 18, 32, 0.12);
+        padding: 28px;
+      }
+
+      .team-sheet-header {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+
+      .team-sheet-header h1,
+      .team-sheet-card h2,
+      .team-sheet-block h3,
+      .team-sheet-meta p,
+      .team-sheet-card-head p,
+      .team-sheet-signoff p {
+        margin: 0;
+      }
+
+      .team-sheet-kicker {
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        font-size: 0.74rem;
+        color: var(--muted);
+      }
+
+      .team-sheet-header h1 {
+        font-size: 1.9rem;
+      }
+
+      .team-sheet-meta {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .team-sheet-meta p {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--panel);
+        padding: 10px 12px;
+      }
+
+      .team-sheet-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .team-sheet-card {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 18px;
+        display: grid;
+        gap: 16px;
+      }
+
+      .team-sheet-card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .team-sheet-card-head p,
+      .team-sheet-block-head span {
+        color: var(--muted);
+      }
+
+      .team-sheet-block {
+        display: grid;
+        gap: 8px;
+      }
+
+      .team-sheet-block-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .team-sheet-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .team-sheet-table th,
+      .team-sheet-table td {
+        border: 1px solid var(--border);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      .team-sheet-table th {
+        background: var(--panel);
+        font-size: 0.84rem;
+      }
+
+      .team-sheet-slot,
+      .team-sheet-jersey {
+        width: 52px;
+        text-align: center;
+      }
+
+      .team-sheet-staff-label {
+        width: 160px;
+        font-weight: 700;
+      }
+
+      .team-sheet-line {
+        height: 34px;
+      }
+
+      .team-sheet-notes {
+        width: 28%;
+      }
+
+      .team-sheet-signoff {
+        display: grid;
+        gap: 10px;
+        margin-top: 4px;
+      }
+
+      @media (max-width: 900px) {
+        .team-sheet-meta,
+        .team-sheet-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media print {
+        body {
+          background: white;
+        }
+
+        .team-sheet-page {
+          max-width: none;
+          padding: 0;
+        }
+
+        .team-sheet-toolbar {
+          display: none;
+        }
+
+        .team-sheet-document {
+          box-shadow: none;
+          border-radius: 0;
+          padding: 0;
+        }
+
+        .team-sheet-card {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="team-sheet-page">
+      <div class="team-sheet-toolbar">
+        <div>
+          <strong>${escapeHtmlText(title)}</strong>
+        </div>
+        <button type="button" onclick="window.print()">Print template</button>
+      </div>
+
+      <main class="team-sheet-document">
+        <header class="team-sheet-header">
+          <p class="team-sheet-kicker">Bhanoyi Secondary School</p>
+          <h1>${escapeHtmlText(title)}</h1>
+          <div class="team-sheet-meta">
+            <p><strong>Sport:</strong> ${escapeHtmlText(sportLabel)}</p>
+            <p><strong>Competition:</strong> ${escapeHtmlText(competitionLabel || 'TBC')}</p>
+            <p><strong>Date / Time:</strong> ${escapeHtmlText(`${fixtureDate} · ${kickoff}`)}</p>
+            <p><strong>Venue:</strong> ${escapeHtmlText(venue)}</p>
+          </div>
+        </header>
+
+        <section class="team-sheet-grid">
+          ${buildPrintableTeamSheetSection(fixture.homeName)}
+          ${buildPrintableTeamSheetSection(fixture.awayName)}
+        </section>
+      </main>
+    </div>
+  </body>
+</html>`;
+  };
+
+  const exportMatchTeamSheetTemplate = () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (!printWindow) {
+      showSmartToast('Allow pop-ups to open the printable team sheet template.', { tone: 'error' });
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(buildMatchTeamSheetTemplateHtml(fixture));
+    printWindow.document.close();
+    printWindow.focus();
+  };
+
   const render = () => {
     const fixture = getCurrentFixture();
 
@@ -4636,6 +5000,10 @@ const hydrateMatchLog = (matchLogNode) => {
     void exportMatchWorkbook().catch(() => {
       showSmartToast('Could not export the match workbook right now.', { tone: 'error' });
     });
+  });
+
+  exportTemplateButton?.addEventListener('click', () => {
+    exportMatchTeamSheetTemplate();
   });
 
   saveLogButton?.addEventListener('click', () => {
