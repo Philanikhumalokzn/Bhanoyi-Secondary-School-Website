@@ -1271,7 +1271,7 @@ const inferMatchEventPlayerSearchScope = (key, label = '') => {
   }
 
   if (key === 'injury') {
-    return 'match_squad';
+    return 'active_match';
   }
 
   return 'team_players';
@@ -1331,7 +1331,7 @@ const DEFAULT_MATCH_EVENT_TYPES = [
     scoreFor: 'none',
     allowAssist: false,
     playerLabel: 'Injured Player',
-    playerSearchScope: 'match_squad'
+    playerSearchScope: 'active_match'
   },
   {
     key: 'substitution',
@@ -2886,24 +2886,49 @@ const hydrateMatchLog = (matchLogNode) => {
     };
   };
 
+  const getParticipantSearchScope = (definition, field = 'player') => {
+    if (field === 'assist') {
+      return String(definition?.assistSearchScope || definition?.playerSearchScope || 'team_players').trim();
+    }
+    if (field === 'replacement') {
+      return String(definition?.replacementSearchScope || 'bench_match').trim();
+    }
+    return String(definition?.playerSearchScope || 'team_players').trim();
+  };
+
+  const isSquadBoundSearchScope = (scope) => ['active_match', 'bench_match', 'match_squad'].includes(String(scope || '').trim());
+
+  const getParticipantScopeErrorMessage = (scope) => {
+    switch (String(scope || '').trim()) {
+      case 'active_match':
+        return 'Use a player from the current on-pitch squad for this event.';
+      case 'bench_match':
+        return 'Use a player from the substitutes list for this event.';
+      case 'match_squad':
+        return 'Use a player from the current match team list for this event.';
+      default:
+        return 'Use one of the suggested names for this event.';
+    }
+  };
+
   const getEventParticipants = (teamId, definition, field = 'player') => {
     const normalizedTeamId = getNormalizedTeamId(teamId);
     if (!normalizedTeamId) return [];
 
     const availability = getMatchAvailabilityForTeam(normalizedTeamId, { excludeEventId: editingEventId });
-    const scope = field === 'assist'
-      ? String(definition?.assistSearchScope || definition?.playerSearchScope || 'team_players').trim()
-      : field === 'replacement'
-        ? String(definition?.replacementSearchScope || 'bench_match').trim()
-        : String(definition?.playerSearchScope || 'team_players').trim();
+    const scope = getParticipantSearchScope(definition, field);
+
+    if (isSquadBoundSearchScope(scope) && !availability.hasSquad) {
+      return [];
+    }
 
     switch (scope) {
       case 'active_match':
-        return availability.hasSquad ? availability.active : getPlayersForTeam(normalizedTeamId);
+        return availability.active;
       case 'bench_match':
-        return availability.hasSquad ? availability.bench : getPlayersForTeam(normalizedTeamId);
+        return availability.bench;
       case 'match_squad':
-        return availability.hasSquad ? availability.squadPlayers : getPlayersForTeam(normalizedTeamId);
+        return availability.squadPlayers;
       case 'house_participants':
         return mergeUniqueMatchParticipants(getHousePlayersForTeam(normalizedTeamId), getStaffForTeam(normalizedTeamId));
       case 'team_players':
@@ -3039,7 +3064,7 @@ const hydrateMatchLog = (matchLogNode) => {
       const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
       const activeNames = availability.hasSquad
         ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
-        : 'No team list set yet. Goals and assists still use the full team list.';
+        : 'No team list set yet. Set the starting XI and substitutes before logging on-pitch events.';
 
       return `
         <article class="match-log-squad-card" data-match-squad-card="${escapeHtmlAttribute(teamId)}">
@@ -3050,7 +3075,7 @@ const hydrateMatchLog = (matchLogNode) => {
             </div>
             <button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>
           </header>
-          <p class="match-log-squad-helper">Goals, own goals, penalty goals, and assists use only the current on-pitch squad once a team list is set.</p>
+          <p class="match-log-squad-helper">Goals, own goals, penalty goals, injuries, assists, and substitutions only use the current team list and on-pitch squad.</p>
           <div class="match-log-squad-controls">
             <label>
               Find player
@@ -4271,6 +4296,40 @@ const hydrateMatchLog = (matchLogNode) => {
     const selectedPlayer = findParticipantByTypedName(activeTeamId, playerName, definition, 'player');
     const selectedAssist = findParticipantByTypedName(activeTeamId, assistName, definition, 'assist');
     const selectedReplacement = findParticipantByTypedName(activeTeamId, replacementName, definition, 'replacement');
+    const availability = getMatchAvailabilityForTeam(activeTeamId, { excludeEventId: editingEventId });
+    const validateScopedParticipant = (value, selectedParticipant, field) => {
+      const typedValue = String(value || '').trim();
+      if (!typedValue) return true;
+
+      const scope = getParticipantSearchScope(definition, field);
+      if (!isSquadBoundSearchScope(scope)) {
+        return true;
+      }
+
+      if (!availability.hasSquad) {
+        showSmartToast('Set the starting XI and substitutes for this team before logging on-pitch events.', { tone: 'error' });
+        return false;
+      }
+
+      if (!selectedParticipant) {
+        showSmartToast(getParticipantScopeErrorMessage(scope), { tone: 'error' });
+        return false;
+      }
+
+      return true;
+    };
+
+    if (!validateScopedParticipant(playerName, selectedPlayer, 'player')) {
+      return;
+    }
+
+    if (!validateScopedParticipant(assistName, selectedAssist, 'assist')) {
+      return;
+    }
+
+    if (!validateScopedParticipant(replacementName, selectedReplacement, 'replacement')) {
+      return;
+    }
 
     if (definition.showReplacement) {
       if (!playerName || !replacementName) {
@@ -4291,7 +4350,6 @@ const hydrateMatchLog = (matchLogNode) => {
       }
 
       if (!editingEventId) {
-        const availability = getMatchAvailabilityForTeam(activeTeamId);
         if (availability.hasSquad) {
           if (!availability.active.some((player) => player.id === selectedPlayer.id)) {
             showSmartToast('The player going off must currently be on the pitch.', { tone: 'error' });
