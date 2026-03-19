@@ -1911,30 +1911,44 @@ const normalizeFixturePlayersByTeam = (fixture, storedPlayersByTeam, fallbackPla
   if (!fixture) return {};
   const homeId = String(fixture.homeId || '').trim();
   const awayId = String(fixture.awayId || '').trim();
+  const normalizedHomeId = homeId.toLowerCase();
+  const normalizedAwayId = awayId.toLowerCase();
 
   const stored = storedPlayersByTeam && typeof storedPlayersByTeam === 'object' ? storedPlayersByTeam : {};
   const fallback = fallbackPlayersByTeam && typeof fallbackPlayersByTeam === 'object' ? fallbackPlayersByTeam : {};
+  const pickTeamPlayers = (source, teamId, normalizedTeamId, legacyKey) => {
+    if (!source || typeof source !== 'object') return [];
+    return source[teamId] || source[normalizedTeamId] || source[legacyKey] || [];
+  };
 
   const homePlayers = normalizeMatchPlayersForTeam(
-    stored[homeId] || stored.homePlayers || fallback[homeId] || fallback.homePlayers || [],
-    { houseId: homeId }
+    pickTeamPlayers(stored, homeId, normalizedHomeId, 'homePlayers') ||
+      pickTeamPlayers(fallback, homeId, normalizedHomeId, 'homePlayers') ||
+      [],
+    { houseId: normalizedHomeId || homeId }
   );
   const awayPlayers = normalizeMatchPlayersForTeam(
-    stored[awayId] || stored.awayPlayers || fallback[awayId] || fallback.awayPlayers || [],
-    { houseId: awayId }
+    pickTeamPlayers(stored, awayId, normalizedAwayId, 'awayPlayers') ||
+      pickTeamPlayers(fallback, awayId, normalizedAwayId, 'awayPlayers') ||
+      [],
+    { houseId: normalizedAwayId || awayId }
   );
 
-  if (homePlayers.length || awayPlayers.length) {
-    return {
-      [homeId]: homePlayers,
-      [awayId]: awayPlayers
-    };
-  }
+  const derived = loadEnrollmentPlayersByHouse(normalizedHomeId || homeId, normalizedAwayId || awayId, fixture.sport || '');
+  const resolvedHomePlayers = homePlayers.length
+    ? homePlayers
+    : normalizeMatchPlayersForTeam(derived[normalizedHomeId] || derived[homeId] || [], {
+        houseId: normalizedHomeId || homeId
+      });
+  const resolvedAwayPlayers = awayPlayers.length
+    ? awayPlayers
+    : normalizeMatchPlayersForTeam(derived[normalizedAwayId] || derived[awayId] || [], {
+        houseId: normalizedAwayId || awayId
+      });
 
-  const derived = loadEnrollmentPlayersByHouse(homeId, awayId, fixture.sport || '');
   return {
-    [homeId]: normalizeMatchPlayersForTeam(derived[homeId] || [], { houseId: homeId }),
-    [awayId]: normalizeMatchPlayersForTeam(derived[awayId] || [], { houseId: awayId })
+    [homeId]: resolvedHomePlayers,
+    [awayId]: resolvedAwayPlayers
   };
 };
 
