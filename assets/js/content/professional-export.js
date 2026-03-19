@@ -473,7 +473,7 @@ export const exportProfessionalWorkbook = async ({
     // Ensure print area covers all rendered table sections so PDF exports use correct dimensions
     try {
       const lastRenderedRow = currentRow - 1;
-      const lastColLabel = toColumnLabel(section.columns.length);
+      const lastColLabel = endColumnLabel || toColumnLabel(effectiveColumns.length);
       sheet.pageSetup = sheet.pageSetup || {};
       sheet.pageSetup.printArea = `A1:${lastColLabel}${lastRenderedRow}`;
       sheet.pageSetup.fitToPage = true;
