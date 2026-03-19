@@ -2500,7 +2500,7 @@ const renderMatchEventItem = (event, definition, options = {}) => {
   `;
 };
 
-const hydrateMatchLog = (matchLogNode) => {
+function hydrateMatchLog(matchLogNode) {
   const rawConfig = (matchLogNode.dataset.matchLogConfig || '').trim();
   if (!rawConfig) return;
 
@@ -3893,7 +3893,7 @@ const hydrateMatchLog = (matchLogNode) => {
     });
   };
 
-  const buildMatchTeamSheetTemplateSections = (fixture) => {
+  function buildMatchTeamSheetTemplateSections(fixture) {
     if (!fixture) return [];
 
     const squadTemplateColumns = [
@@ -3949,13 +3949,10 @@ const hydrateMatchLog = (matchLogNode) => {
       }
     ];
 
-    return [
-      ...buildSectionsForTeam(fixture.homeName),
-      ...buildSectionsForTeam(fixture.awayName)
-    ];
-  };
+    return [...buildSectionsForTeam(fixture.homeName), ...buildSectionsForTeam(fixture.awayName)];
+  }
 
-  const exportMatchTeamSheetTemplate = async () => {
+  async function exportMatchTeamSheetTemplate() {
     const fixture = getCurrentFixture();
     if (!fixture) return;
 
@@ -3991,14 +3988,15 @@ const hydrateMatchLog = (matchLogNode) => {
         }
       ]
     });
+
     showSmartToast('Team sheet template exported (.xlsx).', { tone: 'success' });
+  }
 
-  };
-
-  const render = () => {
+  function render() {
     const fixture = getCurrentFixture();
 
     if (!fixture) {
+      if (tableBodyNode) {
         tableBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="3">Choose a fixture date and match to start logging.</td></tr>';
       }
       if (playerStatsBodyNode) {
@@ -4210,7 +4208,7 @@ const hydrateMatchLog = (matchLogNode) => {
     renderClockStatus();
     syncModalTeamState();
     renderAutocompleteOptions();
-  };
+  }
 
   const resetModal = () => {
     selectedTypeKey = '';
@@ -5094,7 +5092,7 @@ const hydrateMatchLog = (matchLogNode) => {
     .finally(() => {
       initializeMatchLogState();
     });
-};
+}
 
 const isGenericHouseName = (value) => /^house\s*\d+$/i.test(String(value || '').trim());
 
