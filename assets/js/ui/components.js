@@ -3772,9 +3772,8 @@ function hydrateMatchLog(matchLogNode) {
     const squadColumns = [
       { key: 'slot', header: '#', width: 6, align: 'center' },
       { key: 'name', header: 'Name', width: 28 },
-      { key: 'admissionNo', header: 'Admission', width: 14 },
       { key: 'jerseyNumber', header: 'Jersey', width: 10, align: 'center' },
-      { key: 'role', header: 'Role', width: 18 }
+      { key: 'role', header: 'Position', width: 18 }
     ];
     const eventColumns = [
       { key: 'team', header: 'Team', width: 20 },
