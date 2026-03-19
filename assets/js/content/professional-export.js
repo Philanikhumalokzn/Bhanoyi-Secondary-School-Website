@@ -470,6 +470,19 @@ export const exportProfessionalWorkbook = async ({
 
     sheet.views = [{ state: 'frozen', ySplit: frozenHeaderRow + 1 }];
 
+    // Ensure print area covers all rendered table sections so PDF exports use correct dimensions
+    try {
+      const lastRenderedRow = currentRow - 1;
+      const lastColLabel = toColumnLabel(section.columns.length);
+      sheet.pageSetup = sheet.pageSetup || {};
+      sheet.pageSetup.printArea = `A1:${lastColLabel}${lastRenderedRow}`;
+      sheet.pageSetup.fitToPage = true;
+      sheet.pageSetup.fitToWidth = 1;
+      sheet.pageSetup.fitToHeight = 0;
+    } catch (e) {
+      // ignore if we cannot compute print area
+    }
+
     const normalizedFileName = String(fileName || 'export.xlsx').trim() || 'export.xlsx';
     const withExtension = normalizedFileName.toLowerCase().endsWith('.xlsx') ? normalizedFileName : `${normalizedFileName}.xlsx`;
     await downloadWorkbook(workbook, withExtension);
@@ -679,6 +692,18 @@ export const exportProfessionalWorkbook = async ({
         sectionRow += 1;
       });
     });
+  }
+
+  // Force print area for the sheet so saved/printed PDFs use intended page dimensions
+  try {
+    const lastRow = footerRowNumber;
+    sheet.pageSetup = sheet.pageSetup || {};
+    sheet.pageSetup.printArea = `A1:${endColumnLabel}${lastRow}`;
+    sheet.pageSetup.fitToPage = true;
+    sheet.pageSetup.fitToWidth = 1;
+    sheet.pageSetup.fitToHeight = 0;
+  } catch (e) {
+    // ignore errors and proceed to download
   }
 
   const normalizedFileName = String(fileName || 'export.xlsx').trim() || 'export.xlsx';
