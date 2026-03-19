@@ -3896,6 +3896,12 @@ const wireSportsHouseManagerInline = () => {
     houseOptions?: Array<{ id: string; name: string; color?: string }>;
     leftTeamId?: string;
     rightTeamId?: string;
+    disciplinePolicy?: {
+      straightRedSuspensionMatches?: number;
+      secondYellowSuspensionMatches?: number;
+      yellowAccumulationThreshold?: number;
+      yellowAccumulationSuspensionMatches?: number;
+    };
   };
   const fixtureConfig = parseConfig(fixtureShell?.dataset.fixtureConfig || '{}') as {
     houseOptions?: Array<{ id: string; name: string; color?: string }>;
@@ -3958,12 +3964,26 @@ const wireSportsHouseManagerInline = () => {
   const readState = {
     options: baseOptions,
     leftTeamId: String(matchConfig.leftTeamId || baseOptions[0]?.id || '').trim(),
-    rightTeamId: String(matchConfig.rightTeamId || baseOptions[1]?.id || baseOptions[0]?.id || '').trim()
+    rightTeamId: String(matchConfig.rightTeamId || baseOptions[1]?.id || baseOptions[0]?.id || '').trim(),
+    disciplinePolicy: {
+      straightRedSuspensionMatches: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.straightRedSuspensionMatches) || 1)),
+      secondYellowSuspensionMatches: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.secondYellowSuspensionMatches) || 1)),
+      yellowAccumulationThreshold: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.yellowAccumulationThreshold) || 2)),
+      yellowAccumulationSuspensionMatches: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.yellowAccumulationSuspensionMatches) || 1))
+    }
   };
 
   let editorWrap: HTMLElement | null = null;
   let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement; summaryNode: HTMLElement }> = [];
   let overallStatsNode: HTMLElement | null = null;
+  let disciplinePolicyEditor:
+    | {
+        straightRedInput: HTMLInputElement;
+        secondYellowInput: HTMLInputElement;
+        yellowThresholdInput: HTMLInputElement;
+        yellowSuspensionInput: HTMLInputElement;
+      }
+    | null = null;
 
   type EnrollmentStoreRoot = Record<string, unknown>;
   type EnrollmentLearnerRecord = {
@@ -6473,6 +6493,13 @@ const wireSportsHouseManagerInline = () => {
     });
 
     controls.appendChild(houseButtonList);
+
+    if (matchLogSection) {
+      const disciplineSummary = document.createElement('p');
+      disciplineSummary.className = 'inline-house-policy-summary';
+      disciplineSummary.textContent = `Card policy: straight red ${readState.disciplinePolicy.straightRedSuspensionMatches} match, second yellow ${readState.disciplinePolicy.secondYellowSuspensionMatches} match, yellow threshold ${readState.disciplinePolicy.yellowAccumulationThreshold}, accumulation suspension ${readState.disciplinePolicy.yellowAccumulationSuspensionMatches} match.`;
+      controls.appendChild(disciplineSummary);
+    }
   };
 
   const exitEdit = () => {
@@ -6483,6 +6510,7 @@ const wireSportsHouseManagerInline = () => {
     overallStatsNode = null;
     closeUnallocatedOverlay();
     editors = [];
+    disciplinePolicyEditor = null;
   };
 
   const renderEditControls = () => {
@@ -6510,12 +6538,24 @@ const wireSportsHouseManagerInline = () => {
         }
 
         if (matchLogSection) {
+          const disciplinePolicy = disciplinePolicyEditor
+            ? {
+                straightRedSuspensionMatches: Math.max(1, Math.floor(Number(disciplinePolicyEditor.straightRedInput.value) || 1)),
+                secondYellowSuspensionMatches: Math.max(1, Math.floor(Number(disciplinePolicyEditor.secondYellowInput.value) || 1)),
+                yellowAccumulationThreshold: Math.max(1, Math.floor(Number(disciplinePolicyEditor.yellowThresholdInput.value) || 2)),
+                yellowAccumulationSuspensionMatches: Math.max(1, Math.floor(Number(disciplinePolicyEditor.yellowSuspensionInput.value) || 1))
+              }
+            : { ...readState.disciplinePolicy };
+
           await saveSectionOverride(matchLogSection, {
             type: 'match-log',
             houseOptions,
             leftTeamId: readState.leftTeamId,
-            rightTeamId: readState.rightTeamId
+            rightTeamId: readState.rightTeamId,
+            disciplinePolicy
           });
+
+          readState.disciplinePolicy = disciplinePolicy;
         }
 
         if (fixtureSection) {
@@ -6612,6 +6652,46 @@ const wireSportsHouseManagerInline = () => {
       editors.push({ id: house.id, nameInput: input, colorInput, summaryNode });
       editorWrap?.appendChild(wrapper);
     });
+
+    if (matchLogSection) {
+      const policyWrap = document.createElement('div');
+      policyWrap.className = 'inline-house-policy-editor';
+      policyWrap.innerHTML = `
+        <h3>Card Suspension Policy</h3>
+        <p class="inline-house-policy-copy">Use FIFA-style defaults for school matches, then adjust for your competition rules when needed.</p>
+      `;
+
+      const policyGrid = document.createElement('div');
+      policyGrid.className = 'inline-house-policy-grid';
+
+      const createPolicyInput = (labelText: string, value: number) => {
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '1';
+        input.step = '1';
+        input.value = String(value);
+        label.appendChild(input);
+        policyGrid.appendChild(label);
+        return input;
+      };
+
+      const straightRedInput = createPolicyInput('Straight red suspension matches', readState.disciplinePolicy.straightRedSuspensionMatches);
+      const secondYellowInput = createPolicyInput('Second-yellow suspension matches', readState.disciplinePolicy.secondYellowSuspensionMatches);
+      const yellowThresholdInput = createPolicyInput('Yellow-card accumulation threshold', readState.disciplinePolicy.yellowAccumulationThreshold);
+      const yellowSuspensionInput = createPolicyInput('Accumulation suspension matches', readState.disciplinePolicy.yellowAccumulationSuspensionMatches);
+
+      disciplinePolicyEditor = {
+        straightRedInput,
+        secondYellowInput,
+        yellowThresholdInput,
+        yellowSuspensionInput
+      };
+
+      policyWrap.appendChild(policyGrid);
+      editorWrap?.appendChild(policyWrap);
+    }
 
     controls.after(editorWrap);
     renderEditControls();

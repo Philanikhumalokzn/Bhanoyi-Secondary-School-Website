@@ -1529,7 +1529,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
     rightTeamId: teamPair.rightTeamId,
     eventTypes,
     pauseReasons,
-    initialScores
+    initialScores,
+    disciplinePolicy: normalizeMatchDisciplinePolicy(section.disciplinePolicy)
   };
 
   const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
@@ -2132,6 +2133,34 @@ const DEFAULT_MATCH_DISCIPLINE_POLICY = {
   yellowAccumulationSuspensionMatches: 1
 };
 
+const normalizeMatchDisciplinePolicy = (value = {}) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const toPositiveInt = (candidate, fallback) => {
+    const parsed = Number(candidate);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1, Math.floor(parsed));
+  };
+
+  return {
+    straightRedSuspensionMatches: toPositiveInt(
+      source.straightRedSuspensionMatches,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.straightRedSuspensionMatches
+    ),
+    secondYellowSuspensionMatches: toPositiveInt(
+      source.secondYellowSuspensionMatches,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.secondYellowSuspensionMatches
+    ),
+    yellowAccumulationThreshold: toPositiveInt(
+      source.yellowAccumulationThreshold,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationThreshold
+    ),
+    yellowAccumulationSuspensionMatches: toPositiveInt(
+      source.yellowAccumulationSuspensionMatches,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationSuspensionMatches
+    )
+  };
+};
+
 const createEmptyMatchTeamSheet = () => ({
   starters: [],
   substitutes: []
@@ -2437,6 +2466,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const matchLogStoreStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
 
   const eventTypes = normalizeMatchEventTypes(config.eventTypes);
+  const disciplinePolicy = normalizeMatchDisciplinePolicy(config.disciplinePolicy);
   const pauseReasons = (Array.isArray(config.pauseReasons) ? config.pauseReasons : [])
     .map((entry) => String(entry || '').trim())
     .filter(Boolean);
@@ -2966,14 +2996,21 @@ const hydrateMatchLog = (matchLogNode) => {
           ${entries.length
             ? `<ul class="match-log-squad-list">${entries
                 .map((player) => {
+                  const discipline = getPlayerDisciplinaryStatus(teamId, player);
+                  const descriptor = getDisciplinaryStatusDescriptor(discipline);
                   const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
                     .filter(Boolean)
                     .join(' · ');
+                  const reasons = Array.isArray(discipline.reasons) ? discipline.reasons.filter(Boolean).join('; ') : '';
                   return `
                     <li class="match-log-squad-item">
                       <div class="match-log-squad-item-main">
-                        <strong>${escapeHtmlText(player.name)}</strong>
+                        <div class="match-log-squad-item-head">
+                          <strong>${escapeHtmlText(player.name)}</strong>
+                          <span class="match-log-squad-candidate-badge" data-tone="${escapeHtmlAttribute(descriptor.tone)}">${escapeHtmlText(descriptor.label)}</span>
+                        </div>
                         <span class="match-log-squad-item-meta">${escapeHtmlText(meta || 'Learner')}</span>
+                        ${reasons ? `<span class="match-log-squad-item-reasons">${escapeHtmlText(reasons)}</span>` : ''}
                       </div>
                       <div class="match-log-squad-item-actions">
                         <button type="button" class="btn btn-secondary" data-match-squad-move="${moveTarget}" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">${moveLabel}</button>
@@ -3019,7 +3056,13 @@ const hydrateMatchLog = (matchLogNode) => {
               <datalist id="${datalistId}">
                 ${availablePlayers
                   .map((player) => {
-                    const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
+                    const discipline = getPlayerDisciplinaryStatus(teamId, player);
+                    const descriptor = getDisciplinaryStatusDescriptor(discipline);
+                    const meta = [
+                      player.admissionNo ? `Adm ${player.admissionNo}` : '',
+                      player.jerseyNumber ? `#${player.jerseyNumber}` : '',
+                      descriptor.shortLabel
+                    ]
                       .filter(Boolean)
                       .join(' · ');
                     return `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(meta || player.name)}"></option>`;
@@ -3032,6 +3075,9 @@ const hydrateMatchLog = (matchLogNode) => {
               <button type="button" class="btn btn-secondary" data-match-squad-add="substitutes" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Bench</button>
             </div>
           </div>
+          <div class="match-log-squad-candidate-preview" data-match-squad-preview="${escapeHtmlAttribute(teamId)}">
+            <span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>
+          </div>
           <div class="match-log-squad-columns">
             ${renderSquadList(teamId, 'starters', 'Starting XI', teamSheet.starters)}
             ${renderSquadList(teamId, 'substitutes', 'Substitutes', teamSheet.substitutes)}
@@ -3042,6 +3088,7 @@ const hydrateMatchLog = (matchLogNode) => {
     });
 
     squadManagerNode.innerHTML = `<div class="match-log-squad-grid">${cards.join('')}</div>`;
+  [fixture.homeId, fixture.awayId].forEach((teamId) => renderSquadCandidatePreview(teamId));
 
     if (squadStatusNode) {
       const homeSheet = getTeamSheet(fixture.homeId);
@@ -3072,6 +3119,48 @@ const hydrateMatchLog = (matchLogNode) => {
       getPlayersForTeam(teamId).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) ||
       null
     );
+  };
+
+  const renderSquadCandidatePreview = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim();
+    if (!normalizedTeamId || !(squadManagerNode instanceof HTMLElement)) return;
+
+    const card = squadManagerNode.querySelector(`[data-match-squad-card="${CSS.escape(normalizedTeamId)}"]`);
+    if (!(card instanceof HTMLElement)) return;
+
+    const input = card.querySelector(`[data-match-squad-search-input="${CSS.escape(normalizedTeamId)}"]`);
+    const preview = card.querySelector(`[data-match-squad-preview="${CSS.escape(normalizedTeamId)}"]`);
+    if (!(input instanceof HTMLInputElement) || !(preview instanceof HTMLElement)) return;
+
+    const typedName = String(input.value || '').trim();
+    if (!typedName) {
+      preview.innerHTML = '<span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>';
+      return;
+    }
+
+    const candidate = getSquadCandidateByTypedName(normalizedTeamId, typedName);
+    if (!candidate) {
+      preview.innerHTML = '<span class="match-log-squad-candidate-empty">Select a learner from the suggestions to view status.</span>';
+      return;
+    }
+
+    const discipline = getPlayerDisciplinaryStatus(normalizedTeamId, candidate);
+    const descriptor = getDisciplinaryStatusDescriptor(discipline);
+    const meta = [candidate.admissionNo ? `Adm ${candidate.admissionNo}` : '', candidate.jerseyNumber ? `#${candidate.jerseyNumber}` : '']
+      .filter(Boolean)
+      .join(' · ');
+    const reasons = Array.isArray(discipline.reasons) ? discipline.reasons.filter(Boolean).join('; ') : '';
+
+    preview.innerHTML = `
+      <div class="match-log-squad-candidate-card">
+        <div class="match-log-squad-candidate-head">
+          <strong class="match-log-squad-candidate-name">${escapeHtmlText(candidate.name)}</strong>
+          <span class="match-log-squad-candidate-badge" data-tone="${escapeHtmlAttribute(descriptor.tone)}">${escapeHtmlText(descriptor.label)}</span>
+        </div>
+        <p class="match-log-squad-candidate-meta">${escapeHtmlText(meta || 'Learner')}</p>
+        ${reasons ? `<p class="match-log-squad-candidate-reasons">${escapeHtmlText(reasons)}</p>` : ''}
+      </div>
+    `;
   };
 
   const eventMatchesParticipant = (event, participantKeySet, teamId) => {
@@ -3135,13 +3224,13 @@ const hydrateMatchLog = (matchLogNode) => {
       ).length;
 
       if (redCards > 0) {
-        suspensionMatchesRemaining += DEFAULT_MATCH_DISCIPLINE_POLICY.straightRedSuspensionMatches;
+        suspensionMatchesRemaining += disciplinePolicy.straightRedSuspensionMatches;
         reasons.push(`Red card in ${entry.homeName} vs ${entry.awayName}`);
         return;
       }
 
       if (yellowCards >= 2) {
-        suspensionMatchesRemaining += DEFAULT_MATCH_DISCIPLINE_POLICY.secondYellowSuspensionMatches;
+        suspensionMatchesRemaining += disciplinePolicy.secondYellowSuspensionMatches;
         cautionCarry = 0;
         reasons.push(`Second caution suspension from ${entry.homeName} vs ${entry.awayName}`);
         return;
@@ -3149,8 +3238,8 @@ const hydrateMatchLog = (matchLogNode) => {
 
       if (yellowCards > 0) {
         cautionCarry += 1;
-        if (cautionCarry >= DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationThreshold) {
-          suspensionMatchesRemaining += DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationSuspensionMatches;
+        if (cautionCarry >= disciplinePolicy.yellowAccumulationThreshold) {
+          suspensionMatchesRemaining += disciplinePolicy.yellowAccumulationSuspensionMatches;
           cautionCarry = 0;
           reasons.push(`Yellow-card accumulation suspension triggered after ${entry.homeName} vs ${entry.awayName}`);
         }
@@ -3162,6 +3251,32 @@ const hydrateMatchLog = (matchLogNode) => {
       suspensionMatchesRemaining,
       cautionCarry,
       reasons
+    };
+  };
+
+  const getDisciplinaryStatusDescriptor = (discipline) => {
+    if (discipline?.activeSuspension) {
+      const count = Number(discipline.suspensionMatchesRemaining || 0);
+      return {
+        tone: 'suspended',
+        shortLabel: `Susp ${count}m`,
+        label: `Suspended for ${count} match${count === 1 ? '' : 'es'}`
+      };
+    }
+
+    if (Number(discipline?.cautionCarry || 0) > 0) {
+      const carry = Number(discipline.cautionCarry || 0);
+      return {
+        tone: 'warning',
+        shortLabel: `${carry} YC`,
+        label: `${carry} yellow card${carry === 1 ? '' : 's'} carried`
+      };
+    }
+
+    return {
+      tone: 'eligible',
+      shortLabel: '',
+      label: 'No active card warning'
     };
   };
 
@@ -4339,6 +4454,22 @@ const hydrateMatchLog = (matchLogNode) => {
       persistCurrentFixtureLog();
       render();
     }
+  });
+
+  squadManagerNode?.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const teamId = String(target.dataset.matchSquadSearchInput || '').trim();
+    if (!teamId) return;
+    renderSquadCandidatePreview(teamId);
+  });
+
+  squadManagerNode?.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const teamId = String(target.dataset.matchSquadSearchInput || '').trim();
+    if (!teamId) return;
+    renderSquadCandidatePreview(teamId);
   });
 
   matchDaySelect.addEventListener('change', () => {

@@ -2638,6 +2638,53 @@ body.news-read-open {
   border-color: var(--primary);
 }
 
+.inline-house-policy-summary {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.inline-house-policy-editor {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-alt);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.inline-house-policy-editor h3,
+.inline-house-policy-copy {
+  margin: 0;
+}
+
+.inline-house-policy-copy {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.inline-house-policy-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.inline-house-policy-grid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.inline-house-policy-grid input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+}
+
 .inline-house-members-modal {
   position: fixed;
   inset: 0;
@@ -3166,6 +3213,64 @@ body.match-log-workspace-open {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.match-log-squad-candidate-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 10px;
+}
+
+.match-log-squad-candidate-card {
+  display: grid;
+  gap: 6px;
+}
+
+.match-log-squad-candidate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.match-log-squad-candidate-name,
+.match-log-squad-candidate-meta,
+.match-log-squad-candidate-reasons,
+.match-log-squad-candidate-empty {
+  margin: 0;
+}
+
+.match-log-squad-candidate-meta,
+.match-log-squad-candidate-reasons,
+.match-log-squad-candidate-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.match-log-squad-candidate-badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.match-log-squad-candidate-badge[data-tone='eligible'] {
+  background: rgba(23, 122, 74, 0.12);
+  color: #177a4a;
+}
+
+.match-log-squad-candidate-badge[data-tone='warning'] {
+  background: rgba(176, 104, 0, 0.14);
+  color: #8a4d00;
+}
+
+.match-log-squad-candidate-badge[data-tone='suspended'] {
+  background: rgba(163, 34, 56, 0.14);
+  color: #a32238;
 }
 
 .match-log-squad-columns {
