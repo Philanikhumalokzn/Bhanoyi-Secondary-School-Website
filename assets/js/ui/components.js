@@ -3953,40 +3953,129 @@ function hydrateMatchLog(matchLogNode) {
     const fixture = getCurrentFixture();
     if (!fixture) return;
 
-    const fixtureDate = fixture.date ? formatDateLabel(fixture.date) : 'TBC';
-    const kickoff = fixture.time || 'TBC';
-    const venue = fixture.venue || config.venue || 'TBC';
-    const sportLabel = fixture.sport || config.sport || 'Match';
-    const competitionLabel = fixture.competition || config.competition || 'TBC';
-    const safeFixture = `${fixture.homeName}-vs-${fixture.awayName}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    const stamp = new Date().toISOString().slice(0, 10);
+    const sections = buildMatchTeamSheetTemplateSections(fixture);
+    if (!Array.isArray(sections) || !sections.length) return;
 
-    await exportProfessionalWorkbook({
-      fileName: `${safeFixture || 'match'}-team-sheet-template-${stamp}.xlsx`,
-      sheetName: 'Team Sheet',
-      title: 'Official Team Sheet Template',
-      subtitle: `${fixture.homeName} vs ${fixture.awayName}`,
-      contextLine: `${sportLabel} • ${competitionLabel}`,
-      metaLine: `Venue: ${venue} | Date: ${fixtureDate}${kickoff ? ` ${kickoff}` : ''}`,
-      tableSections: buildMatchTeamSheetTemplateSections(fixture),
-      note: 'Complete the starting XI, substitutes, and officials before match day. Keep a signed copy for school sports records.',
-      footerSections: [
-        {
-          title: 'Sign-off',
-          lines: [
-            `${fixture.homeName} Captain: ______________________________`,
-            `${fixture.homeName} Coach Signature: ______________________________`,
-            `${fixture.awayName} Captain: ______________________________`,
-            `${fixture.awayName} Coach Signature: ______________________________`
-          ]
+    // split sections into two teams (assumes sections are produced home then away)
+    const perTeam = Math.ceil(sections.length / 2);
+    const homeSections = sections.slice(0, perTeam);
+    const awaySections = sections.slice(perTeam);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Bhanoyi Secondary School Website';
+    workbook.created = new Date();
+
+    const makeColLabel = (index) => {
+      let value = Math.max(1, Number(index) || 1);
+      let label = '';
+      while (value > 0) {
+        const remainder = (value - 1) % 26;
+        label = String.fromCharCode(65 + remainder) + label;
+        value = Math.floor((value - 1) / 26);
+      }
+      return label;
+    };
+
+    const renderTeamSheet = (teamName, teamSections) => {
+      const sheet = workbook.addWorksheet(`${teamName} Team Sheet`, {
+        pageSetup: {
+          paperSize: 9,
+          orientation: 'portrait',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          horizontalCentered: true,
+          margins: { left: 0.35, right: 0.35, top: 0.55, bottom: 0.5, header: 0.2, footer: 0.2 }
         }
-      ]
-    });
+      });
 
-    showSmartToast('Team sheet template exported (.xlsx).', { tone: 'success' });
+      // compute effective columns (widest column set among sections)
+      const effectiveCols = teamSections.reduce((widest, entry) => (entry.columns.length > widest.length ? entry.columns : widest), teamSections[0].columns || []);
+      const endLabel = makeColLabel(effectiveCols.length);
+
+      // header area
+      sheet.mergeCells(`A1:${endLabel}1`);
+      sheet.mergeCells(`A2:${endLabel}2`);
+      sheet.mergeCells(`A3:${endLabel}3`);
+      sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
+      sheet.getCell('A2').value = `${teamName} Team Sheet Template`;
+      sheet.getCell('A3').value = `${fixture.homeName} vs ${fixture.awayName}`;
+
+      sheet.getRow(1).height = 24;
+      sheet.getRow(2).height = 18;
+      sheet.getRow(3).height = 16;
+
+      // set columns on sheet to effectiveCols
+      sheet.columns = effectiveCols.map((c) => ({ header: c.header || '', key: c.key || '', width: Math.max(8, Number(c.width) || 16) }));
+
+      let currentRow = 5;
+
+      teamSections.forEach((section) => {
+        // title
+        if (section.title) {
+          sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+          sheet.getCell(`A${currentRow}`).value = section.title;
+          currentRow += 1;
+        }
+
+        // meta line
+        if (section.metaLine) {
+          sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+          sheet.getCell(`A${currentRow}`).value = section.metaLine;
+          currentRow += 1;
+        }
+
+        // header row
+        const headerRow = sheet.getRow(currentRow);
+        headerRow.values = section.columns.map((c) => c.header || '');
+        headerRow.eachCell((cell) => {
+          cell.font = { name: 'Calibri', size: 10.5, bold: true };
+        });
+        currentRow += 1;
+
+        // data rows
+        section.rows.forEach((rowValue, rowIndex) => {
+          const row = sheet.getRow(currentRow + rowIndex);
+          section.columns.forEach((col, colIndex) => {
+            const key = String(col.key || `col_${colIndex + 1}`);
+            row.getCell(colIndex + 1).value = rowValue && typeof rowValue === 'object' ? rowValue[key] ?? '' : '';
+          });
+        });
+        currentRow += section.rows.length;
+
+        // section note
+        if (section.note) {
+          sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+          sheet.getCell(`A${currentRow}`).value = section.note;
+          currentRow += 1;
+        }
+
+        currentRow += 1; // gap between sections
+      });
+
+      // set print area
+      const lastRow = currentRow - 1;
+      sheet.pageSetup.printArea = `A1:${endLabel}${lastRow}`;
+    };
+
+    renderTeamSheet(fixture.homeName, homeSections);
+    renderTeamSheet(fixture.awayName, awaySections);
+
+    // prepare download
+    const fileName = `${(fixture.homeName || 'home')}-vs-${(fixture.awayName || 'away')}-team-sheet-template-${new Date().toISOString().slice(0,10)}.xlsx`;
+    const workbookBuffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([workbookBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showSmartToast('Team sheet template exported (.xlsx) with separate sheets.', { tone: 'success' });
   }
 
   function render() {
