@@ -6278,9 +6278,8 @@ const wireSportsHouseManagerInline = () => {
           rows: managementRows
         },
         columns: [
-          { header: 'Role', key: 'role', width: 12, align: 'center' },
+          { header: 'Position', key: 'role', width: 12, align: 'center' },
           { header: 'Full Name', key: 'fullName', width: 30, align: 'left' },
-          { header: 'Admission/Staff No.', key: 'identifier', width: 20, align: 'center' },
           { header: 'Gender', key: 'gender', width: 14, align: 'center' },
           { header: 'Class', key: 'className', width: 16, align: 'center' },
           { header: 'Sporting Codes', key: 'sportingCodes', width: 40, align: 'left', wrapText: true }
