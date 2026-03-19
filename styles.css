@@ -3326,6 +3326,19 @@ body.match-log-workspace-open {
   gap: 4px;
 }
 
+.match-log-squad-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.match-log-squad-item-reasons {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .match-log-squad-item-actions {
   display: flex;
   gap: 6px;
