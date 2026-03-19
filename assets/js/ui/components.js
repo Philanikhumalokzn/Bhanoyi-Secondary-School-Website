@@ -3771,7 +3771,7 @@ function hydrateMatchLog(matchLogNode) {
 
     const squadColumns = [
       { key: 'slot', header: '#', width: 6, align: 'center' },
-      { key: 'name', header: 'Name', width: 44 },
+      { key: 'name', header: 'Name', width: 88 },
       { key: 'jerseyNumber', header: 'Jersey', width: 12, align: 'center' },
       { key: 'role', header: 'Position', width: 24 }
     ];
@@ -3897,13 +3897,13 @@ function hydrateMatchLog(matchLogNode) {
 
     const squadTemplateColumns = [
       { key: 'slot', header: '#', width: 6, align: 'center' },
-      { key: 'name', header: 'Name', width: 44 },
+      { key: 'name', header: 'Name', width: 88 },
       { key: 'jerseyNumber', header: 'Jersey', width: 12, align: 'center' },
       { key: 'role', header: 'Position', width: 24 }
     ];
     const staffColumns = [
       { key: 'role', header: 'Role', width: 22 },
-      { key: 'name', header: 'Name', width: 44 },
+      { key: 'name', header: 'Name', width: 88 },
       { key: 'notes', header: 'Notes', width: 36, wrapText: true }
     ];
     const staffRoles = ['Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
@@ -3914,7 +3914,7 @@ function hydrateMatchLog(matchLogNode) {
         name: '',
         admissionNo: '',
         jerseyNumber: '',
-        role: roleLabel,
+        role: '',
         notes: ''
       }));
 
