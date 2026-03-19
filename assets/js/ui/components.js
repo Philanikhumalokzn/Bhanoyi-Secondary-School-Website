@@ -2167,6 +2167,56 @@ const createEmptyMatchTeamSheet = () => ({
   substitutes: []
 });
 
+const buildEmptySquadDirtyState = (fixture) => {
+  if (!fixture) return {};
+  return {
+    [fixture.homeId]: false,
+    [fixture.awayId]: false
+  };
+};
+
+const validateMatchTeamSheet = (sheet) => {
+  const starters = normalizeMatchPlayersForTeam(sheet?.starters || []);
+  const substitutes = normalizeMatchPlayersForTeam(sheet?.substitutes || []);
+  const starterIds = new Set();
+  const duplicateStarterIds = new Set();
+
+  starters.forEach((player) => {
+    if (starterIds.has(player.id)) {
+      duplicateStarterIds.add(player.id);
+      return;
+    }
+    starterIds.add(player.id);
+  });
+
+  const overlapPlayers = substitutes.filter((player) => starterIds.has(player.id));
+  const errors = [];
+
+  if (starters.length !== MAX_MATCH_STARTERS) {
+    errors.push(`Starting XI must contain exactly ${MAX_MATCH_STARTERS} players before saving.`);
+  }
+
+  if (substitutes.length > MAX_MATCH_SUBSTITUTES) {
+    errors.push(`Substitutes may not exceed ${MAX_MATCH_SUBSTITUTES} players.`);
+  }
+
+  if (duplicateStarterIds.size) {
+    errors.push('A player cannot be added twice to the starting lineup.');
+  }
+
+  if (overlapPlayers.length) {
+    errors.push('A player cannot appear in both the starting lineup and substitutes.');
+  }
+
+  return {
+    starters,
+    substitutes,
+    errors,
+    hasSelections: starters.length > 0 || substitutes.length > 0,
+    isReady: errors.length === 0
+  };
+};
+
 const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) => {
   if (!fixture) return {};
 
@@ -2603,7 +2653,9 @@ const hydrateMatchLog = (matchLogNode) => {
   let currentPlayersByTeam = {};
   let currentHousePlayersByTeam = {};
   let currentStaffByTeam = {};
+  let savedSquadByTeam = {};
   let currentSquadByTeam = {};
+  let squadDirtyByTeam = {};
   let matchStartedAt = null;
   let interruptionAccumulatedMs = 0;
   let activePauseStartedAt = null;
@@ -2803,11 +2855,14 @@ const hydrateMatchLog = (matchLogNode) => {
     return normalizeMatchParticipantsForTeam(currentStaffByTeam?.[houseKey] || [], { houseId: houseKey });
   };
 
-  const getTeamSheet = (teamId) => {
+  const hasUnsavedSquadChanges = () => Object.values(squadDirtyByTeam).some(Boolean);
+
+  const getTeamSheet = (teamId, { saved = false } = {}) => {
     const fixture = getCurrentFixture();
     if (!fixture) return createEmptyMatchTeamSheet();
     const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
-    const sheet = currentSquadByTeam?.[normalizedTeamId];
+    const source = saved ? savedSquadByTeam : currentSquadByTeam;
+    const sheet = source?.[normalizedTeamId];
     if (!sheet || typeof sheet !== 'object') return createEmptyMatchTeamSheet();
     return {
       starters: normalizeMatchPlayersForTeam(sheet.starters || [], { houseId: normalizedTeamId }),
@@ -2834,15 +2889,17 @@ const hydrateMatchLog = (matchLogNode) => {
       });
   };
 
-  const getMatchAvailabilityForTeam = (teamId, { excludeEventId = '' } = {}) => {
+  const getMatchAvailabilityForTeam = (teamId, { excludeEventId = '', saved = true } = {}) => {
     const normalizedTeamId = getNormalizedTeamId(teamId);
     const teamPlayers = getPlayersForTeam(normalizedTeamId);
-    const sheet = getTeamSheet(normalizedTeamId);
-    const hasSquad = sheet.starters.length > 0 || sheet.substitutes.length > 0;
+    const sheet = getTeamSheet(normalizedTeamId, { saved });
+    const validation = validateMatchTeamSheet(sheet);
+    const hasSquad = validation.hasSelections;
 
     if (!hasSquad) {
       return {
         hasSquad: false,
+        isReady: false,
         starters: [],
         substitutes: [],
         active: teamPlayers,
@@ -2851,11 +2908,23 @@ const hydrateMatchLog = (matchLogNode) => {
       };
     }
 
-    const squadPlayers = normalizeMatchPlayersForTeam([...sheet.starters, ...sheet.substitutes], { houseId: normalizedTeamId });
+    if (!validation.isReady) {
+      return {
+        hasSquad: true,
+        isReady: false,
+        starters: validation.starters,
+        substitutes: validation.substitutes,
+        active: [],
+        bench: [],
+        squadPlayers: normalizeMatchPlayersForTeam([...validation.starters, ...validation.substitutes], { houseId: normalizedTeamId })
+      };
+    }
+
+    const squadPlayers = normalizeMatchPlayersForTeam([...validation.starters, ...validation.substitutes], { houseId: normalizedTeamId });
     const squadById = new Map(squadPlayers.map((player) => [player.id, player]));
     const squadByName = new Map(squadPlayers.map((player) => [normalizeMatchSearchValue(player.name), player]));
-    const activeMap = new Map(sheet.starters.map((player) => [player.id, player]));
-    const benchMap = new Map(sheet.substitutes.map((player) => [player.id, player]));
+    const activeMap = new Map(validation.starters.map((player) => [player.id, player]));
+    const benchMap = new Map(validation.substitutes.map((player) => [player.id, player]));
 
     getChronologicalTeamEvents(normalizedTeamId, { excludeEventId }).forEach((event) => {
       if (String(event.type || '').trim() !== 'substitution') return;
@@ -2878,8 +2947,9 @@ const hydrateMatchLog = (matchLogNode) => {
 
     return {
       hasSquad: true,
-      starters: sheet.starters,
-      substitutes: sheet.substitutes,
+      isReady: true,
+      starters: validation.starters,
+      substitutes: validation.substitutes,
       active: normalizeMatchPlayersForTeam(Array.from(activeMap.values()), { houseId: normalizedTeamId }),
       bench: normalizeMatchPlayersForTeam(Array.from(benchMap.values()), { houseId: normalizedTeamId }),
       squadPlayers
@@ -2915,10 +2985,10 @@ const hydrateMatchLog = (matchLogNode) => {
     const normalizedTeamId = getNormalizedTeamId(teamId);
     if (!normalizedTeamId) return [];
 
-    const availability = getMatchAvailabilityForTeam(normalizedTeamId, { excludeEventId: editingEventId });
+    const availability = getMatchAvailabilityForTeam(normalizedTeamId, { excludeEventId: editingEventId, saved: true });
     const scope = getParticipantSearchScope(definition, field);
 
-    if (isSquadBoundSearchScope(scope) && !availability.hasSquad) {
+    if (isSquadBoundSearchScope(scope) && !availability.isReady) {
       return [];
     }
 
@@ -3058,13 +3128,27 @@ const hydrateMatchLog = (matchLogNode) => {
     ].map(({ teamId, teamName }) => {
       const teamPlayers = getPlayersForTeam(teamId);
       const teamSheet = getTeamSheet(teamId);
-      const availability = getMatchAvailabilityForTeam(teamId);
+      const savedTeamSheet = getTeamSheet(teamId, { saved: true });
+      const availability = getMatchAvailabilityForTeam(teamId, { saved: false });
+      const validation = validateMatchTeamSheet(teamSheet);
+      const savedValidation = validateMatchTeamSheet(savedTeamSheet);
+      const isDirty = Boolean(squadDirtyByTeam?.[teamId]);
       const selectedIds = new Set([...teamSheet.starters, ...teamSheet.substitutes].map((player) => player.id));
       const availablePlayers = teamPlayers.filter((player) => !selectedIds.has(player.id));
       const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-      const activeNames = availability.hasSquad
+      const activeNames = availability.isReady
         ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
-        : 'No team list set yet. Set the starting XI and substitutes before logging on-pitch events.';
+        : validation.hasSelections
+          ? 'Starting XI must be exactly 11 players before this team list can go live.'
+          : 'No team list set yet. Set the starting XI and substitutes before logging on-pitch events.';
+      const validationMessage = validation.isReady
+        ? `Starting XI fixed at ${MAX_MATCH_STARTERS}. Substitutes ${teamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}.`
+        : validation.errors[0];
+      const saveStateMessage = isDirty
+        ? 'Unsaved team list changes.'
+        : savedValidation.isReady
+          ? 'Saved team list is live for event logging.'
+          : 'No saved team list yet.';
 
       return `
         <article class="match-log-squad-card" data-match-squad-card="${escapeHtmlAttribute(teamId)}">
@@ -3100,8 +3184,11 @@ const hydrateMatchLog = (matchLogNode) => {
             <div class="match-log-squad-control-actions">
               <button type="button" class="btn btn-secondary" data-match-squad-add="starters" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Starting XI</button>
               <button type="button" class="btn btn-secondary" data-match-squad-add="substitutes" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Bench</button>
+              <button type="button" class="btn btn-primary" data-match-squad-save="true" data-team-id="${escapeHtmlAttribute(teamId)}"${isDirty ? '' : ' disabled'}>Save team list</button>
             </div>
           </div>
+          <p class="match-log-squad-helper">${escapeHtmlText(validationMessage)}</p>
+          <p class="match-log-squad-helper">${escapeHtmlText(saveStateMessage)}</p>
           <div class="match-log-squad-candidate-preview" data-match-squad-preview="${escapeHtmlAttribute(teamId)}">
             <span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>
           </div>
@@ -3136,6 +3223,42 @@ const hydrateMatchLog = (matchLogNode) => {
       },
       currentPlayersByTeam
     );
+    squadDirtyByTeam = {
+      ...squadDirtyByTeam,
+      [normalizedTeamId]: true
+    };
+  };
+
+  const saveTeamSheetForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return false;
+
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const teamSheet = getTeamSheet(normalizedTeamId);
+    const validation = validateMatchTeamSheet(teamSheet);
+
+    if (validation.errors.length) {
+      showSmartToast(validation.errors[0], { tone: 'error' });
+      return false;
+    }
+
+    savedSquadByTeam = normalizeFixtureSquadByTeam(
+      fixture,
+      {
+        ...savedSquadByTeam,
+        [normalizedTeamId]: teamSheet
+      },
+      currentPlayersByTeam
+    );
+    currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, currentSquadByTeam, currentPlayersByTeam);
+    squadDirtyByTeam = {
+      ...squadDirtyByTeam,
+      [normalizedTeamId]: false
+    };
+    persistCurrentFixtureLog();
+    showSmartToast('Team list saved and now live for match logging.', { tone: 'success' });
+    render();
+    return true;
   };
 
   const getSquadCandidateByTypedName = (teamId, typedName) => {
@@ -3346,7 +3469,7 @@ const hydrateMatchLog = (matchLogNode) => {
         awayPlayers: fixture.awayPlayers
       }
     );
-    const normalizedSquadByTeam = normalizeFixtureSquadByTeam(fixture, currentSquadByTeam, normalizedPlayersByTeam);
+    const normalizedSquadByTeam = normalizeFixtureSquadByTeam(fixture, savedSquadByTeam, normalizedPlayersByTeam);
     const playerEventIndex = buildPlayerEventIndex(currentEvents, fixture, normalizedPlayersByTeam);
 
     logsByFixture[fixture.fixtureId] = {
@@ -3386,7 +3509,9 @@ const hydrateMatchLog = (matchLogNode) => {
       currentPlayersByTeam = {};
       currentHousePlayersByTeam = {};
       currentStaffByTeam = {};
+      savedSquadByTeam = {};
       currentSquadByTeam = {};
+      squadDirtyByTeam = {};
       matchStartedAt = null;
       interruptionAccumulatedMs = 0;
       activePauseStartedAt = null;
@@ -3416,7 +3541,9 @@ const hydrateMatchLog = (matchLogNode) => {
     );
     currentHousePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, '');
     currentStaffByTeam = loadEnrollmentStaffByHouse(fixture.homeId, fixture.awayId);
-    currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, entry?.squadByTeam, currentPlayersByTeam);
+    savedSquadByTeam = normalizeFixtureSquadByTeam(fixture, entry?.squadByTeam, currentPlayersByTeam);
+    currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, savedSquadByTeam, currentPlayersByTeam);
+    squadDirtyByTeam = buildEmptySquadDirtyState(fixture);
   };
 
   const populateFixtureData = () => {
@@ -3514,7 +3641,8 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!nextFixture) return true;
 
     const nextLabel = `${nextFixture.homeName} vs ${nextFixture.awayName}`;
-    const message = `Switch to ${nextLabel}? This will log events for a different fixture.`;
+    const unsavedNotice = hasUnsavedSquadChanges() ? ' Unsaved team list changes will be lost.' : '';
+    const message = `Switch to ${nextLabel}? This will log events for a different fixture.${unsavedNotice}`;
     return window.confirm(message);
   };
 
@@ -3661,7 +3789,7 @@ const hydrateMatchLog = (matchLogNode) => {
       },
       {
         title: `${fixture.homeName} Current On-Pitch Squad`,
-        metaLine: homeAvailability.hasSquad ? `${homeAvailability.active.length} active players` : 'No team list set yet',
+        metaLine: homeAvailability.isReady ? `${homeAvailability.active.length} active players` : 'No saved valid team list yet',
         columns: squadColumns,
         rows: buildSquadRows(homeAvailability.active)
       },
@@ -3679,7 +3807,7 @@ const hydrateMatchLog = (matchLogNode) => {
       },
       {
         title: `${fixture.awayName} Current On-Pitch Squad`,
-        metaLine: awayAvailability.hasSquad ? `${awayAvailability.active.length} active players` : 'No team list set yet',
+        metaLine: awayAvailability.isReady ? `${awayAvailability.active.length} active players` : 'No saved valid team list yet',
         columns: squadColumns,
         rows: buildSquadRows(awayAvailability.active)
       },
@@ -4306,8 +4434,8 @@ const hydrateMatchLog = (matchLogNode) => {
         return true;
       }
 
-      if (!availability.hasSquad) {
-        showSmartToast('Set the starting XI and substitutes for this team before logging on-pitch events.', { tone: 'error' });
+      if (!availability.isReady) {
+        showSmartToast('Save a valid team list with exactly 11 starters before logging on-pitch events.', { tone: 'error' });
         return false;
       }
 
@@ -4490,6 +4618,14 @@ const hydrateMatchLog = (matchLogNode) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
 
+    const saveButton = target.closest('[data-match-squad-save]');
+    if (saveButton instanceof HTMLElement) {
+      const teamId = String(saveButton.dataset.teamId || '').trim();
+      if (!teamId) return;
+      saveTeamSheetForTeam(teamId);
+      return;
+    }
+
     const addButton = target.closest('[data-match-squad-add]');
     if (addButton instanceof HTMLElement) {
       const teamId = String(addButton.dataset.teamId || '').trim();
@@ -4505,7 +4641,12 @@ const hydrateMatchLog = (matchLogNode) => {
         return;
       }
 
-      if ([...current.starters, ...current.substitutes].some((player) => player.id === candidate.id)) {
+      if (current.starters.some((player) => player.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already in the starting lineup.`, { tone: 'error' });
+        return;
+      }
+
+      if (current.substitutes.some((player) => player.id === candidate.id)) {
         showSmartToast(`${candidate.name} is already in this team list.`, { tone: 'error' });
         return;
       }
@@ -4551,7 +4692,6 @@ const hydrateMatchLog = (matchLogNode) => {
         input.value = '';
       }
 
-      persistCurrentFixtureLog();
       render();
       return;
     }
@@ -4563,7 +4703,6 @@ const hydrateMatchLog = (matchLogNode) => {
       if (!confirmed) return;
 
       setTeamSheetForTeam(teamId, createEmptyMatchTeamSheet());
-      persistCurrentFixtureLog();
       render();
       return;
     }
@@ -4578,7 +4717,6 @@ const hydrateMatchLog = (matchLogNode) => {
         ...current,
         [group]: (Array.isArray(current[group]) ? current[group] : []).filter((player) => player.id !== playerId)
       });
-      persistCurrentFixtureLog();
       render();
       return;
     }
@@ -4608,7 +4746,6 @@ const hydrateMatchLog = (matchLogNode) => {
         [currentGroup]: (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).filter((entry) => entry.id !== playerId),
         [nextGroup]: [...(Array.isArray(current[nextGroup]) ? current[nextGroup] : []), player]
       });
-      persistCurrentFixtureLog();
       render();
     }
   });
