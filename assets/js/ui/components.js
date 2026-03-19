@@ -3898,10 +3898,8 @@ function hydrateMatchLog(matchLogNode) {
     const squadTemplateColumns = [
       { key: 'slot', header: '#', width: 6, align: 'center' },
       { key: 'name', header: 'Name', width: 28 },
-      { key: 'admissionNo', header: 'Admission', width: 14 },
       { key: 'jerseyNumber', header: 'Jersey', width: 10, align: 'center' },
-      { key: 'role', header: 'Role', width: 18 },
-      { key: 'notes', header: 'Notes', width: 26, wrapText: true }
+      { key: 'role', header: 'Position', width: 18 }
     ];
     const staffColumns = [
       { key: 'role', header: 'Role', width: 22 },
