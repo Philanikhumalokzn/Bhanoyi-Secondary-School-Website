@@ -3092,6 +3092,160 @@ body.match-log-workspace-open {
   background: var(--surface);
 }
 
+.match-log-squad-manager {
+  display: grid;
+  gap: 12px;
+}
+
+.match-log-squad-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.match-log-squad-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.match-log-squad-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.match-log-squad-card-head h4,
+.match-log-squad-group-head h5 {
+  margin: 0;
+}
+
+.match-log-squad-summary,
+.match-log-squad-helper,
+.match-log-squad-active {
+  margin: 0;
+}
+
+.match-log-squad-summary,
+.match-log-squad-helper,
+.match-log-squad-item-meta,
+.match-log-squad-active {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.match-log-squad-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.match-log-squad-controls label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.match-log-squad-controls input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.match-log-squad-control-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.match-log-squad-columns {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.match-log-squad-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.match-log-squad-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.match-log-squad-group-head span {
+  color: var(--primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.match-log-squad-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.match-log-squad-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.match-log-squad-item-main {
+  display: grid;
+  gap: 4px;
+}
+
+.match-log-squad-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.match-log-squad-item-actions .btn,
+.match-log-squad-card-head .btn,
+.match-log-squad-control-actions .btn {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 0.76rem;
+}
+
+.match-log-squad-empty {
+  margin: 0;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .match-log-table-wrap {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -5167,6 +5321,15 @@ body.match-log-workspace-open {
 
   .match-log-team-pickers {
     grid-template-columns: 1fr;
+  }
+
+  .match-log-squad-controls,
+  .match-log-squad-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .match-log-squad-control-actions {
+    justify-content: stretch;
   }
 
   .match-log-workspace-modal {

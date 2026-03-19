@@ -1247,14 +1247,104 @@ const getOrderedSectionEntries = (sections, context = {}) => {
   });
 };
 
+const inferMatchEventPlayerSearchScope = (key, label = '') => {
+  const normalized = `${String(key || '').trim()} ${String(label || '').trim()}`.toLowerCase();
+
+  if (key === 'goal' || key === 'penalty_goal' || key === 'own_goal') {
+    return 'active_match';
+  }
+
+  if (key === 'substitution') {
+    return 'active_match';
+  }
+
+  if (
+    normalized.includes('yellow') ||
+    normalized.includes('red') ||
+    normalized.includes('card') ||
+    normalized.includes('offence') ||
+    normalized.includes('offense') ||
+    normalized.includes('misconduct') ||
+    normalized.includes('foul')
+  ) {
+    return 'house_participants';
+  }
+
+  if (key === 'injury') {
+    return 'match_squad';
+  }
+
+  return 'team_players';
+};
+
 const DEFAULT_MATCH_EVENT_TYPES = [
-  { key: 'goal', label: 'Goal', icon: '⚽', scoreFor: 'self', allowAssist: true, playerLabel: 'Scorer' },
-  { key: 'penalty_goal', label: 'Penalty Goal', icon: '⚽', scoreFor: 'self', allowAssist: false, playerLabel: 'Scorer' },
-  { key: 'own_goal', label: 'Own Goal', icon: '⚽', scoreFor: 'opponent', allowAssist: false, playerLabel: 'Player' },
-  { key: 'yellow_card', label: 'Yellow Card', icon: '🟨', scoreFor: 'none', allowAssist: false, playerLabel: 'Booked Player' },
-  { key: 'red_card', label: 'Red Card', icon: '🟥', scoreFor: 'none', allowAssist: false, playerLabel: 'Sent-off Player' },
-  { key: 'injury', label: 'Injury', icon: '🩹', scoreFor: 'none', allowAssist: false, playerLabel: 'Injured Player' },
-  { key: 'substitution', label: 'Substitution', icon: '🔁', scoreFor: 'none', allowAssist: false, playerLabel: 'Player' }
+  {
+    key: 'goal',
+    label: 'Goal',
+    icon: '⚽',
+    scoreFor: 'self',
+    allowAssist: true,
+    playerLabel: 'Scorer',
+    playerSearchScope: 'active_match',
+    assistSearchScope: 'active_match'
+  },
+  {
+    key: 'penalty_goal',
+    label: 'Penalty Goal',
+    icon: '⚽',
+    scoreFor: 'self',
+    allowAssist: false,
+    playerLabel: 'Scorer',
+    playerSearchScope: 'active_match'
+  },
+  {
+    key: 'own_goal',
+    label: 'Own Goal',
+    icon: '⚽',
+    scoreFor: 'opponent',
+    allowAssist: false,
+    playerLabel: 'Player',
+    playerSearchScope: 'active_match'
+  },
+  {
+    key: 'yellow_card',
+    label: 'Yellow Card',
+    icon: '🟨',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Booked Person',
+    playerSearchScope: 'house_participants'
+  },
+  {
+    key: 'red_card',
+    label: 'Red Card',
+    icon: '🟥',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Sent-off Person',
+    playerSearchScope: 'house_participants'
+  },
+  {
+    key: 'injury',
+    label: 'Injury',
+    icon: '🩹',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Injured Player',
+    playerSearchScope: 'match_squad'
+  },
+  {
+    key: 'substitution',
+    label: 'Substitution',
+    icon: '🔁',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Player going off',
+    playerSearchScope: 'active_match',
+    showReplacement: true,
+    replacementLabel: 'Player coming on',
+    replacementSearchScope: 'bench_match'
+  }
 ];
 
 const DEFAULT_HOUSE_COLORS = ['#d62828', '#1d4ed8', '#15803d', '#f59e0b', '#7c3aed'];
@@ -1308,7 +1398,18 @@ const normalizeMatchEventTypes = (sectionEventTypes = []) => {
         icon: (source.icon || fallback.icon || '•').trim(),
         scoreFor: source.scoreFor || fallback.scoreFor || 'none',
         allowAssist: source.allowAssist !== undefined ? Boolean(source.allowAssist) : Boolean(fallback.allowAssist),
-        playerLabel: (source.playerLabel || fallback.playerLabel || 'Player').trim()
+        playerLabel: (source.playerLabel || fallback.playerLabel || 'Player').trim(),
+        playerSearchScope:
+          String(source.playerSearchScope || fallback.playerSearchScope || '').trim() ||
+          inferMatchEventPlayerSearchScope(key, source.label || fallback.label || key),
+        assistSearchScope:
+          String(source.assistSearchScope || fallback.assistSearchScope || '').trim() ||
+          (source.allowAssist !== undefined ? Boolean(source.allowAssist) : Boolean(fallback.allowAssist)
+            ? 'active_match'
+            : ''),
+        showReplacement: source.showReplacement !== undefined ? Boolean(source.showReplacement) : Boolean(fallback.showReplacement),
+        replacementLabel: (source.replacementLabel || fallback.replacementLabel || 'Replacement').trim(),
+        replacementSearchScope: String(source.replacementSearchScope || fallback.replacementSearchScope || '').trim() || 'bench_match'
       };
     })
     .filter(Boolean);
@@ -1399,6 +1500,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
   const inputSuffix = String(fallbackSectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_');
   const playerOptionsId = `match-player-options-${inputSuffix}`;
   const assistOptionsId = `match-assist-options-${inputSuffix}`;
+  const replacementOptionsId = `match-replacement-options-${inputSuffix}`;
   const fixtureSectionKey = (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const houseOptions = normalizeMatchTeams(
     Array.isArray(section.houseOptions) && section.houseOptions.length
@@ -1456,7 +1558,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
                 </div>
                 <div class="match-log-header-actions">
-                  <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
+                  <button type="button" class="btn btn-secondary" data-match-export>Export workbook</button>
                   <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
                 </div>
               </header>
@@ -1502,6 +1604,15 @@ const renderMatchLogSection = (section, sectionIndex) => {
                 </div>
                 <p class="match-log-status" data-match-clock-status aria-live="polite">Match clock not started.</p>
               </div>
+            </div>
+          </section>
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="manage-squads">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Set Team Lists</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <p class="match-log-status" data-match-squad-status aria-live="polite">Choose a fixture to set the starting XI and substitutes for both teams.</p>
+              <div class="match-log-squad-manager" data-match-squad-manager></div>
             </div>
           </section>
           <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="log-events">
@@ -1633,6 +1744,11 @@ const renderMatchLogSection = (section, sectionIndex) => {
                     Assist by (optional)
                     <input type="text" name="assistName" maxlength="120" placeholder="Start typing assister name" list="${assistOptionsId}" autocomplete="off" />
                     <datalist id="${assistOptionsId}" data-match-assist-options></datalist>
+                  </label>
+                  <label class="match-log-replacement-row is-hidden" data-replacement-row>
+                    Player coming on
+                    <input type="text" name="replacementName" maxlength="120" placeholder="Start typing replacement name" list="${replacementOptionsId}" autocomplete="off" />
+                    <datalist id="${replacementOptionsId}" data-match-replacement-options></datalist>
                   </label>
                   <label>
                     Notes (optional)
@@ -1787,6 +1903,8 @@ const normalizeMatchPlayerEntry = (entry, fallback = {}) => {
     name,
     admissionNo,
     houseId,
+    participantType: 'player',
+    roleLabel: 'Learner',
     gender: String(entry.gender || '').trim(),
     jerseyNumber: String(entry.jerseyNumber || '').trim(),
     sportingCodes: Array.isArray(entry.sportingCodes)
@@ -1815,6 +1933,70 @@ const normalizeMatchPlayersForTeam = (players, fallback = {}) => {
   });
 
   return normalized.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const normalizeMatchStaffEntry = (entry, fallback = {}) => {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const name = String(
+    entry.displayName ||
+      entry.name ||
+      [entry.title || '', entry.firstName || '', entry.surname || ''].filter(Boolean).join(' ')
+  ).trim();
+  if (!name) return null;
+
+  const houseId = String(entry.houseId || fallback.houseId || '').trim().toLowerCase();
+  const staffNumber = String(entry.staffNumber || '').trim();
+  const loginEmail = String(entry.loginEmail || entry.email || '').trim().toLowerCase();
+  const normalizedNameKey = name.toLowerCase().replace(/\s+/g, ' ').trim();
+  const roleParts = [String(entry.staffType || '').trim(), String(entry.rank || entry.postLevel || '').trim()].filter(Boolean);
+
+  return {
+    id: staffNumber || loginEmail || `${houseId || 'staff'}:staff:${normalizedNameKey}`,
+    name,
+    admissionNo: '',
+    houseId,
+    participantType: 'staff',
+    roleLabel: roleParts.join(' · ') || 'Staff',
+    gender: String(entry.gender || '').trim(),
+    jerseyNumber: '',
+    sportingCodes: []
+  };
+};
+
+const normalizeMatchParticipantsForTeam = (participants, fallback = {}) => {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(participants) ? participants : []).forEach((entry) => {
+    const participant =
+      entry?.participantType === 'staff'
+        ? normalizeMatchStaffEntry(entry, fallback)
+        : normalizeMatchPlayerEntry(entry, fallback);
+    if (!participant) return;
+    const dedupeKey = `${participant.participantType}:${participant.id}::${participant.name.toLowerCase()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push(participant);
+  });
+
+  return normalized.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const mergeUniqueMatchParticipants = (...groups) => {
+  const merged = [];
+  const seen = new Set();
+
+  groups.forEach((group) => {
+    normalizeMatchParticipantsForTeam(group).forEach((participant) => {
+      const dedupeKey = `${participant.participantType}:${participant.id}::${participant.name.toLowerCase()}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      merged.push(participant);
+    });
+  });
+
+  return merged.sort((left, right) => left.name.localeCompare(right.name));
 };
 
 const inferSportCodeMatches = (sportLabel, sportingCodes = []) => {
@@ -1905,6 +2087,116 @@ const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel) => {
   });
 
   return byHouse;
+};
+
+const loadEnrollmentStaffByHouse = (homeId, awayId) => {
+  const targetHouseIds = new Set(
+    [String(homeId || '').trim().toLowerCase(), String(awayId || '').trim().toLowerCase()].filter(Boolean)
+  );
+  const byHouse = {
+    [String(homeId || '').trim().toLowerCase()]: [],
+    [String(awayId || '').trim().toLowerCase()]: []
+  };
+
+  if (!targetHouseIds.size) return byHouse;
+
+  const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
+
+  enrollmentKeys.forEach((key) => {
+    try {
+      const parsed = readEnrollmentStoreLocal(key);
+      const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
+      staffMembers.forEach((staff) => {
+        const normalized = normalizeMatchStaffEntry(staff);
+        if (!normalized || !targetHouseIds.has(normalized.houseId)) return;
+        byHouse[normalized.houseId] = [...(byHouse[normalized.houseId] || []), normalized];
+      });
+    } catch {
+      return;
+    }
+  });
+
+  targetHouseIds.forEach((houseId) => {
+    byHouse[houseId] = normalizeMatchParticipantsForTeam(byHouse[houseId] || [], { houseId });
+  });
+
+  return byHouse;
+};
+
+const MAX_MATCH_STARTERS = 11;
+const MAX_MATCH_SUBSTITUTES = 6;
+
+const createEmptyMatchTeamSheet = () => ({
+  starters: [],
+  substitutes: []
+});
+
+const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) => {
+  if (!fixture) return {};
+
+  const source = squadByTeam && typeof squadByTeam === 'object' ? squadByTeam : {};
+  const resolveTeamSource = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim().toLowerCase();
+    return source[teamId] || source[normalizedTeamId] || {};
+  };
+
+  const normalizeTeamGroup = (values, teamId, maxItems, excludedIds = new Set()) => {
+    const teamPlayers = normalizeMatchPlayersForTeam(playersByTeam?.[teamId] || [], { houseId: teamId });
+    const playerById = new Map(teamPlayers.map((player) => [player.id, player]));
+    const playerByName = new Map(
+      teamPlayers.map((player) => [player.name.toLowerCase().replace(/\s+/g, ' ').trim(), player])
+    );
+    const resolved = [];
+    const seen = new Set([...excludedIds]);
+
+    (Array.isArray(values) ? values : []).forEach((entry) => {
+      if (resolved.length >= maxItems) return;
+      const normalized = normalizeMatchPlayerEntry(entry, { houseId: teamId });
+      if (!normalized) return;
+      const matched =
+        playerById.get(normalized.id) ||
+        playerByName.get(normalized.name.toLowerCase().replace(/\s+/g, ' ').trim()) ||
+        normalized;
+      if (seen.has(matched.id)) return;
+      seen.add(matched.id);
+      resolved.push(matched);
+    });
+
+    return normalizeMatchPlayersForTeam(resolved, { houseId: teamId }).slice(0, maxItems);
+  };
+
+  return {
+    [fixture.homeId]: (() => {
+      const teamSource = resolveTeamSource(fixture.homeId);
+      const starters = normalizeTeamGroup(
+        teamSource.starters || teamSource.starting || [],
+        fixture.homeId,
+        MAX_MATCH_STARTERS
+      );
+      const substitutes = normalizeTeamGroup(
+        teamSource.substitutes || teamSource.bench || [],
+        fixture.homeId,
+        MAX_MATCH_SUBSTITUTES,
+        new Set(starters.map((player) => player.id))
+      );
+      return { starters, substitutes };
+    })(),
+    [fixture.awayId]: (() => {
+      const teamSource = resolveTeamSource(fixture.awayId);
+      const starters = normalizeTeamGroup(
+        teamSource.starters || teamSource.starting || [],
+        fixture.awayId,
+        MAX_MATCH_STARTERS
+      );
+      const substitutes = normalizeTeamGroup(
+        teamSource.substitutes || teamSource.bench || [],
+        fixture.awayId,
+        MAX_MATCH_SUBSTITUTES,
+        new Set(starters.map((player) => player.id))
+      );
+      return { starters, substitutes };
+    })()
+  };
 };
 
 const normalizeFixturePlayersByTeam = (fixture, storedPlayersByTeam, fallbackPlayersByTeam = null) => {
@@ -2077,11 +2369,17 @@ const renderMatchEventItem = (event, definition, options = {}) => {
   const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
   const playerParts = [event.playerName || '', event.jerseyNumber ? `#${event.jerseyNumber}` : ''].filter(Boolean);
   const playerLabel = playerParts.join(' ');
-  const detailParts = [
-    playerLabel,
-    event.assistName ? `Assist: ${event.assistName}` : '',
-    event.notes || ''
-  ].filter(Boolean);
+  const detailParts = definition?.key === 'substitution'
+    ? [
+        playerLabel ? `Off: ${playerLabel}` : '',
+        event.replacementName ? `On: ${event.replacementName}` : '',
+        event.notes || ''
+      ].filter(Boolean)
+    : [
+        playerLabel,
+        event.assistName ? `Assist: ${event.assistName}` : '',
+        event.notes || ''
+      ].filter(Boolean);
 
   return `
     <div class="match-log-event-item" data-event-type="${event.type}">
@@ -2163,6 +2461,8 @@ const hydrateMatchLog = (matchLogNode) => {
   const topScorerNode = matchLogNode.querySelector('[data-match-highlight-scorer]');
   const topAssisterNode = matchLogNode.querySelector('[data-match-highlight-assister]');
   const mostBookedNode = matchLogNode.querySelector('[data-match-highlight-booked]');
+  const squadStatusNode = matchLogNode.querySelector('[data-match-squad-status]');
+  const squadManagerNode = matchLogNode.querySelector('[data-match-squad-manager]');
   const matchDaySelect = matchLogNode.querySelector('[data-matchday-select]');
   const fixtureSelect = matchLogNode.querySelector('[data-match-fixture-select]');
   const modal = matchLogNode.querySelector('[data-match-modal]');
@@ -2185,14 +2485,17 @@ const hydrateMatchLog = (matchLogNode) => {
   const eventForm = matchLogNode.querySelector('[data-match-event-form]');
   const playerLabelNode = matchLogNode.querySelector('[data-player-label]');
   const assistRow = matchLogNode.querySelector('[data-assist-row]');
+  const replacementRow = matchLogNode.querySelector('[data-replacement-row]');
   const minuteInput = eventForm?.querySelector('input[name="minute"]');
   const stoppageInput = eventForm?.querySelector('input[name="stoppage"]');
   const playerInput = eventForm?.querySelector('input[name="playerName"]');
   const jerseyInput = eventForm?.querySelector('input[name="jerseyNumber"]');
   const assistInput = eventForm?.querySelector('input[name="assistName"]');
+  const replacementInput = eventForm?.querySelector('input[name="replacementName"]');
   const notesInput = eventForm?.querySelector('textarea[name="notes"]');
   const playerOptionsNode = matchLogNode.querySelector('[data-match-player-options]');
   const assistOptionsNode = matchLogNode.querySelector('[data-match-assist-options]');
+  const replacementOptionsNode = matchLogNode.querySelector('[data-match-replacement-options]');
 
   portalOverlayToBody(workspaceModal, `match-log-workspace:${sectionKey}`);
   portalOverlayToBody(modal, `match-log-modal:${sectionKey}`);
@@ -2248,6 +2551,9 @@ const hydrateMatchLog = (matchLogNode) => {
   let editingEventId = '';
   let currentEvents = [];
   let currentPlayersByTeam = {};
+  let currentHousePlayersByTeam = {};
+  let currentStaffByTeam = {};
+  let currentSquadByTeam = {};
   let matchStartedAt = null;
   let interruptionAccumulatedMs = 0;
   let activePauseStartedAt = null;
@@ -2330,6 +2636,17 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) return null;
     const stored = logsByFixture[fixture.fixtureId];
     const safeStored = stored && typeof stored === 'object' ? stored : {};
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(
+      fixture,
+      safeStored.playersByTeam || {
+        homePlayers: safeStored.homePlayers,
+        awayPlayers: safeStored.awayPlayers
+      },
+      fixture.playersByTeam || {
+        homePlayers: fixture.homePlayers,
+        awayPlayers: fixture.awayPlayers
+      }
+    );
     const initialScores = {
       [fixture.homeId]: getInitialScoreForTeam(fixture.homeId),
       [fixture.awayId]: getInitialScoreForTeam(fixture.awayId),
@@ -2358,17 +2675,8 @@ const hydrateMatchLog = (matchLogNode) => {
       activePauseStartedAt: Number.isFinite(Number(safeStored.activePauseStartedAt)) ? Number(safeStored.activePauseStartedAt) : null,
       activePauseReason: String(safeStored.activePauseReason || '').trim(),
       events: Array.isArray(safeStored.events) ? safeStored.events : [],
-      playersByTeam: normalizeFixturePlayersByTeam(
-        fixture,
-        safeStored.playersByTeam || {
-          homePlayers: safeStored.homePlayers,
-          awayPlayers: safeStored.awayPlayers
-        },
-        fixture.playersByTeam || {
-          homePlayers: fixture.homePlayers,
-          awayPlayers: fixture.awayPlayers
-        }
-      )
+      playersByTeam: normalizedPlayersByTeam,
+      squadByTeam: normalizeFixtureSquadByTeam(fixture, safeStored.squadByTeam, normalizedPlayersByTeam)
     };
   };
 
@@ -2393,8 +2701,19 @@ const hydrateMatchLog = (matchLogNode) => {
           playerAdmissionNo: String(entry.playerAdmissionNo || '').trim(),
           playerHouseId: String(entry.playerHouseId || '').trim(),
           playerGender: String(entry.playerGender || '').trim(),
+          playerType: String(entry.playerType || '').trim(),
+          playerRole: String(entry.playerRole || '').trim(),
           assistId: String(entry.assistId || '').trim(),
           assistAdmissionNo: String(entry.assistAdmissionNo || '').trim(),
+          assistType: String(entry.assistType || '').trim(),
+          assistRole: String(entry.assistRole || '').trim(),
+          replacementName: String(entry.replacementName || '').trim(),
+          replacementId: String(entry.replacementId || '').trim(),
+          replacementAdmissionNo: String(entry.replacementAdmissionNo || '').trim(),
+          replacementHouseId: String(entry.replacementHouseId || '').trim(),
+          replacementGender: String(entry.replacementGender || '').trim(),
+          replacementType: String(entry.replacementType || '').trim(),
+          replacementRole: String(entry.replacementRole || '').trim(),
           reason: String(entry.reason || '').trim(),
           notes: String(entry.notes || '').trim(),
           createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
@@ -2402,45 +2721,339 @@ const hydrateMatchLog = (matchLogNode) => {
       });
   };
 
+  const normalizeMatchSearchValue = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+  const getNormalizedTeamId = (teamId, fixture = getCurrentFixture()) => {
+    if (!fixture) return String(teamId || '').trim();
+    return teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+  };
+
   const getPlayersForTeam = (teamId) => {
     const fixture = getCurrentFixture();
     if (!fixture) return [];
-    const normalizedTeamId = teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
     return normalizeMatchPlayersForTeam(currentPlayersByTeam?.[normalizedTeamId] || [], { houseId: normalizedTeamId });
   };
 
-  const findPlayerByTypedName = (teamId, typedName) => {
-    const normalizedName = String(typedName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const getHousePlayersForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return [];
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const houseKey = normalizedTeamId.toLowerCase();
+    return normalizeMatchPlayersForTeam(currentHousePlayersByTeam?.[houseKey] || currentPlayersByTeam?.[normalizedTeamId] || [], {
+      houseId: houseKey
+    });
+  };
+
+  const getStaffForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return [];
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const houseKey = normalizedTeamId.toLowerCase();
+    return normalizeMatchParticipantsForTeam(currentStaffByTeam?.[houseKey] || [], { houseId: houseKey });
+  };
+
+  const getTeamSheet = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return createEmptyMatchTeamSheet();
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const sheet = currentSquadByTeam?.[normalizedTeamId];
+    if (!sheet || typeof sheet !== 'object') return createEmptyMatchTeamSheet();
+    return {
+      starters: normalizeMatchPlayersForTeam(sheet.starters || [], { houseId: normalizedTeamId }),
+      substitutes: normalizeMatchPlayersForTeam(sheet.substitutes || [], { houseId: normalizedTeamId })
+    };
+  };
+
+  const getChronologicalTeamEvents = (teamId, { excludeEventId = '' } = {}) => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    return [...currentEvents]
+      .filter((event) => {
+        if (!event || event.scope !== 'team') return false;
+        if (String(event.teamId || '').trim() !== normalizedTeamId) return false;
+        if (excludeEventId && String(event.id || '').trim() === String(excludeEventId || '').trim()) return false;
+        return true;
+      })
+      .sort((left, right) => {
+        const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+        const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+        if (leftMinute === rightMinute) {
+          return (left.createdAt || 0) - (right.createdAt || 0);
+        }
+        return leftMinute - rightMinute;
+      });
+  };
+
+  const getMatchAvailabilityForTeam = (teamId, { excludeEventId = '' } = {}) => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    const teamPlayers = getPlayersForTeam(normalizedTeamId);
+    const sheet = getTeamSheet(normalizedTeamId);
+    const hasSquad = sheet.starters.length > 0 || sheet.substitutes.length > 0;
+
+    if (!hasSquad) {
+      return {
+        hasSquad: false,
+        starters: [],
+        substitutes: [],
+        active: teamPlayers,
+        bench: [],
+        squadPlayers: teamPlayers
+      };
+    }
+
+    const squadPlayers = normalizeMatchPlayersForTeam([...sheet.starters, ...sheet.substitutes], { houseId: normalizedTeamId });
+    const squadById = new Map(squadPlayers.map((player) => [player.id, player]));
+    const squadByName = new Map(squadPlayers.map((player) => [normalizeMatchSearchValue(player.name), player]));
+    const activeMap = new Map(sheet.starters.map((player) => [player.id, player]));
+    const benchMap = new Map(sheet.substitutes.map((player) => [player.id, player]));
+
+    getChronologicalTeamEvents(normalizedTeamId, { excludeEventId }).forEach((event) => {
+      if (String(event.type || '').trim() !== 'substitution') return;
+      const outgoing =
+        squadById.get(String(event.playerId || '').trim()) ||
+        squadByName.get(normalizeMatchSearchValue(event.playerName));
+      const incoming =
+        squadById.get(String(event.replacementId || '').trim()) ||
+        squadByName.get(normalizeMatchSearchValue(event.replacementName));
+
+      if (outgoing?.id) {
+        activeMap.delete(outgoing.id);
+      }
+
+      if (incoming?.id) {
+        benchMap.delete(incoming.id);
+        activeMap.set(incoming.id, incoming);
+      }
+    });
+
+    return {
+      hasSquad: true,
+      starters: sheet.starters,
+      substitutes: sheet.substitutes,
+      active: normalizeMatchPlayersForTeam(Array.from(activeMap.values()), { houseId: normalizedTeamId }),
+      bench: normalizeMatchPlayersForTeam(Array.from(benchMap.values()), { houseId: normalizedTeamId }),
+      squadPlayers
+    };
+  };
+
+  const getEventParticipants = (teamId, definition, field = 'player') => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    if (!normalizedTeamId) return [];
+
+    const availability = getMatchAvailabilityForTeam(normalizedTeamId, { excludeEventId: editingEventId });
+    const scope = field === 'assist'
+      ? String(definition?.assistSearchScope || definition?.playerSearchScope || 'team_players').trim()
+      : field === 'replacement'
+        ? String(definition?.replacementSearchScope || 'bench_match').trim()
+        : String(definition?.playerSearchScope || 'team_players').trim();
+
+    switch (scope) {
+      case 'active_match':
+        return availability.hasSquad ? availability.active : getPlayersForTeam(normalizedTeamId);
+      case 'bench_match':
+        return availability.hasSquad ? availability.bench : getPlayersForTeam(normalizedTeamId);
+      case 'match_squad':
+        return availability.hasSquad ? availability.squadPlayers : getPlayersForTeam(normalizedTeamId);
+      case 'house_participants':
+        return mergeUniqueMatchParticipants(getHousePlayersForTeam(normalizedTeamId), getStaffForTeam(normalizedTeamId));
+      case 'team_players':
+      default:
+        return getPlayersForTeam(normalizedTeamId);
+    }
+  };
+
+  const findParticipantByTypedName = (teamId, typedName, definition, field = 'player') => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
     if (!normalizedName) return null;
 
-    const teamPlayers = getPlayersForTeam(teamId);
     return (
-      teamPlayers.find((player) => String(player.name || '').trim().toLowerCase().replace(/\s+/g, ' ') === normalizedName) ||
+      getEventParticipants(teamId, definition, field).find(
+        (participant) => normalizeMatchSearchValue(participant.name) === normalizedName
+      ) ||
       null
     );
   };
 
-  const renderAutocompleteOptions = () => {
-    const fixture = getCurrentFixture();
-    if (!(playerOptionsNode instanceof HTMLDataListElement) || !(assistOptionsNode instanceof HTMLDataListElement)) return;
-    if (!fixture) {
-      playerOptionsNode.innerHTML = '';
-      assistOptionsNode.innerHTML = '';
-      return;
+  const formatParticipantSearchMeta = (participant) => {
+    if (!participant || typeof participant !== 'object') return '';
+    if (participant.participantType === 'staff') {
+      return String(participant.roleLabel || 'Staff').trim();
     }
 
-    const teamPlayers = getPlayersForTeam(activeTeamId || fixture.homeId);
-    const optionsMarkup = teamPlayers
-      .map((player) => {
-        const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
-          .filter(Boolean)
-          .join(' · ');
-        return `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(meta || player.name)}"></option>`;
+    return [
+      participant.admissionNo ? `Adm ${participant.admissionNo}` : '',
+      participant.jerseyNumber ? `#${participant.jerseyNumber}` : '',
+      participant.roleLabel && participant.roleLabel !== 'Learner' ? participant.roleLabel : ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  };
+
+  const buildParticipantOptionsMarkup = (participants) =>
+    normalizeMatchParticipantsForTeam(participants)
+      .map((participant) => {
+        const meta = formatParticipantSearchMeta(participant);
+        return `<option value="${escapeHtmlAttribute(participant.name)}" label="${escapeHtmlAttribute(meta || participant.name)}"></option>`;
       })
       .join('');
 
-    playerOptionsNode.innerHTML = optionsMarkup;
-    assistOptionsNode.innerHTML = optionsMarkup;
+  const renderAutocompleteOptions = () => {
+    const fixture = getCurrentFixture();
+    const definition = eventTypeByKey.get(selectedTypeKey) || null;
+    if (
+      !(playerOptionsNode instanceof HTMLDataListElement) ||
+      !(assistOptionsNode instanceof HTMLDataListElement) ||
+      !(replacementOptionsNode instanceof HTMLDataListElement)
+    ) {
+      return;
+    }
+    if (!fixture) {
+      playerOptionsNode.innerHTML = '';
+      assistOptionsNode.innerHTML = '';
+      replacementOptionsNode.innerHTML = '';
+      return;
+    }
+
+    const teamId = activeTeamId || fixture.homeId;
+    playerOptionsNode.innerHTML = buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'player'));
+    assistOptionsNode.innerHTML = definition?.allowAssist
+      ? buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'assist'))
+      : '';
+    replacementOptionsNode.innerHTML = definition?.showReplacement
+      ? buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'replacement'))
+      : '';
+  };
+
+  const renderSquadManager = () => {
+    if (!(squadManagerNode instanceof HTMLElement)) return;
+
+    const fixture = getCurrentFixture();
+    if (!fixture) {
+      squadManagerNode.innerHTML = '<div class="match-log-squad-empty">Choose a fixture to manage the team lists.</div>';
+      if (squadStatusNode) {
+        squadStatusNode.textContent = 'Choose a fixture to set the starting XI and substitutes for both teams.';
+      }
+      return;
+    }
+
+    const renderSquadList = (teamId, groupKey, title, entries) => {
+      const moveTarget = groupKey === 'starters' ? 'substitutes' : 'starters';
+      const moveLabel = groupKey === 'starters' ? 'To bench' : 'To XI';
+      return `
+        <section class="match-log-squad-group">
+          <header class="match-log-squad-group-head">
+            <h5>${title}</h5>
+            <span>${entries.length}/${groupKey === 'starters' ? MAX_MATCH_STARTERS : MAX_MATCH_SUBSTITUTES}</span>
+          </header>
+          ${entries.length
+            ? `<ul class="match-log-squad-list">${entries
+                .map((player) => {
+                  const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
+                    .filter(Boolean)
+                    .join(' · ');
+                  return `
+                    <li class="match-log-squad-item">
+                      <div class="match-log-squad-item-main">
+                        <strong>${escapeHtmlText(player.name)}</strong>
+                        <span class="match-log-squad-item-meta">${escapeHtmlText(meta || 'Learner')}</span>
+                      </div>
+                      <div class="match-log-squad-item-actions">
+                        <button type="button" class="btn btn-secondary" data-match-squad-move="${moveTarget}" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">${moveLabel}</button>
+                        <button type="button" class="btn btn-secondary" data-match-squad-remove="true" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">Remove</button>
+                      </div>
+                    </li>
+                  `;
+                })
+                .join('')}</ul>`
+            : '<p class="match-log-squad-empty">No players added yet.</p>'}
+        </section>
+      `;
+    };
+
+    const cards = [
+      { teamId: fixture.homeId, teamName: fixture.homeName },
+      { teamId: fixture.awayId, teamName: fixture.awayName }
+    ].map(({ teamId, teamName }) => {
+      const teamPlayers = getPlayersForTeam(teamId);
+      const teamSheet = getTeamSheet(teamId);
+      const availability = getMatchAvailabilityForTeam(teamId);
+      const selectedIds = new Set([...teamSheet.starters, ...teamSheet.substitutes].map((player) => player.id));
+      const availablePlayers = teamPlayers.filter((player) => !selectedIds.has(player.id));
+      const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const activeNames = availability.hasSquad
+        ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
+        : 'No team list set yet. Goals and assists still use the full team list.';
+
+      return `
+        <article class="match-log-squad-card" data-match-squad-card="${escapeHtmlAttribute(teamId)}">
+          <header class="match-log-squad-card-head">
+            <div>
+              <h4>${escapeHtmlText(teamName)}</h4>
+              <p class="match-log-squad-summary">Starting XI ${teamSheet.starters.length}/${MAX_MATCH_STARTERS} · Substitutes ${teamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}</p>
+            </div>
+            <button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>
+          </header>
+          <p class="match-log-squad-helper">Goals, own goals, penalty goals, and assists use only the current on-pitch squad once a team list is set.</p>
+          <div class="match-log-squad-controls">
+            <label>
+              Find player
+              <input type="text" data-match-squad-search-input="${escapeHtmlAttribute(teamId)}" list="${datalistId}" placeholder="Type learner name" autocomplete="off" />
+              <datalist id="${datalistId}">
+                ${availablePlayers
+                  .map((player) => {
+                    const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
+                      .filter(Boolean)
+                      .join(' · ');
+                    return `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(meta || player.name)}"></option>`;
+                  })
+                  .join('')}
+              </datalist>
+            </label>
+            <div class="match-log-squad-control-actions">
+              <button type="button" class="btn btn-secondary" data-match-squad-add="starters" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Starting XI</button>
+              <button type="button" class="btn btn-secondary" data-match-squad-add="substitutes" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Bench</button>
+            </div>
+          </div>
+          <div class="match-log-squad-columns">
+            ${renderSquadList(teamId, 'starters', 'Starting XI', teamSheet.starters)}
+            ${renderSquadList(teamId, 'substitutes', 'Substitutes', teamSheet.substitutes)}
+          </div>
+          <p class="match-log-squad-active"><strong>Current on pitch:</strong> ${escapeHtmlText(activeNames)}</p>
+        </article>
+      `;
+    });
+
+    squadManagerNode.innerHTML = `<div class="match-log-squad-grid">${cards.join('')}</div>`;
+
+    if (squadStatusNode) {
+      const homeSheet = getTeamSheet(fixture.homeId);
+      const awaySheet = getTeamSheet(fixture.awayId);
+      squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
+    }
+  };
+
+  const setTeamSheetForTeam = (teamId, nextSheet) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    currentSquadByTeam = normalizeFixtureSquadByTeam(
+      fixture,
+      {
+        ...currentSquadByTeam,
+        [normalizedTeamId]: nextSheet
+      },
+      currentPlayersByTeam
+    );
+  };
+
+  const getSquadCandidateByTypedName = (teamId, typedName) => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+
+    return (
+      getPlayersForTeam(teamId).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) ||
+      null
+    );
   };
 
   const computeScores = (fixture) => {
@@ -2482,6 +3095,7 @@ const hydrateMatchLog = (matchLogNode) => {
         awayPlayers: fixture.awayPlayers
       }
     );
+    const normalizedSquadByTeam = normalizeFixtureSquadByTeam(fixture, currentSquadByTeam, normalizedPlayersByTeam);
     const playerEventIndex = buildPlayerEventIndex(currentEvents, fixture, normalizedPlayersByTeam);
 
     logsByFixture[fixture.fixtureId] = {
@@ -2492,6 +3106,7 @@ const hydrateMatchLog = (matchLogNode) => {
       activePauseStartedAt: Number.isFinite(Number(activePauseStartedAt)) ? Number(activePauseStartedAt) : null,
       activePauseReason: String(activePauseReason || '').trim(),
       playersByTeam: normalizedPlayersByTeam,
+      squadByTeam: normalizedSquadByTeam,
       homePlayers: normalizedPlayersByTeam[fixture.homeId] || [],
       awayPlayers: normalizedPlayersByTeam[fixture.awayId] || [],
       playerEventIndex,
@@ -2518,6 +3133,9 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) {
       currentEvents = [];
       currentPlayersByTeam = {};
+      currentHousePlayersByTeam = {};
+      currentStaffByTeam = {};
+      currentSquadByTeam = {};
       matchStartedAt = null;
       interruptionAccumulatedMs = 0;
       activePauseStartedAt = null;
@@ -2545,6 +3163,9 @@ const hydrateMatchLog = (matchLogNode) => {
         awayPlayers: fixture.awayPlayers
       }
     );
+    currentHousePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, '');
+    currentStaffByTeam = loadEnrollmentStaffByHouse(fixture.homeId, fixture.awayId);
+    currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, entry?.squadByTeam, currentPlayersByTeam);
   };
 
   const populateFixtureData = () => {
@@ -2733,6 +3354,133 @@ const hydrateMatchLog = (matchLogNode) => {
     return lines.join('\n');
   };
 
+  const buildMatchWorkbookSections = (fixture) => {
+    if (!fixture) return [];
+
+    const squadColumns = [
+      { key: 'slot', header: '#', width: 6, align: 'center' },
+      { key: 'name', header: 'Name', width: 28 },
+      { key: 'admissionNo', header: 'Admission', width: 14 },
+      { key: 'jerseyNumber', header: 'Jersey', width: 10, align: 'center' },
+      { key: 'role', header: 'Role', width: 18 }
+    ];
+    const eventColumns = [
+      { key: 'team', header: 'Team', width: 20 },
+      { key: 'minute', header: 'Minute', width: 10, align: 'center' },
+      { key: 'event', header: 'Event', width: 18 },
+      { key: 'player', header: 'Player / Person', width: 28 },
+      { key: 'secondary', header: 'Assist / Replacement', width: 28 },
+      { key: 'notes', header: 'Notes', width: 36, wrapText: true }
+    ];
+
+    const buildSquadRows = (entries) =>
+      entries.map((player, index) => ({
+        slot: index + 1,
+        name: player.name || '',
+        admissionNo: player.admissionNo || '—',
+        jerseyNumber: player.jerseyNumber || '—',
+        role: player.roleLabel || 'Learner'
+      }));
+
+    const homeSheet = getTeamSheet(fixture.homeId);
+    const awaySheet = getTeamSheet(fixture.awayId);
+    const homeAvailability = getMatchAvailabilityForTeam(fixture.homeId);
+    const awayAvailability = getMatchAvailabilityForTeam(fixture.awayId);
+    const sortedEvents = [...currentEvents].sort((left, right) => {
+      const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+      const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+      if (leftMinute === rightMinute) {
+        return (left.createdAt || 0) - (right.createdAt || 0);
+      }
+      return leftMinute - rightMinute;
+    });
+
+    return [
+      {
+        title: `${fixture.homeName} Starting XI`,
+        metaLine: `${homeSheet.starters.length}/${MAX_MATCH_STARTERS} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(homeSheet.starters)
+      },
+      {
+        title: `${fixture.homeName} Substitutes`,
+        metaLine: `${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(homeSheet.substitutes)
+      },
+      {
+        title: `${fixture.homeName} Current On-Pitch Squad`,
+        metaLine: homeAvailability.hasSquad ? `${homeAvailability.active.length} active players` : 'No team list set yet',
+        columns: squadColumns,
+        rows: buildSquadRows(homeAvailability.active)
+      },
+      {
+        title: `${fixture.awayName} Starting XI`,
+        metaLine: `${awaySheet.starters.length}/${MAX_MATCH_STARTERS} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(awaySheet.starters)
+      },
+      {
+        title: `${fixture.awayName} Substitutes`,
+        metaLine: `${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(awaySheet.substitutes)
+      },
+      {
+        title: `${fixture.awayName} Current On-Pitch Squad`,
+        metaLine: awayAvailability.hasSquad ? `${awayAvailability.active.length} active players` : 'No team list set yet',
+        columns: squadColumns,
+        rows: buildSquadRows(awayAvailability.active)
+      },
+      {
+        title: 'Event Log',
+        metaLine: `${sortedEvents.length} event${sortedEvents.length === 1 ? '' : 's'} logged`,
+        columns: eventColumns,
+        rows: sortedEvents.map((event) => {
+          const definition = eventTypeByKey.get(event.type);
+          const teamName = event.scope === 'match'
+            ? 'Match'
+            : event.teamId === fixture.homeId
+              ? fixture.homeName
+              : fixture.awayName;
+          return {
+            team: teamName,
+            minute: formatMatchMinuteLabel(event.minute, event.stoppage) || '—',
+            event: definition?.label || event.type,
+            player: event.playerName || '—',
+            secondary: event.type === 'substitution'
+              ? event.replacementName || '—'
+              : event.assistName || '—',
+            notes: event.notes || ''
+          };
+        })
+      }
+    ];
+  };
+
+  const exportMatchWorkbook = async () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+
+    const scores = computeScores(fixture);
+    const safeFixture = `${fixture.homeName}-vs-${fixture.awayName}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    await exportProfessionalWorkbook({
+      fileName: `${safeFixture || 'match'}-match-log-${stamp}.xlsx`,
+      sheetName: 'Match Log',
+      title: 'Live Match Log Workbook',
+      subtitle: `${fixture.homeName} vs ${fixture.awayName}`,
+      contextLine: `${fixture.sport || config.sport || 'Match'} • ${fixture.competition || config.competition || ''}`,
+      metaLine: `Venue: ${fixture.venue || config.venue || 'TBC'} | Date: ${fixture.date || 'TBC'}${fixture.time ? ` ${fixture.time}` : ''} | Score: ${fixture.homeName} ${scores[fixture.homeId] || 0} - ${scores[fixture.awayId] || 0} ${fixture.awayName}`,
+      tableSections: buildMatchWorkbookSections(fixture),
+      note: 'Team sheets include the starting XI, substitutes, and the current on-pitch squad after logged substitutions.'
+    });
+  };
+
   const render = () => {
     const fixture = getCurrentFixture();
 
@@ -2774,6 +3522,7 @@ const hydrateMatchLog = (matchLogNode) => {
           button.disabled = true;
         }
       });
+      renderSquadManager();
       renderClockStatus();
       syncModalTeamState();
       renderAutocompleteOptions();
@@ -2948,6 +3697,7 @@ const hydrateMatchLog = (matchLogNode) => {
       }
     });
 
+    renderSquadManager();
     renderClockStatus();
     syncModalTeamState();
     renderAutocompleteOptions();
@@ -2975,6 +3725,9 @@ const hydrateMatchLog = (matchLogNode) => {
     eventForm.reset();
     if (assistRow) {
       assistRow.classList.add('is-hidden');
+    }
+    if (replacementRow) {
+      replacementRow.classList.add('is-hidden');
     }
     renderAutocompleteOptions();
   };
@@ -3076,6 +3829,9 @@ const hydrateMatchLog = (matchLogNode) => {
     if (assistRow) {
       assistRow.classList.toggle('is-hidden', !definition.allowAssist);
     }
+    if (replacementRow) {
+      replacementRow.classList.toggle('is-hidden', !definition.showReplacement);
+    }
 
     const selectedTypeInput = typeListNode.querySelector(`input[name="match-event-type"][value="${CSS.escape(selectedTypeKey)}"]`);
     if (selectedTypeInput instanceof HTMLInputElement) {
@@ -3096,6 +3852,9 @@ const hydrateMatchLog = (matchLogNode) => {
     }
     if (assistInput instanceof HTMLInputElement) {
       assistInput.value = String(existing.assistName || '').trim();
+    }
+    if (replacementInput instanceof HTMLInputElement) {
+      replacementInput.value = String(existing.replacementName || '').trim();
     }
     if (notesInput instanceof HTMLTextAreaElement) {
       notesInput.value = String(existing.notes || '').trim();
@@ -3154,6 +3913,13 @@ const hydrateMatchLog = (matchLogNode) => {
       }
     }
 
+    if (replacementRow) {
+      replacementRow.classList.toggle('is-hidden', !definition.showReplacement);
+      if (!definition.showReplacement && replacementInput instanceof HTMLInputElement) {
+        replacementInput.value = '';
+      }
+    }
+
     typeStep.classList.add('is-hidden');
     detailsStep.classList.remove('is-hidden');
   });
@@ -3169,14 +3935,53 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!selectedTypeKey || !eventTypeByKey.has(selectedTypeKey)) return;
     if (!activeTeamId || (activeTeamId !== fixture.homeId && activeTeamId !== fixture.awayId)) return;
 
+    const definition = eventTypeByKey.get(selectedTypeKey);
+    if (!definition) return;
+
     const minute = Number(minuteInput?.value);
     const stoppage = Number(stoppageInput?.value);
     const playerName = (playerInput?.value || '').trim();
     const jerseyNumber = (jerseyInput?.value || '').trim();
     const assistName = (assistInput?.value || '').trim();
+    const replacementName = (replacementInput?.value || '').trim();
     const notes = (notesInput?.value || '').trim();
-    const selectedPlayer = findPlayerByTypedName(activeTeamId, playerName);
-    const selectedAssist = findPlayerByTypedName(activeTeamId, assistName);
+    const selectedPlayer = findParticipantByTypedName(activeTeamId, playerName, definition, 'player');
+    const selectedAssist = findParticipantByTypedName(activeTeamId, assistName, definition, 'assist');
+    const selectedReplacement = findParticipantByTypedName(activeTeamId, replacementName, definition, 'replacement');
+
+    if (definition.showReplacement) {
+      if (!playerName || !replacementName) {
+        showSmartToast('Select both the player going off and the player coming on.', { tone: 'error' });
+        return;
+      }
+
+      if (!selectedPlayer || !selectedReplacement) {
+        showSmartToast('Use the suggested player names for substitutions so the active squad updates correctly.', {
+          tone: 'error'
+        });
+        return;
+      }
+
+      if (selectedPlayer.id === selectedReplacement.id) {
+        showSmartToast('The same player cannot go off and come on in the same substitution.', { tone: 'error' });
+        return;
+      }
+
+      if (!editingEventId) {
+        const availability = getMatchAvailabilityForTeam(activeTeamId);
+        if (availability.hasSquad) {
+          if (!availability.active.some((player) => player.id === selectedPlayer.id)) {
+            showSmartToast('The player going off must currently be on the pitch.', { tone: 'error' });
+            return;
+          }
+
+          if (!availability.bench.some((player) => player.id === selectedReplacement.id)) {
+            showSmartToast('The player coming on must come from the substitutes list.', { tone: 'error' });
+            return;
+          }
+        }
+      }
+    }
 
     const nextEvent = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -3190,10 +3995,21 @@ const hydrateMatchLog = (matchLogNode) => {
       playerAdmissionNo: selectedPlayer?.admissionNo || '',
       playerHouseId: selectedPlayer?.houseId || activeTeamId,
       playerGender: selectedPlayer?.gender || '',
+      playerType: selectedPlayer?.participantType || '',
+      playerRole: selectedPlayer?.roleLabel || '',
       jerseyNumber,
       assistName: selectedAssist?.name || assistName,
       assistId: selectedAssist?.id || '',
       assistAdmissionNo: selectedAssist?.admissionNo || '',
+      assistType: selectedAssist?.participantType || '',
+      assistRole: selectedAssist?.roleLabel || '',
+      replacementName: selectedReplacement?.name || replacementName,
+      replacementId: selectedReplacement?.id || '',
+      replacementAdmissionNo: selectedReplacement?.admissionNo || '',
+      replacementHouseId: selectedReplacement?.houseId || activeTeamId,
+      replacementGender: selectedReplacement?.gender || '',
+      replacementType: selectedReplacement?.participantType || '',
+      replacementRole: selectedReplacement?.roleLabel || '',
       notes,
       createdAt: Date.now()
     };
@@ -3287,6 +4103,111 @@ const hydrateMatchLog = (matchLogNode) => {
       const teamId = side === 'right' ? fixture.awayId : fixture.homeId;
       openModalForTeam(teamId);
     });
+  });
+
+  squadManagerNode?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const addButton = target.closest('[data-match-squad-add]');
+    if (addButton instanceof HTMLElement) {
+      const teamId = String(addButton.dataset.teamId || '').trim();
+      const group = String(addButton.dataset.matchSquadAdd || '').trim();
+      const card = addButton.closest('[data-match-squad-card]');
+      const input = card?.querySelector('[data-match-squad-search-input]');
+      const typedName = input instanceof HTMLInputElement ? input.value : '';
+      const candidate = getSquadCandidateByTypedName(teamId, typedName);
+      const current = getTeamSheet(teamId);
+
+      if (!candidate) {
+        showSmartToast('Choose a learner from the team list before adding them to the match squad.', { tone: 'error' });
+        return;
+      }
+
+      if ([...current.starters, ...current.substitutes].some((player) => player.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already in this team list.`, { tone: 'error' });
+        return;
+      }
+
+      if (group === 'starters' && current.starters.length >= MAX_MATCH_STARTERS) {
+        showSmartToast(`Only ${MAX_MATCH_STARTERS} players can be in the starting XI.`, { tone: 'error' });
+        return;
+      }
+
+      if (group === 'substitutes' && current.substitutes.length >= MAX_MATCH_SUBSTITUTES) {
+        showSmartToast(`Only ${MAX_MATCH_SUBSTITUTES} substitutes can be added.`, { tone: 'error' });
+        return;
+      }
+
+      setTeamSheetForTeam(teamId, {
+        ...current,
+        [group]: [...current[group], candidate]
+      });
+
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+
+      persistCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const clearButton = target.closest('[data-match-squad-clear]');
+    if (clearButton instanceof HTMLElement) {
+      const teamId = String(clearButton.dataset.teamId || '').trim();
+      const confirmed = window.confirm('Clear the starting XI and substitutes for this team?');
+      if (!confirmed) return;
+
+      setTeamSheetForTeam(teamId, createEmptyMatchTeamSheet());
+      persistCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const removeButton = target.closest('[data-match-squad-remove]');
+    if (removeButton instanceof HTMLElement) {
+      const teamId = String(removeButton.dataset.teamId || '').trim();
+      const group = String(removeButton.dataset.currentGroup || '').trim();
+      const playerId = String(removeButton.dataset.playerId || '').trim();
+      const current = getTeamSheet(teamId);
+      setTeamSheetForTeam(teamId, {
+        ...current,
+        [group]: (Array.isArray(current[group]) ? current[group] : []).filter((player) => player.id !== playerId)
+      });
+      persistCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const moveButton = target.closest('[data-match-squad-move]');
+    if (moveButton instanceof HTMLElement) {
+      const teamId = String(moveButton.dataset.teamId || '').trim();
+      const currentGroup = String(moveButton.dataset.currentGroup || '').trim();
+      const nextGroup = String(moveButton.dataset.matchSquadMove || '').trim();
+      const playerId = String(moveButton.dataset.playerId || '').trim();
+      const current = getTeamSheet(teamId);
+      const player = (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).find((entry) => entry.id === playerId);
+      if (!player) return;
+
+      if (nextGroup === 'starters' && current.starters.length >= MAX_MATCH_STARTERS) {
+        showSmartToast(`Only ${MAX_MATCH_STARTERS} players can be in the starting XI.`, { tone: 'error' });
+        return;
+      }
+
+      if (nextGroup === 'substitutes' && current.substitutes.length >= MAX_MATCH_SUBSTITUTES) {
+        showSmartToast(`Only ${MAX_MATCH_SUBSTITUTES} substitutes can be added.`, { tone: 'error' });
+        return;
+      }
+
+      setTeamSheetForTeam(teamId, {
+        ...current,
+        [currentGroup]: (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).filter((entry) => entry.id !== playerId),
+        [nextGroup]: [...(Array.isArray(current[nextGroup]) ? current[nextGroup] : []), player]
+      });
+      persistCurrentFixtureLog();
+      render();
+    }
   });
 
   matchDaySelect.addEventListener('change', () => {
@@ -3450,24 +4371,9 @@ const hydrateMatchLog = (matchLogNode) => {
   });
 
   exportButton?.addEventListener('click', () => {
-    const fixture = getCurrentFixture();
-    if (!fixture) return;
-    const csv = buildMatchExportCsv();
-    if (!csv) return;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    const safeFixture = `${fixture.homeName}-vs-${fixture.awayName}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    const stamp = new Date().toISOString().slice(0, 10);
-    anchor.href = url;
-    anchor.download = `${safeFixture || 'match'}-event-log-${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    void exportMatchWorkbook().catch(() => {
+      showSmartToast('Could not export the match workbook right now.', { tone: 'error' });
+    });
   });
 
   saveLogButton?.addEventListener('click', () => {
