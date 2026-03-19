@@ -1752,6 +1752,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
                     <input type="text" name="replacementName" maxlength="120" placeholder="Start typing replacement name" list="${replacementOptionsId}" autocomplete="off" />
                     <datalist id="${replacementOptionsId}" data-match-replacement-options></datalist>
                   </label>
+                  <p class="match-log-inline-notice is-hidden" data-match-inline-notice></p>
                   <label>
                     Notes (optional)
                     <textarea name="notes" rows="3" maxlength="300" placeholder="Additional event context"></textarea>
@@ -2586,6 +2587,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const playerLabelNode = matchLogNode.querySelector('[data-player-label]');
   const assistRow = matchLogNode.querySelector('[data-assist-row]');
   const replacementRow = matchLogNode.querySelector('[data-replacement-row]');
+  const inlineNoticeNode = matchLogNode.querySelector('[data-match-inline-notice]');
   const minuteInput = eventForm?.querySelector('input[name="minute"]');
   const stoppageInput = eventForm?.querySelector('input[name="stoppage"]');
   const playerInput = eventForm?.querySelector('input[name="playerName"]');
@@ -2981,6 +2983,35 @@ const hydrateMatchLog = (matchLogNode) => {
     }
   };
 
+  const updateEventInlineNotice = () => {
+    if (!(inlineNoticeNode instanceof HTMLElement)) return;
+
+    const fixture = getCurrentFixture();
+    const definition = eventTypeByKey.get(selectedTypeKey) || null;
+    const teamId = activeTeamId || fixture?.homeId || '';
+    const playerScope = getParticipantSearchScope(definition, 'player');
+    const assistScope = definition?.allowAssist ? getParticipantSearchScope(definition, 'assist') : '';
+    const replacementScope = definition?.showReplacement ? getParticipantSearchScope(definition, 'replacement') : '';
+    const requiresSavedTeamList = [playerScope, assistScope, replacementScope].some((scope) => isSquadBoundSearchScope(scope));
+
+    if (!fixture || !definition || !requiresSavedTeamList || !teamId) {
+      inlineNoticeNode.textContent = '';
+      inlineNoticeNode.classList.add('is-hidden');
+      return;
+    }
+
+    const savedAvailability = getMatchAvailabilityForTeam(teamId, { excludeEventId: editingEventId, saved: true });
+    if (savedAvailability.isReady) {
+      inlineNoticeNode.textContent = '';
+      inlineNoticeNode.classList.add('is-hidden');
+      return;
+    }
+
+    const teamName = teamId === fixture.awayId ? fixture.awayName : fixture.homeName;
+    inlineNoticeNode.textContent = `${teamName}: save a valid team list with exactly ${MAX_MATCH_STARTERS} starters before player suggestions will appear for this event. Substitutes can be up to ${MAX_MATCH_SUBSTITUTES}.`;
+    inlineNoticeNode.classList.remove('is-hidden');
+  };
+
   const getEventParticipants = (teamId, definition, field = 'player') => {
     const normalizedTeamId = getNormalizedTeamId(teamId);
     if (!normalizedTeamId) return [];
@@ -3056,6 +3087,7 @@ const hydrateMatchLog = (matchLogNode) => {
       playerOptionsNode.innerHTML = '';
       assistOptionsNode.innerHTML = '';
       replacementOptionsNode.innerHTML = '';
+      updateEventInlineNotice();
       return;
     }
 
@@ -3067,6 +3099,7 @@ const hydrateMatchLog = (matchLogNode) => {
     replacementOptionsNode.innerHTML = definition?.showReplacement
       ? buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'replacement'))
       : '';
+    updateEventInlineNotice();
   };
 
   const renderSquadManager = () => {

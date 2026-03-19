@@ -3636,6 +3636,17 @@ body.match-log-workspace-open {
   resize: vertical;
 }
 
+.match-log-inline-notice {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 8%, white);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .match-log-modal-actions {
   display: flex;
   justify-content: flex-end;
