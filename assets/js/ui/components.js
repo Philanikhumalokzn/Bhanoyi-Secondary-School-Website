@@ -3977,7 +3977,46 @@ function hydrateMatchLog(matchLogNode) {
       return label;
     };
 
-    const renderTeamSheet = (teamName, teamSections) => {
+    const theme = {
+      primaryBlue: '1F6FCB',
+      deepBlue: '173A5E',
+      headerBlue: '1B4E7C',
+      lightBlue: 'EAF3FF',
+      white: 'FFFFFF',
+      metaBlue: 'F5FAFF',
+      borderColor: 'D0E0F0'
+    };
+
+    const applyDataRowCellStyle = (cell, style, rowIndex) => {
+      const align = style?.align || 'left';
+      cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${theme.deepBlue}` } };
+      cell.alignment = { vertical: 'middle', horizontal: align, wrapText: Boolean(style?.wrapText) };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${rowIndex % 2 === 0 ? theme.white : theme.lightBlue}` } };
+      cell.border = {
+        top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        bottom: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        right: { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
+      };
+    };
+
+    const styleHeaderRow = (row, columnsForRow) => {
+      row.values = columnsForRow.map((entry) => entry.header || '');
+      row.height = 20;
+      row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.white}` } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${theme.headerBlue}` } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          bottom: { style: 'medium', color: { argb: `FF${theme.borderColor}` } },
+          right: { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
+        };
+      });
+    };
+
+    const renderTeamSheet = async (teamName, teamSections) => {
       const sheet = workbook.addWorksheet(`${teamName} Team Sheet`, {
         pageSetup: {
           paperSize: 9,
@@ -3991,55 +4030,109 @@ function hydrateMatchLog(matchLogNode) {
       });
 
       // compute effective columns (widest column set among sections)
-      const effectiveCols = teamSections.reduce((widest, entry) => (entry.columns.length > widest.length ? entry.columns : widest), teamSections[0].columns || []);
+      const effectiveCols = teamSections.reduce((widest, entry) => (entry.columns.length > (widest?.length || 0) ? entry.columns : widest), teamSections[0].columns || []);
       const endLabel = makeColLabel(effectiveCols.length);
 
-      // header area
+      // header area (match professional-export styling)
       sheet.mergeCells(`A1:${endLabel}1`);
       sheet.mergeCells(`A2:${endLabel}2`);
       sheet.mergeCells(`A3:${endLabel}3`);
+      sheet.mergeCells(`A4:${endLabel}4`);
+      sheet.mergeCells(`A5:${endLabel}5`);
       sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
       sheet.getCell('A2').value = `${teamName} Team Sheet Template`;
       sheet.getCell('A3').value = `${fixture.homeName} vs ${fixture.awayName}`;
+      sheet.getCell('A4').value = '';
+      sheet.getCell('A5').value = `Generated on: ${new Date().toLocaleString('en-GB')}`;
 
-      sheet.getRow(1).height = 24;
-      sheet.getRow(2).height = 18;
-      sheet.getRow(3).height = 16;
+      ['A1', 'A2', 'A3', 'A4', 'A5'].forEach((ref, index) => {
+        const cell = sheet.getCell(ref);
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = { name: 'Calibri', size: index === 0 ? 17 : index === 1 ? 13 : 10.5, bold: index <= 2, color: { argb: index <= 2 ? `FF${theme.white}` : `FF${theme.deepBlue}` } };
+        if (index <= 2) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${index === 0 ? theme.deepBlue : theme.primaryBlue}` } };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${theme.metaBlue}` } };
+        }
+      });
+
+      sheet.getRow(1).height = 28;
+      sheet.getRow(2).height = 22;
+      sheet.getRow(3).height = 20;
+      sheet.getRow(4).height = 18;
+      sheet.getRow(5).height = 18;
+
+      // try to add logo similar to professional-export
+      try {
+        const logoUrl = '/branding/bhanoyi-logo.png';
+        const logoResponse = await fetch(logoUrl);
+        if (logoResponse.ok) {
+          const logoBlob = await logoResponse.blob();
+          const logoBuffer = await logoBlob.arrayBuffer();
+          const imageId = workbook.addImage({ buffer: logoBuffer, extension: 'png' });
+
+          let logoWidth = 86;
+          let logoHeight = 86;
+          try {
+            const bitmap = await createImageBitmap(logoBlob);
+            const intrinsicWidth = Number(bitmap.width) || 1;
+            const intrinsicHeight = Number(bitmap.height) || 1;
+            const aspectRatio = intrinsicWidth / intrinsicHeight;
+            const targetHeight = 86;
+            logoHeight = targetHeight;
+            logoWidth = Math.max(42, Math.min(120, Math.round(targetHeight * aspectRatio)));
+            bitmap.close();
+          } catch {
+            // ignore
+          }
+
+          sheet.addImage(imageId, { tl: { col: 0.1, row: 0.15 }, ext: { width: logoWidth, height: logoHeight } });
+        }
+      } catch {
+        // ignore branding errors
+      }
 
       // set columns on sheet to effectiveCols
       sheet.columns = effectiveCols.map((c) => ({ header: c.header || '', key: c.key || '', width: Math.max(8, Number(c.width) || 16) }));
 
-      let currentRow = 5;
+      let currentRow = 7;
 
       teamSections.forEach((section) => {
         // title
         if (section.title) {
           sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
-          sheet.getCell(`A${currentRow}`).value = section.title;
+          const titleCell = sheet.getCell(`A${currentRow}`);
+          titleCell.value = section.title;
+          titleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+          titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+          titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${theme.metaBlue}` } };
           currentRow += 1;
         }
 
         // meta line
         if (section.metaLine) {
           sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
-          sheet.getCell(`A${currentRow}`).value = section.metaLine;
+          const metaCell = sheet.getCell(`A${currentRow}`);
+          metaCell.value = section.metaLine;
+          metaCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+          metaCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
           currentRow += 1;
         }
 
         // header row
         const headerRow = sheet.getRow(currentRow);
-        headerRow.values = section.columns.map((c) => c.header || '');
-        headerRow.eachCell((cell) => {
-          cell.font = { name: 'Calibri', size: 10.5, bold: true };
-        });
+        styleHeaderRow(headerRow, section.columns);
         currentRow += 1;
 
         // data rows
         section.rows.forEach((rowValue, rowIndex) => {
           const row = sheet.getRow(currentRow + rowIndex);
+          row.height = 18;
           section.columns.forEach((col, colIndex) => {
             const key = String(col.key || `col_${colIndex + 1}`);
-            row.getCell(colIndex + 1).value = rowValue && typeof rowValue === 'object' ? rowValue[key] ?? '' : '';
+            const cell = row.getCell(colIndex + 1);
+            cell.value = rowValue && typeof rowValue === 'object' ? rowValue[key] ?? '' : '';
+            applyDataRowCellStyle(cell, col, rowIndex);
           });
         });
         currentRow += section.rows.length;
@@ -4047,7 +4140,10 @@ function hydrateMatchLog(matchLogNode) {
         // section note
         if (section.note) {
           sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
-          sheet.getCell(`A${currentRow}`).value = section.note;
+          const noteCell = sheet.getCell(`A${currentRow}`);
+          noteCell.value = section.note;
+          noteCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+          noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
           currentRow += 1;
         }
 
