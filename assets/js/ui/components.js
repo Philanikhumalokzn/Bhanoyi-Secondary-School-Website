@@ -4155,8 +4155,8 @@ function hydrateMatchLog(matchLogNode) {
       sheet.pageSetup.printArea = `A1:${endLabel}${lastRow}`;
     };
 
-    renderTeamSheet(fixture.homeName, homeSections);
-    renderTeamSheet(fixture.awayName, awaySections);
+    await renderTeamSheet(fixture.homeName, homeSections);
+    await renderTeamSheet(fixture.awayName, awaySections);
 
     // prepare download
     const fileName = `${(fixture.homeName || 'home')}-vs-${(fixture.awayName || 'away')}-team-sheet-template-${new Date().toISOString().slice(0,10)}.xlsx`;
