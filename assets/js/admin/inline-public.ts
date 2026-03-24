@@ -4023,6 +4023,25 @@ const wireSportsHouseManagerInline = () => {
               });
               quickWrap.appendChild(btn);
             });
+            // also add a logout button for the logged-in staff session
+            const staffSessionKeyLocal = `bhanoyi.staffSession.${enrollmentSectionKey}`;
+            const staffSessionPasswordKeyLocal = `bhanoyi.staffSessionPassword.${enrollmentSectionKey}`;
+            const logoutBtn = document.createElement('button');
+            logoutBtn.type = 'button';
+            logoutBtn.className = 'btn btn-secondary';
+            logoutBtn.textContent = 'Logout';
+            logoutBtn.addEventListener('click', () => {
+              try {
+                sessionStorage.removeItem(staffSessionKeyLocal);
+                sessionStorage.removeItem(staffSessionPasswordKeyLocal);
+              } catch {
+                // ignore
+              }
+              showStatus('Logged out.');
+              window.location.reload();
+            });
+
+            quickWrap.appendChild(logoutBtn);
             controls.insertBefore(quickWrap, controls.firstChild);
           }
         } catch {
