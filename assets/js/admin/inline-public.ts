@@ -3961,6 +3961,79 @@ const wireSportsHouseManagerInline = () => {
   }
   controlsHost.appendChild(controls);
 
+  // If a staff session exists and the staff member is a house manager, expose a "Manage my house" quick action.
+  try {
+    const staffSessionEmail = String(sessionStorage.getItem(staffSessionKey) || '').trim().toLowerCase();
+    if (staffSessionEmail) {
+      const enrollmentRaw = localStorage.getItem(enrollmentStorageKey);
+      if (enrollmentRaw) {
+        try {
+          const parsed = JSON.parse(enrollmentRaw) as Record<string, unknown>;
+          const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
+          const managedHouseIds: string[] = [];
+
+          // build helper to compute default staff email as in staff-bootstrap
+          const normalizeLoginToken = (value: unknown) =>
+            String(value ?? '')
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '');
+
+          const buildDefaultCredentialsEmail = (entry: Record<string, unknown>) => {
+            const surnameToken = normalizeLoginToken(entry.surname).slice(0, 16) || 'staff';
+            const firstToken = normalizeLoginToken(entry.firstName);
+            const initialsToken = normalizeLoginToken(entry.initials);
+            const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
+            const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+            return `${handle}@bhanoyi.education`;
+          };
+
+          // find matching staff member keys
+          const membersByKey = new Map<string, Record<string, unknown>>();
+          staffMembers.forEach((entry, idx) => {
+            if (!entry || typeof entry !== 'object') return;
+            const loginEmail = String((entry as Record<string, unknown>).loginEmail || (entry as Record<string, unknown>).staffEmail || buildDefaultCredentialsEmail(entry as Record<string, unknown>)).trim().toLowerCase();
+            const storageKey = `${enrollmentStorageKey}|staff|${idx}`;
+            if (loginEmail === staffSessionEmail) {
+              membersByKey.set(storageKey, entry as Record<string, unknown>);
+            }
+          });
+
+          if (membersByKey.size) {
+            const roleStore = loadHouseRoleAssignments();
+            Object.entries(roleStore).forEach(([houseId, entry]) => {
+              Object.entries(entry.staffRoles || {}).forEach(([memberKey, roles]) => {
+                if (membersByKey.has(memberKey) && Array.isArray(roles) && roles.includes('house_manager')) {
+                  managedHouseIds.push(houseId);
+                }
+              });
+            });
+          }
+
+          if (managedHouseIds.length) {
+            const quickWrap = document.createElement('div');
+            quickWrap.className = 'inline-house-quick-actions';
+            managedHouseIds.forEach((hid) => {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'btn btn-primary';
+              btn.textContent = 'Manage My House';
+              btn.addEventListener('click', () => {
+                void openHouseModal(hid);
+              });
+              quickWrap.appendChild(btn);
+            });
+            controls.insertBefore(quickWrap, controls.firstChild);
+          }
+        } catch {
+          // ignore parsing errors
+        }
+      }
+    }
+  } catch {
+    // ignore any session access errors
+  }
+
   const readState = {
     options: baseOptions,
     leftTeamId: String(matchConfig.leftTeamId || baseOptions[0]?.id || '').trim(),
