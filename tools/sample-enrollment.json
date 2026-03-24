@@ -1,0 +1,20 @@
+{
+  "staffMembers": [
+    {
+      "firstName": "John",
+      "surname": "Doe",
+      "initials": "J.D.",
+      "staffEmail": "",
+      "loginEmail": "",
+      "loginPassword": ""
+    },
+    {
+      "firstName": "Alice",
+      "surname": "Smith",
+      "initials": "A.S.",
+      "staffEmail": "asmith@school.example",
+      "loginEmail": "",
+      "loginPassword": ""
+    }
+  ]
+}
