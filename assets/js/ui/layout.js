@@ -274,6 +274,105 @@ const initCollapsiblePageSections = (pageKey) => {
   }
 };
 
+// Global logout widget: appears bottom-right on all pages when a user is logged in (admin or staff)
+const installGlobalLogout = () => {
+  if (typeof document === 'undefined') return;
+  const existing = document.querySelector('.global-logout-wrap');
+  if (existing) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'global-logout-wrap';
+  wrap.style.position = 'fixed';
+  wrap.style.right = '16px';
+  wrap.style.bottom = '16px';
+  wrap.style.zIndex = '1100';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-secondary global-logout-btn';
+  btn.textContent = 'Logout';
+  btn.style.display = 'none';
+
+  btn.addEventListener('click', async () => {
+    // clear staff session storage keys
+    try {
+      const toRemove = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const k = sessionStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('bhanoyi.staffSession.') || k.startsWith('bhanoyi.staffSessionPassword.')) {
+          toRemove.push(k);
+        }
+      }
+      toRemove.forEach((k) => sessionStorage.removeItem(k));
+    } catch {
+      // ignore
+    }
+
+    // attempt to sign out Supabase admin session if present
+    try {
+      const api = await import('../admin/api.ts');
+      if (api && typeof api.signOut === 'function') {
+        await api.signOut();
+      }
+    } catch {
+      // ignore
+    }
+
+    // reload to reflect logged-out state
+    window.location.reload();
+  });
+
+  wrap.appendChild(btn);
+  document.body.appendChild(wrap);
+
+  const detect = async () => {
+    try {
+      let visible = false;
+
+      // detect staff session keys
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const k = sessionStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('bhanoyi.staffSession.') && String(sessionStorage.getItem(k) || '').trim()) {
+          visible = true;
+          break;
+        }
+      }
+
+      // detect Supabase admin session
+      if (!visible) {
+        try {
+          const api = await import('../admin/api.ts');
+          if (api && typeof api.getSession === 'function') {
+            const session = await api.getSession().catch(() => null);
+            if (session) visible = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      btn.style.display = visible ? '' : 'none';
+    } catch {
+      btn.style.display = 'none';
+    }
+  };
+
+  detect();
+    window.addEventListener('storage', detect);
+  
+    
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', () => {
+    try {
+      installGlobalLogout();
+    } catch {}
+  });
+}
+
 export const renderSite = async (siteContent, page) => {
   const {
     initFixtureCreators,
