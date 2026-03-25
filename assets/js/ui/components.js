@@ -6373,6 +6373,48 @@ const hydrateEnrollmentManager = (managerNode) => {
     };
   };
 
+  const splitStaffLoginEmail = (value) => {
+    const normalizedEmail = normalizeText(value, 120).toLowerCase();
+    if (!normalizedEmail) {
+      return { localPart: '', domain: 'bhanoyi.education' };
+    }
+
+    const [localPartRaw = '', domainRaw = 'bhanoyi.education'] = normalizedEmail.split('@');
+    return {
+      localPart: normalizeLoginToken(localPartRaw).slice(0, 40),
+      domain: normalizeText(domainRaw, 80).toLowerCase() || 'bhanoyi.education'
+    };
+  };
+
+  const buildUniqueStaffLoginEmail = (preferredEmail, staffLike, usedEmails) => {
+    const used = usedEmails instanceof Set ? usedEmails : new Set();
+    const defaultCredentials = buildDefaultStaffCredentials(staffLike);
+    const preferred = splitStaffLoginEmail(preferredEmail || defaultCredentials.email);
+    const fallback = splitStaffLoginEmail(defaultCredentials.email);
+    const baseLocalPart = preferred.localPart || fallback.localPart || 'staff';
+    const domain = preferred.domain || fallback.domain || 'bhanoyi.education';
+
+    let candidate = `${baseLocalPart}@${domain}`;
+    if (!used.has(candidate)) return candidate;
+
+    const suffixSeed = normalizeLoginToken(staffLike?.staffNumber || '').slice(-6);
+    if (suffixSeed) {
+      candidate = `${baseLocalPart.slice(0, Math.max(1, 24 - suffixSeed.length))}${suffixSeed}@${domain}`;
+      if (!used.has(candidate)) return candidate;
+    }
+
+    let counter = 2;
+    while (counter < 1000) {
+      const suffix = String(counter);
+      const trimmedLocalPart = baseLocalPart.slice(0, Math.max(1, 24 - suffix.length));
+      candidate = `${trimmedLocalPart}${suffix}@${domain}`;
+      if (!used.has(candidate)) return candidate;
+      counter += 1;
+    }
+
+    return `${baseLocalPart}${Date.now()}@${domain}`;
+  };
+
   const dedupeLetters = (values) => {
     const seen = new Set();
     const normalized = [];
@@ -6674,13 +6716,16 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const normalizeStaffMembers = (values) => {
     const seen = new Set();
+    const usedLoginEmails = new Set();
     const normalized = [];
     (Array.isArray(values) ? values : []).forEach((entry) => {
       const staff = normalizeStaffMember(entry);
       if (!staff) return;
       const dedupeKey = `${String(staff.surname || '').toLowerCase()}::${String(staff.initials || '').toLowerCase()}::${String(staff.staffNumber || '').toLowerCase()}::${String(staff.staffType || '').toLowerCase()}`;
       if (seen.has(dedupeKey)) return;
+      staff.loginEmail = buildUniqueStaffLoginEmail(staff.loginEmail, staff, usedLoginEmails);
       seen.add(dedupeKey);
+      usedLoginEmails.add(staff.loginEmail);
       normalized.push(staff);
     });
     return normalized;
@@ -8621,6 +8666,18 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (duplicate) {
       if (statusNode) {
         statusNode.textContent = `${resolveStaffDisplayName(normalized)} is already in staff list.`;
+      }
+      return;
+    }
+
+    const duplicateLoginEmail = staffMembers.some(
+      (entry, index) =>
+        index !== editingStaffIndex &&
+        String(entry.loginEmail || '').trim().toLowerCase() === String(normalized.loginEmail || '').trim().toLowerCase()
+    );
+    if (duplicateLoginEmail) {
+      if (statusNode) {
+        statusNode.textContent = `Login email already in use: ${normalized.loginEmail}. Update the login email or staff number before saving.`;
       }
       return;
     }
