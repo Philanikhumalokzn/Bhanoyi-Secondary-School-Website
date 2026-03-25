@@ -58,6 +58,25 @@ const bindMobileNav = () => {
   });
 };
 
+const resolveActiveStaffSessionEmail = () => {
+  if (typeof sessionStorage === 'undefined') return '';
+
+  try {
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = String(sessionStorage.key(index) || '').trim();
+      if (!key.startsWith('bhanoyi.staffSession.')) continue;
+      const value = String(sessionStorage.getItem(key) || '').trim().toLowerCase();
+      if (value) return value;
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+};
+
+const hasActiveStaffSession = () => Boolean(resolveActiveStaffSessionEmail());
+
 const installPublicCrudSurfaceGuard = () => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
@@ -86,6 +105,11 @@ const installPublicCrudSurfaceGuard = () => {
   // not sanitize the DOM. This prevents logged-in admins from losing admin
   // controls when `?admin=1` is not present.
   (async () => {
+    if (hasActiveStaffSession()) {
+      document.body.dataset.publicCrudGuardInstalled = 'true';
+      return;
+    }
+
     try {
       const api = await import('../admin/api.ts');
       if (api && typeof api.getSession === 'function') {
@@ -412,8 +436,9 @@ if (typeof window !== 'undefined') {
 export const renderSite = async (siteContent, page) => {
   const params = new URLSearchParams(window.location.search);
   const requestedAdminMode = params.get('admin') === '1';
+  const requestedStaffMode = !requestedAdminMode && params.get('staff') === '1';
   let adminMode = requestedAdminMode;
-  let staffMode = !adminMode && params.get('staff') === '1';
+  let staffMode = requestedStaffMode;
 
   const configuredAdminEmails = String(import.meta.env.VITE_ADMIN_EMAILS || '')
     .split(',')
@@ -460,6 +485,12 @@ export const renderSite = async (siteContent, page) => {
   // If no explicit URL flag is present, try to detect a signed-in admin session
   // (e.g. Supabase session). This ensures admin UI surfaces appear for signed-in
   // admins without needing the `?admin=1` query param before components load.
+  if (!adminMode && !staffMode) {
+    if (hasActiveStaffSession()) {
+      staffMode = true;
+    }
+  }
+
   if (!adminMode && !staffMode) {
     const allowedAdminSession = await resolveAllowedAdminSession();
     if (allowedAdminSession) {
