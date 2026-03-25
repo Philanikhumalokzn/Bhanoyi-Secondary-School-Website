@@ -23,9 +23,26 @@ These steps must be done in your Supabase account because they need your private
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_ADMIN_EMAILS` (comma-separated admin emails)
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
    - `ADMIN_EXTRA_PIN` (server-side PIN for admin session control menu)
    - `VITE_OLLAMA_MODEL` (example: `qwen3:4b`)
    - `VITE_OLLAMA_BASE_URL` (default: `http://127.0.0.1:11434`)
+
+## Important about staff login credentials
+
+Admins can assign a `loginEmail` and `loginPassword` to staff inside Enrollment.
+
+Those values are not enough by themselves.
+For staff to log in on `staff.html`, the server must also create or update a matching Supabase Auth user through `/api/staff-auth-sync`.
+
+That requires these server-side variables to exist in the deployed environment:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+If those are missing, admin can still save staff profile credentials in Enrollment, but those credentials will not work for real staff login.
 
 ## Local AI Update (Ollama) on deployed site
 If you open the Vercel site and use **AI Update**, browser CORS rules apply.
