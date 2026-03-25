@@ -5696,8 +5696,6 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   </select>
                   <select data-enrollment-staff-assigned-class></select>
                   <input type="text" maxlength="80" data-enrollment-staff-subject placeholder="Subject / Department (optional)" />
-                  <input type="email" maxlength="120" data-enrollment-staff-login-email placeholder="Login email (optional)" />
-                  <input type="text" maxlength="120" data-enrollment-staff-login-password placeholder="Login password (optional)" />
                   <input type="email" maxlength="120" data-enrollment-staff-email placeholder="Email (optional)" />
                   <input type="text" maxlength="30" data-enrollment-staff-phone placeholder="Phone (optional)" />
                   <textarea rows="2" maxlength="280" data-enrollment-staff-notes placeholder="Notes (optional)"></textarea>
@@ -5918,8 +5916,6 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffAssignedClassSelect = managerNode.querySelector('[data-enrollment-staff-assigned-class]');
   const staffSubjectInput = managerNode.querySelector('[data-enrollment-staff-subject]');
   const staffEmailInput = managerNode.querySelector('[data-enrollment-staff-email]');
-  const staffLoginEmailInput = managerNode.querySelector('[data-enrollment-staff-login-email]');
-  const staffLoginPasswordInput = managerNode.querySelector('[data-enrollment-staff-login-password]');
   const staffPhoneInput = managerNode.querySelector('[data-enrollment-staff-phone]');
   const staffNotesInput = managerNode.querySelector('[data-enrollment-staff-notes]');
   const addStaffButton = managerNode.querySelector('[data-enrollment-add-staff]');
@@ -6138,7 +6134,6 @@ const hydrateEnrollmentManager = (managerNode) => {
   let classesByGrade = {};
   let classProfilesByGrade = {};
   let staffMembers = [];
-  let selectedStaffIndex = -1;
   let selectedManageGrade = '';
   let selectedManageLetter = '';
   let manageLearners = [];
@@ -7577,21 +7572,6 @@ const hydrateEnrollmentManager = (managerNode) => {
           : formatSportCodeWithEmoji(defaultSportCode);
         const topGenderLabel = learner.gender || 'Unspecified';
 
-        const memberKey = `${storageKey}|staff|${index}`;
-        let isHouseManager = false;
-        try {
-          const rawRoles = localStorage.getItem('bhanoyi.houseRoleAssignments');
-          const parsedRoles = rawRoles ? JSON.parse(rawRoles) : {};
-          Object.values(parsedRoles || {}).forEach((houseEntry) => {
-            if (!houseEntry || typeof houseEntry !== 'object') return;
-            const staffRoles = houseEntry.staffRoles || {};
-            const rolesForMember = Array.isArray(staffRoles[memberKey]) ? staffRoles[memberKey] : [];
-            if (rolesForMember.includes('house_manager')) isHouseManager = true;
-          });
-        } catch {
-          isHouseManager = false;
-        }
-
         const houseOptionsMarkup = schoolHouseOptions
           .map(
             (house) => `
@@ -7855,11 +7835,7 @@ const hydrateEnrollmentManager = (managerNode) => {
               </div>
             </div>
             <div class="enrollment-learner-actions">
-              ${isAdminMode ? `
-                    <button type="button" class="enrollment-class-edit" data-enrollment-edit-staff-index="${index}" title="Edit staff ${escapeHtmlAttribute(displayName)}">Edit</button>
-                    <button type="button" class="btn btn-secondary" data-enrollment-toggle-house-manager-index="${index}">${isHouseManager ? 'Remove House Manager' : 'Make House Manager'}</button>
-                    <button type="button" class="enrollment-class-remove" data-enrollment-remove-staff-index="${index}" aria-label="Remove staff ${escapeHtmlAttribute(displayName)}" title="Remove staff ${escapeHtmlAttribute(displayName)}">×</button>
-                  ` : ''}
+              ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-staff-index="${index}" aria-label="Remove staff ${escapeHtmlAttribute(displayName)}" title="Remove staff ${escapeHtmlAttribute(displayName)}">×</button>` : ''}
             </div>
           </div>
         `;
@@ -7881,8 +7857,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffAssignedClassSelect.value = '';
     staffSubjectInput.value = '';
     staffEmailInput.value = '';
-    if (staffLoginEmailInput) staffLoginEmailInput.value = '';
-    if (staffLoginPasswordInput) staffLoginPasswordInput.value = '';
     staffPhoneInput.value = '';
     staffNotesInput.value = '';
     selectedStaffHouseId = '';
@@ -8381,87 +8355,21 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!isAdminMode) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    // Remove button handling
     const removeButton = target.closest('[data-enrollment-remove-staff-index]');
-    if (removeButton instanceof HTMLButtonElement) {
-      const idx = Number.parseInt(String(removeButton.dataset.enrollmentRemoveStaffIndex || ''), 10);
-      if (Number.isFinite(idx) && idx >= 0 && idx < staffMembers.length) {
-        const staffName = String(resolveStaffDisplayName(staffMembers[idx]) || 'this staff member').trim();
-        const confirmed = window.confirm(`Remove ${staffName} from staff list?`);
-        if (confirmed) {
-          staffMembers.splice(idx, 1);
-          syncClassTeachersFromStaffAssignments();
-          saveStore();
-          renderStaffMembers();
-          if (statusNode) statusNode.textContent = `${staffName} removed from staff list.`;
-        }
-      }
-      return;
-    }
+    if (!(removeButton instanceof HTMLButtonElement)) return;
 
-    const editButton = target.closest('[data-enrollment-edit-staff-index]');
-    if (editButton instanceof HTMLButtonElement) {
-      const index = Number.parseInt(String(editButton.dataset.enrollmentEditStaffIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
-      const entry = staffMembers[index];
-      // populate form for editing
-      staffTypeSelect.value = String(entry.staffType || 'teaching_staff');
-      staffTitleSelect.value = String(entry.title || 'Mr.');
-      staffInitialsInput.value = String(entry.initials || '');
-      staffFirstNameInput.value = String(entry.firstName || '');
-      staffSurnameInput.value = String(entry.surname || '');
-      staffNumberInput.value = String(entry.staffNumber || '');
-      staffGenderSelect.value = String(entry.gender || '');
-      staffPostLevelSelect.value = String(entry.postLevel || 'PL1');
-      staffAssignedClassSelect.value = (entry.assignedGrade && entry.assignedClassLetter) ? `${entry.assignedGrade}|${entry.assignedClassLetter}` : '';
-      staffSubjectInput.value = String(entry.subject || '');
-      if (staffLoginEmailInput) staffLoginEmailInput.value = String(entry.loginEmail || '');
-      if (staffLoginPasswordInput) staffLoginPasswordInput.value = String(entry.loginPassword || '');
-      staffEmailInput.value = String(entry.email || '');
-      staffPhoneInput.value = String(entry.phone || '');
-      staffNotesInput.value = String(entry.notes || '');
-      selectedStaffHouseId = String(entry.houseId || '');
-      selectedStaffIndex = index;
-      if (addStaffButton instanceof HTMLButtonElement) addStaffButton.textContent = 'Save changes';
-      renderStaffHouseSelector();
-      return;
-    }
+    const index = Number.parseInt(String(removeButton.dataset.enrollmentRemoveStaffIndex || ''), 10);
+    if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
 
-    const toggleManagerButton = target.closest('[data-enrollment-toggle-house-manager-index]');
-    if (toggleManagerButton instanceof HTMLButtonElement) {
-      const index = Number.parseInt(String(toggleManagerButton.dataset.enrollmentToggleHouseManagerIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
-      const staffEntry = staffMembers[index];
-      const houseId = String(staffEntry.houseId || '');
-      if (!houseId) {
-        if (statusNode) statusNode.textContent = 'Assign the staff member to a house first.';
-        return;
-      }
-      const storageKeyName = 'bhanoyi.houseRoleAssignments';
-      let roleStore = {};
-      try {
-        const raw = localStorage.getItem(storageKeyName);
-        roleStore = raw ? JSON.parse(raw) : {};
-      } catch {
-        roleStore = {};
-      }
-      roleStore[houseId] = roleStore[houseId] || { staffRoles: {}, learnerCaptaincies: {} };
-      const memberKey = `${storageKey}|staff|${index}`;
-      const currentRoles = Array.isArray(roleStore[houseId].staffRoles[memberKey]) ? roleStore[houseId].staffRoles[memberKey] : [];
-      const hasManager = currentRoles.includes('house_manager');
-      if (hasManager) {
-        roleStore[houseId].staffRoles[memberKey] = currentRoles.filter((r) => r !== 'house_manager');
-      } else {
-        roleStore[houseId].staffRoles[memberKey] = Array.from(new Set([...currentRoles, 'house_manager']));
-      }
-      try {
-        localStorage.setItem(storageKeyName, JSON.stringify(roleStore));
-        renderStaffMembers();
-        if (statusNode) statusNode.textContent = `${resolveStaffDisplayName(staffEntry)} ${hasManager ? 'removed as' : 'set as'} house manager for ${houseId}.`;
-      } catch {
-        if (statusNode) statusNode.textContent = 'Could not update house manager assignment.';
-      }
-      return;
+    const staffName = String(resolveStaffDisplayName(staffMembers[index]) || 'this staff member').trim();
+    const confirmed = window.confirm(`Remove ${staffName} from staff list?`);
+    if (!confirmed) return;
+    staffMembers.splice(index, 1);
+    syncClassTeachersFromStaffAssignments();
+    saveStore();
+    renderStaffMembers();
+    if (statusNode) {
+      statusNode.textContent = `${staffName} removed from staff list.`;
     }
   });
 
@@ -8519,8 +8427,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       initials: staffInitialsInput.value,
       firstName: staffFirstNameInput.value,
       surname: staffSurnameInput.value,
-      loginEmail: (staffLoginEmailInput && staffLoginEmailInput.value) || staffEmailInput.value,
-      loginPassword: (staffLoginPasswordInput && staffLoginPasswordInput.value) || undefined,
+      loginEmail: staffEmailInput.value,
       staffNumber: staffNumberInput.value,
       gender: staffGenderSelect.value,
       postLevel: staffPostLevelSelect.value,
@@ -8536,22 +8443,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!normalized) {
       if (statusNode) {
         statusNode.textContent = 'Enter at least surname (plus title/initials defaults) before adding staff.';
-      }
-      return;
-    }
-
-    if (selectedStaffIndex >= 0 && Number.isFinite(selectedStaffIndex) && selectedStaffIndex < staffMembers.length) {
-      // update existing
-      staffMembers[selectedStaffIndex] = normalizeStaffMembers([...(staffMembers.slice(0, selectedStaffIndex)), normalized, ...(staffMembers.slice(selectedStaffIndex + 1))])[selectedStaffIndex];
-      syncClassTeachersFromStaffAssignments();
-      saveStore();
-      syncStaffSession();
-      renderStaffMembers();
-      clearStaffForm();
-      selectedStaffIndex = -1;
-      if (addStaffButton instanceof HTMLButtonElement) addStaffButton.textContent = 'Add staff member';
-      if (statusNode) {
-        statusNode.textContent = `${resolveStaffDisplayName(normalized)} updated.`;
       }
       return;
     }
