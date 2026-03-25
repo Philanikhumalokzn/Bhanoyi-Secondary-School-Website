@@ -1486,7 +1486,7 @@ const hydrateMatchLog = (matchLogNode) => {
       { key: 'role', header: 'Position', width: 24 }
     ];
     const staffColumns = [
-      { key: 'role', header: 'Role', width: 29.5 },
+      { key: 'role', header: 'Role', width: 59 },
       { key: 'name', header: 'Name', width: 88 },
       { key: 'notes', header: 'Notes', width: 36, wrapText: true }
     ];
@@ -1592,7 +1592,7 @@ const hydrateMatchLog = (matchLogNode) => {
 
     const styleHeaderRow = (row, columnsForRow) => {
       row.values = columnsForRow.map((entry) => entry.header || '');
-      row.height = 20;
+      row.height = 40;
       row.eachCell((cell) => {
         cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.white}` } };
         cell.fill = {
@@ -1671,11 +1671,11 @@ const hydrateMatchLog = (matchLogNode) => {
         }
       });
 
-      sheet.getRow(1).height = 28;
-      sheet.getRow(2).height = 22;
-      sheet.getRow(3).height = 20;
-      sheet.getRow(4).height = 18;
-      sheet.getRow(5).height = 18;
+      sheet.getRow(1).height = 56;
+      sheet.getRow(2).height = 44;
+      sheet.getRow(3).height = 40;
+      sheet.getRow(4).height = 36;
+      sheet.getRow(5).height = 36;
 
       try {
         const logoResponse = await fetch('/branding/bhanoyi-logo.png');
@@ -1729,7 +1729,7 @@ const hydrateMatchLog = (matchLogNode) => {
 
         section.rows.forEach((rowValue, rowIndex) => {
           const row = sheet.getRow(currentRow + rowIndex);
-          row.height = 36;
+          row.height = 72;
           section.columns.forEach((column, columnIndex) => {
             const key = String(column.key || `col_${columnIndex + 1}`);
             const cell = row.getCell(columnIndex + 1);
@@ -7037,11 +7037,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
         }
       });
 
-      sheet.getRow(1).height = 28;
-      sheet.getRow(2).height = 22;
-      sheet.getRow(3).height = 20;
-      sheet.getRow(4).height = 18;
-      sheet.getRow(5).height = 18;
+      sheet.getRow(1).height = 56;
+      sheet.getRow(2).height = 44;
+      sheet.getRow(3).height = 40;
+      sheet.getRow(4).height = 36;
+      sheet.getRow(5).height = 36;
 
       try {
         const logoResponse = await fetch('/branding/bhanoyi-logo.png');
@@ -7064,7 +7064,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       const headerLabels = ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'];
       const headerRow = sheet.getRow(headerRowNumber);
       headerRow.values = headerLabels;
-      headerRow.height = 20;
+      headerRow.height = 40;
       headerRow.eachCell((cell) => {
         cell.font = {
           name: 'Calibri',
@@ -7102,7 +7102,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
         ];
-        row.height = 18;
+        row.height = 36;
 
         row.eachCell((cell, columnIndex) => {
           cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${deepBlue}` } };
