@@ -6366,12 +6366,17 @@ const hydrateEnrollmentManager = (managerNode) => {
     const firstToken = normalizeLoginToken(staffLike?.firstName || '');
     const initialsToken = normalizeLoginToken(staffLike?.initials || '');
     const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
-    const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+    const baseHandle = `${surnameToken}${firstInitial}`.slice(0, 24) || 'staffx';
+    const passwordSeed = `${baseHandle}2026`;
     return {
-      email: `${handle}@bhanoyi.education`,
-      password: handle
+      email: `${baseHandle}@bhanoyi.education`,
+      password: passwordSeed.slice(0, 24)
     };
   };
+
+  const isValidStaffLoginEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeText(value, 120).toLowerCase());
+
+  const isValidStaffLoginPassword = (value) => normalizeText(value, 120).length >= 6;
 
   const splitStaffLoginEmail = (value) => {
     const normalizedEmail = normalizeText(value, 120).toLowerCase();
@@ -7128,6 +7133,19 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffAuthStatusNode.textContent = String(message || '').trim();
   };
 
+  const formatStaffAuthProblems = (problems) => {
+    const rows = (Array.isArray(problems) ? problems : [])
+      .map((problem) => {
+        const staff = String(problem?.staff || '').trim();
+        const loginEmail = String(problem?.loginEmail || '').trim();
+        const reason = String(problem?.reason || '').trim();
+        return [staff, loginEmail ? `(${loginEmail})` : '', reason].filter(Boolean).join(' ');
+      })
+      .filter(Boolean);
+
+    return rows.slice(0, 3).join(' | ');
+  };
+
   const runStaffAuthSync = async ({ manual = false } = {}) => {
     if (!isAdminMode) {
       setStaffAuthStatus('Staff auth sync is only available in admin mode.');
@@ -7148,7 +7166,8 @@ const hydrateEnrollmentManager = (managerNode) => {
       return true;
     }
 
-    setStaffAuthStatus(`Staff auth sync failed (${result.status || 'network'}): ${result.error || 'Unknown error.'}`);
+    const problemDetails = formatStaffAuthProblems(result.problems);
+    setStaffAuthStatus(`Staff auth sync failed (${result.status || 'network'}): ${result.error || 'Unknown error.'}${problemDetails ? ` Fix: ${problemDetails}` : ''}`);
     return false;
   };
 
@@ -8678,6 +8697,20 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (duplicateLoginEmail) {
       if (statusNode) {
         statusNode.textContent = `Login email already in use: ${normalized.loginEmail}. Update the login email or staff number before saving.`;
+      }
+      return;
+    }
+
+    if (!isValidStaffLoginEmail(normalized.loginEmail)) {
+      if (statusNode) {
+        statusNode.textContent = `Login email is invalid: ${normalized.loginEmail}.`;
+      }
+      return;
+    }
+
+    if (!isValidStaffLoginPassword(normalized.loginPassword)) {
+      if (statusNode) {
+        statusNode.textContent = 'Login password must be at least 6 characters.';
       }
       return;
     }

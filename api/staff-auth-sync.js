@@ -25,6 +25,17 @@ const normalizeEmail = (value) => normalizeText(value, 120).toLowerCase();
 
 const normalizePassword = (value) => normalizeText(value, 120);
 
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
+
+const isStrongEnoughPassword = (value) => normalizePassword(value).length >= 6;
+
+const describeStaff = (entry) => {
+  const surname = normalizeText(entry?.surname, 80);
+  const firstName = normalizeText(entry?.firstName, 80);
+  const displayName = [surname, firstName].filter(Boolean).join(' ').trim();
+  return displayName || normalizeEmail(entry?.loginEmail || entry?.staffEmail || entry?.email) || 'Unknown staff member';
+};
+
 const buildStaffKey = (entry) => {
   const staffType = normalizeStaffType(entry?.staffType);
   const surname = normalizeText(entry?.surname, 80).toLowerCase();
@@ -58,6 +69,64 @@ const normalizeStaffMember = (entry) => {
     loginEmail,
     loginPassword,
     staffKey: buildStaffKey(entry)
+  };
+};
+
+const validateStaffMembers = (staffMembers) => {
+  const normalizedStaff = [];
+  const problems = [];
+  const seenEmails = new Map();
+
+  (Array.isArray(staffMembers) ? staffMembers : []).forEach((entry, index) => {
+    const normalizedStaffMember = normalizeStaffMember(entry);
+    const staffLabel = describeStaff(entry);
+
+    if (!normalizedStaffMember) {
+      problems.push({
+        index,
+        staff: staffLabel,
+        loginEmail: normalizeEmail(entry?.loginEmail || entry?.staffEmail || entry?.email),
+        reason: 'Missing required staff auth fields.'
+      });
+      return;
+    }
+
+    if (!isValidEmail(normalizedStaffMember.loginEmail)) {
+      problems.push({
+        index,
+        staff: staffLabel,
+        loginEmail: normalizedStaffMember.loginEmail,
+        reason: 'Login email is not a valid email address.'
+      });
+    }
+
+    if (!isStrongEnoughPassword(normalizedStaffMember.loginPassword)) {
+      problems.push({
+        index,
+        staff: staffLabel,
+        loginEmail: normalizedStaffMember.loginEmail,
+        reason: 'Password must be at least 6 characters.'
+      });
+    }
+
+    if (seenEmails.has(normalizedStaffMember.loginEmail)) {
+      const firstIndex = seenEmails.get(normalizedStaffMember.loginEmail);
+      problems.push({
+        index,
+        staff: staffLabel,
+        loginEmail: normalizedStaffMember.loginEmail,
+        reason: `Duplicate login email also used by staff entry #${firstIndex + 1}.`
+      });
+    } else {
+      seenEmails.set(normalizedStaffMember.loginEmail, index);
+    }
+
+    normalizedStaff.push(normalizedStaffMember);
+  });
+
+  return {
+    normalizedStaff,
+    problems
   };
 };
 
@@ -170,17 +239,13 @@ const deleteAuthUser = async (url, serviceRoleKey, userId) => {
 };
 
 const syncManagedStaffUsers = async (url, serviceRoleKey, staffMembers) => {
-  const normalizedStaff = (Array.isArray(staffMembers) ? staffMembers : [])
-    .map((entry) => normalizeStaffMember(entry))
-    .filter(Boolean);
-
-  const seenEmails = new Set();
-  normalizedStaff.forEach((staff) => {
-    if (seenEmails.has(staff.loginEmail)) {
-      throw new Error(`Duplicate staff login email found: ${staff.loginEmail}`);
-    }
-    seenEmails.add(staff.loginEmail);
-  });
+  const { normalizedStaff, problems } = validateStaffMembers(staffMembers);
+  if (problems.length) {
+    return {
+      syncedCount: 0,
+      problems
+    };
+  }
 
   const managedUsers = await listManagedStaffUsers(url, serviceRoleKey);
   const usersByEmail = new Map(managedUsers.map((user) => [normalizeEmail(user.email), user]));
@@ -210,7 +275,10 @@ const syncManagedStaffUsers = async (url, serviceRoleKey, staffMembers) => {
     await deleteAuthUser(url, serviceRoleKey, user.id);
   }
 
-  return normalizedStaff.length;
+  return {
+    syncedCount: normalizedStaff.length,
+    problems: []
+  };
 };
 
 export default async function handler(request, response) {
@@ -241,8 +309,19 @@ export default async function handler(request, response) {
   }
 
   try {
-    const syncedCount = await syncManagedStaffUsers(url, serviceRoleKey, body.staffMembers);
-    return sendJson(response, 200, { ok: true, syncedCount, sectionKey, by: admin.email });
+    const result = await syncManagedStaffUsers(url, serviceRoleKey, body.staffMembers);
+    if (Array.isArray(result.problems) && result.problems.length) {
+      return sendJson(response, 400, {
+        ok: false,
+        error: result.problems[0]?.reason || 'Staff auth sync validation failed.',
+        problems: result.problems,
+        syncedCount: 0,
+        sectionKey,
+        by: admin.email
+      });
+    }
+
+    return sendJson(response, 200, { ok: true, syncedCount: result.syncedCount, sectionKey, by: admin.email, problems: [] });
   } catch (error) {
     return sendJson(response, 500, {
       error: error instanceof Error ? error.message : 'Staff auth sync failed.'

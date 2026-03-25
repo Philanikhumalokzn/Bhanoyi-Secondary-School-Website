@@ -238,7 +238,8 @@ export const syncStaffAuthUsersRemoteDetailed = async (sectionKey, staffMembers)
       ok: false,
       status: 401,
       error: 'No active admin session was found. Please sign in again.',
-      syncedCount: 0
+      syncedCount: 0,
+      problems: []
     };
   }
 
@@ -253,14 +254,16 @@ export const syncStaffAuthUsersRemoteDetailed = async (sectionKey, staffMembers)
       ok: response.ok,
       status: response.status,
       error: response.ok ? '' : toErrorMessage(payload, 'Staff auth sync failed.'),
-      syncedCount: Number(payload?.syncedCount) || 0
+      syncedCount: Number(payload?.syncedCount) || 0,
+      problems: Array.isArray(payload?.problems) ? payload.problems : []
     };
   } catch {
     return {
       ok: false,
       status: 0,
       error: 'Could not reach /api/staff-auth-sync. Check deployment and try again.',
-      syncedCount: 0
+      syncedCount: 0,
+      problems: []
     };
   }
 };

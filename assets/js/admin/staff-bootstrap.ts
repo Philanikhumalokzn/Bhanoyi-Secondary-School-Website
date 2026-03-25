@@ -23,10 +23,11 @@ const buildDefaultCredentials = (entry: Record<string, unknown>) => {
   const firstToken = normalizeLoginToken(entry.firstName);
   const initialsToken = normalizeLoginToken(entry.initials);
   const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
-  const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+  const baseHandle = `${surnameToken}${firstInitial}`.slice(0, 24) || 'staffx';
+  const passwordSeed = `${baseHandle}2026`;
   return {
-    email: `${handle}@bhanoyi.education`,
-    password: handle
+    email: `${baseHandle}@bhanoyi.education`,
+    password: passwordSeed.slice(0, 24)
   };
 };
 
