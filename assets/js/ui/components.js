@@ -150,6 +150,44 @@ const isStaffModeEnabled = () => {
   return String(document.body?.dataset?.audience || '').trim() === 'staff';
 };
 
+const resolveActiveStaffSessionEmail = () => {
+  if (typeof sessionStorage === 'undefined') return '';
+
+  const directKeys = ['bhanoyi.staffSession.enrollment_manager'];
+  for (const key of directKeys) {
+    const value = String(sessionStorage.getItem(key) || '').trim().toLowerCase();
+    if (value) return value;
+  }
+
+  for (let index = 0; index < sessionStorage.length; index += 1) {
+    const key = String(sessionStorage.key(index) || '').trim();
+    if (!key.startsWith('bhanoyi.staffSession.')) continue;
+    const value = String(sessionStorage.getItem(key) || '').trim().toLowerCase();
+    if (value) return value;
+  }
+
+  return '';
+};
+
+const resolveActiveStaffProfile = () => {
+  const sessionEmail = resolveActiveStaffSessionEmail();
+  if (!sessionEmail) return null;
+
+  const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
+  for (const key of enrollmentKeys) {
+    const parsed = readEnrollmentStoreLocal(key);
+    const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
+    const matched = staffMembers.find(
+      (entry) => String(entry?.loginEmail || entry?.email || '').trim().toLowerCase() === sessionEmail
+    );
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return null;
+};
+
 const isPublicAudienceEnabled = () => !isAdminModeEnabled() && !isStaffModeEnabled();
 
 const toConcisePublicText = (value, maxChars = 110) => {
@@ -1612,6 +1650,21 @@ const renderMatchLogSection = (section, sectionIndex) => {
           </section>
           <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="manage-squads">
             <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Manage House Sporting Squad</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <div class="match-log-manager-toolbar">
+                <label>
+                  Sporting code
+                  <select data-match-manager-sport></select>
+                </label>
+              </div>
+              <p class="match-log-status" data-match-manager-status aria-live="polite">Select a sporting code to manage the house squad.</p>
+              <div class="match-log-manager-squad" data-match-manager-squad></div>
+            </div>
+          </section>
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="manage-team-lists">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Set Team Lists</span>
             </button>
             <div class="sports-workflow-body" data-sports-workflow-body>
@@ -2026,6 +2079,117 @@ const inferSportCodeMatches = (sportLabel, sportingCodes = []) => {
   }
 
   return normalizedCodes.some((entry) => normalizedSport.includes(entry) || entry.includes(normalizedSport));
+};
+
+const MAX_HOUSE_SPORT_SQUAD_PLAYERS = 30;
+const HOUSE_SPORT_OFFICIAL_ROLES = ['House Manager', 'Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
+
+const normalizeManagedSportKey = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('soccer') || raw.includes('football')) return 'soccer';
+  if (raw.includes('netball')) return 'netball';
+  return raw
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+};
+
+const buildManagedSportOptions = (...labels) => {
+  const options = new Map();
+
+  (labels || []).forEach((label) => {
+    const normalized = String(label || '').trim().toLowerCase();
+    if (!normalized) return;
+    if (normalized.includes('soccer') || normalized.includes('football')) {
+      options.set('soccer', 'Football');
+    }
+    if (normalized.includes('netball')) {
+      options.set('netball', 'Netball');
+    }
+  });
+
+  if (!options.size) {
+    options.set('soccer', 'Football');
+    options.set('netball', 'Netball');
+  }
+
+  return Array.from(options.entries()).map(([key, label]) => ({ key, label }));
+};
+
+const getHouseSportSquadStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.houseSportSquads.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const createEmptyHouseSportSquad = () => ({
+  players: [],
+  officials: []
+});
+
+const normalizeManagedHouseSportOfficial = (entry, fallback = {}) => {
+  const normalized = normalizeMatchStaffEntry(entry, fallback);
+  if (!normalized) return null;
+
+  const requestedRole = String(entry?.assignmentRole || entry?.managedRole || entry?.officialRole || '').trim();
+  const assignmentRole = HOUSE_SPORT_OFFICIAL_ROLES.includes(requestedRole) ? requestedRole : 'Team Manager';
+  return {
+    ...normalized,
+    assignmentRole,
+    roleLabel: assignmentRole
+  };
+};
+
+const normalizeHouseSportSquadEntry = (entry, houseId) => {
+  const source = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
+  return {
+    players: normalizeMatchPlayersForTeam(source.players || [], { houseId }).slice(0, MAX_HOUSE_SPORT_SQUAD_PLAYERS),
+    officials: (Array.isArray(source.officials) ? source.officials : [])
+      .map((official) => normalizeManagedHouseSportOfficial(official, { houseId }))
+      .filter(Boolean)
+  };
+};
+
+const loadHouseSportSquadStore = (fixtureSectionKey) => {
+  try {
+    const raw = localStorage.getItem(getHouseSportSquadStorageKey(fixtureSectionKey));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistHouseSportSquadStore = (fixtureSectionKey, store) => {
+  const storageKey = getHouseSportSquadStorageKey(fixtureSectionKey);
+  const safeStore = store && typeof store === 'object' && !Array.isArray(store) ? store : {};
+  localStorage.setItem(storageKey, JSON.stringify(safeStore));
+  void persistLocalStore(storageKey, safeStore);
+  return storageKey;
+};
+
+const readHouseSportSquad = (store, sportKey, houseId) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  const normalizedHouseId = String(houseId || '').trim().toLowerCase();
+  if (!normalizedSportKey || !normalizedHouseId) return createEmptyHouseSportSquad();
+
+  const sportBucket = store && typeof store === 'object' && !Array.isArray(store) ? store[normalizedSportKey] : null;
+  const nextEntry = sportBucket && typeof sportBucket === 'object' && !Array.isArray(sportBucket) ? sportBucket[normalizedHouseId] : null;
+  return normalizeHouseSportSquadEntry(nextEntry, normalizedHouseId);
+};
+
+const writeHouseSportSquad = (store, sportKey, houseId, entry) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  const normalizedHouseId = String(houseId || '').trim().toLowerCase();
+  if (!normalizedSportKey || !normalizedHouseId) return store;
+
+  const nextStore = store && typeof store === 'object' && !Array.isArray(store) ? { ...store } : {};
+  const nextSportBucket = nextStore[normalizedSportKey] && typeof nextStore[normalizedSportKey] === 'object' && !Array.isArray(nextStore[normalizedSportKey])
+    ? { ...nextStore[normalizedSportKey] }
+    : {};
+
+  nextSportBucket[normalizedHouseId] = normalizeHouseSportSquadEntry(entry, normalizedHouseId);
+  nextStore[normalizedSportKey] = nextSportBucket;
+  return nextStore;
 };
 
 const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel) => {
@@ -2518,6 +2682,7 @@ function hydrateMatchLog(matchLogNode) {
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const matchLogStoreStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+  const houseSportSquadStorageKey = getHouseSportSquadStorageKey(fixtureSectionKey);
 
   const eventTypes = normalizeMatchEventTypes(config.eventTypes);
   const disciplinePolicy = normalizeMatchDisciplinePolicy(config.disciplinePolicy);
@@ -2563,6 +2728,9 @@ function hydrateMatchLog(matchLogNode) {
   const topScorerNode = matchLogNode.querySelector('[data-match-highlight-scorer]');
   const topAssisterNode = matchLogNode.querySelector('[data-match-highlight-assister]');
   const mostBookedNode = matchLogNode.querySelector('[data-match-highlight-booked]');
+  const managerStatusNode = matchLogNode.querySelector('[data-match-manager-status]');
+  const managerSportSelect = matchLogNode.querySelector('[data-match-manager-sport]');
+  const managerSquadNode = matchLogNode.querySelector('[data-match-manager-squad]');
   const squadStatusNode = matchLogNode.querySelector('[data-match-squad-status]');
   const squadManagerNode = matchLogNode.querySelector('[data-match-squad-manager]');
   const matchDaySelect = matchLogNode.querySelector('[data-matchday-select]');
@@ -2621,6 +2789,17 @@ function hydrateMatchLog(matchLogNode) {
 
   const workflowSteps = initSportsWorkflowSteps(matchLogNode);
   const openButtons = Array.from(matchLogNode.querySelectorAll('[data-match-open-event-side]'));
+  const activeStaffProfile = isStaffModeEnabled() ? resolveActiveStaffProfile() : null;
+  const managedHouseId = String(activeStaffProfile?.houseId || '').trim().toLowerCase();
+  const isStaffManagerMode = isStaffModeEnabled() && Boolean(managedHouseId);
+  const canOperateMatchLog = isAdminModeEnabled() || isStaffManagerMode;
+  const managerSportOptions = buildManagedSportOptions(config.sport);
+
+  if (managerSportSelect instanceof HTMLSelectElement) {
+    managerSportSelect.innerHTML = managerSportOptions
+      .map((option) => `<option value="${escapeHtmlAttribute(option.key)}">${escapeHtmlText(option.label)}</option>`)
+      .join('');
+  }
 
   const parseDateTimeStamp = (stamp) => {
     const normalized = normalizeFixtureStampGlobal(stamp);
@@ -2666,9 +2845,264 @@ function hydrateMatchLog(matchLogNode) {
   let activePauseReason = '';
   let pauseCompensationStartedAt = null;
   let clockTickerId = null;
-  const canEditEvents = isAdminModeEnabled();
+  let houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
+  let selectedManagerSportKey = managerSportOptions[0]?.key || 'soccer';
+
+  if (managerSportSelect instanceof HTMLSelectElement) {
+    managerSportSelect.value = selectedManagerSportKey;
+  }
+
+  const canManageTeam = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim().toLowerCase();
+    if (!normalizedTeamId) return false;
+    if (isAdminModeEnabled()) return true;
+    return isStaffManagerMode && normalizedTeamId === managedHouseId;
+  };
+
+  const canEditTeamEvents = (teamId) => canManageTeam(teamId);
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
+
+  const getCurrentSportKey = () => {
+    const fixture = getCurrentFixture();
+    const fromFixture = normalizeManagedSportKey(fixture?.sport || '');
+    if (fromFixture) return fromFixture;
+    return normalizeManagedSportKey(selectedManagerSportKey || config.sport || '') || managerSportOptions[0]?.key || 'soccer';
+  };
+
+  const getCurrentSportLabel = () => {
+    const sportKey = getCurrentSportKey();
+    return managerSportOptions.find((entry) => entry.key === sportKey)?.label || 'Football';
+  };
+
+  const getAccessibleHouseIds = () => {
+    if (isAdminModeEnabled()) {
+      return Array.from(new Set((Array.isArray(config.houseOptions) ? config.houseOptions : []).map((entry) => String(entry.id || '').trim().toLowerCase()).filter(Boolean)));
+    }
+    return managedHouseId ? [managedHouseId] : [];
+  };
+
+  const getHouseLabel = (houseId) => {
+    const normalizedHouseId = String(houseId || '').trim().toLowerCase();
+    return (
+      (Array.isArray(config.houseOptions) ? config.houseOptions : []).find((entry) => String(entry.id || '').trim().toLowerCase() === normalizedHouseId)?.name ||
+      normalizedHouseId ||
+      'House'
+    );
+  };
+
+  const getManagedHouseSquad = (houseId, sportKey = getCurrentSportKey()) =>
+    readHouseSportSquad(houseSportSquadStore, sportKey, houseId);
+
+  const saveManagedHouseSquad = (houseId, entry, sportKey = getCurrentSportKey()) => {
+    houseSportSquadStore = writeHouseSportSquad(houseSportSquadStore, sportKey, houseId, entry);
+    persistHouseSportSquadStore(fixtureSectionKey, houseSportSquadStore);
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:house-sport-squad-updated', {
+        detail: {
+          fixtureSectionKey,
+          houseId,
+          sportKey: normalizeManagedSportKey(sportKey)
+        }
+      })
+    );
+  };
+
+  const getAvailableHousePlayersForSport = (houseId, sportLabel = getCurrentSportLabel()) => {
+    const byHouse = loadEnrollmentPlayersByHouse(houseId, houseId, sportLabel);
+    return normalizeMatchPlayersForTeam(byHouse[String(houseId || '').trim().toLowerCase()] || [], { houseId });
+  };
+
+  const getAvailableHouseOfficials = (houseId) => {
+    const byHouse = loadEnrollmentStaffByHouse(houseId, houseId);
+    return normalizeMatchParticipantsForTeam(byHouse[String(houseId || '').trim().toLowerCase()] || [], { houseId }).filter(
+      (entry) => entry.participantType === 'staff'
+    );
+  };
+
+  const findManagedSquadPlayerByName = (houseId, typedName) => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+    return getAvailableHousePlayersForSport(houseId).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) || null;
+  };
+
+  const findManagedOfficialByName = (houseId, typedName) => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+    return getAvailableHouseOfficials(houseId).find((official) => normalizeMatchSearchValue(official.name) === normalizedName) || null;
+  };
+
+  const resolveFixturePlayersByTeam = (fixture, entry) => {
+    const persistedPlayersByTeam = entry?.playersByTeam || {
+      homePlayers: entry?.homePlayers,
+      awayPlayers: entry?.awayPlayers
+    };
+    const housePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel());
+    const nextSource = {
+      ...(persistedPlayersByTeam && typeof persistedPlayersByTeam === 'object' ? persistedPlayersByTeam : {})
+    };
+    [fixture.homeId, fixture.awayId].forEach((teamId) => {
+      const managedSquadPlayers = getManagedHouseSquad(teamId, normalizeManagedSportKey(fixture.sport || getCurrentSportKey())).players;
+      if (managedSquadPlayers.length) {
+        nextSource[teamId] = managedSquadPlayers;
+        return;
+      }
+      if (!Array.isArray(nextSource[teamId]) || !nextSource[teamId].length) {
+        nextSource[teamId] = housePlayersByTeam[teamId] || [];
+      }
+    });
+    return {
+      playersByTeam: normalizeFixturePlayersByTeam(
+        fixture,
+        nextSource,
+        fixture.playersByTeam || {
+          homePlayers: fixture.homePlayers,
+          awayPlayers: fixture.awayPlayers
+        }
+      ),
+      housePlayersByTeam
+    };
+  };
+
+  const renderManagedHouseSquadWorkspace = () => {
+    if (!(managerSquadNode instanceof HTMLElement)) return;
+
+    if (!canOperateMatchLog) {
+      managerSquadNode.innerHTML = '<div class="match-log-squad-empty">Sign in as an admin or a house-linked staff manager to manage sporting squads.</div>';
+      if (managerStatusNode instanceof HTMLElement) {
+        managerStatusNode.textContent = 'Squad management is unavailable for the public audience.';
+      }
+      return;
+    }
+
+    const accessibleHouseIds = getAccessibleHouseIds();
+    if (!accessibleHouseIds.length) {
+      managerSquadNode.innerHTML = '<div class="match-log-squad-empty">No house assignment was found for this staff account.</div>';
+      if (managerStatusNode instanceof HTMLElement) {
+        managerStatusNode.textContent = 'This staff account needs a house assignment before it can manage sports squads.';
+      }
+      return;
+    }
+
+    const sportLabel = getCurrentSportLabel();
+    const sportKey = getCurrentSportKey();
+    const cards = accessibleHouseIds.map((houseId) => {
+      const squad = getManagedHouseSquad(houseId, sportKey);
+      const selectedPlayerIds = new Set(squad.players.map((player) => player.id));
+      const selectedOfficialIds = new Set(squad.officials.map((official) => official.id));
+      const availablePlayers = getAvailableHousePlayersForSport(houseId, sportLabel).filter((player) => !selectedPlayerIds.has(player.id));
+      const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !selectedOfficialIds.has(official.id));
+      const houseLabel = getHouseLabel(houseId);
+      const playerListId = `match-manager-player-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+      const officialListId = `match-manager-official-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+
+      return `
+        <article class="match-log-squad-card" data-match-manager-card="${escapeHtmlAttribute(houseId)}">
+          <header class="match-log-squad-card-head">
+            <div>
+              <h4>${escapeHtmlText(houseLabel)} ${escapeHtmlText(sportLabel)} Squad</h4>
+              <p class="match-log-squad-summary">Players ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} · Officials ${squad.officials.length}</p>
+            </div>
+          </header>
+          <p class="match-log-squad-helper">Only learners from this house can join the squad. Match-day team lists are chosen from these saved players.</p>
+          <div class="match-log-squad-controls">
+            <label>
+              Add player
+              <input type="text" data-match-manager-player-input="${escapeHtmlAttribute(houseId)}" list="${playerListId}" placeholder="Type learner name" autocomplete="off" />
+              <datalist id="${playerListId}">
+                ${availablePlayers.map((player) => `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(player.admissionNo ? `Adm ${player.admissionNo}` : player.name)}"></option>`).join('')}
+              </datalist>
+            </label>
+            <div class="match-log-squad-control-actions">
+              <button type="button" class="btn btn-secondary" data-match-manager-add-player="${escapeHtmlAttribute(houseId)}">Add player</button>
+            </div>
+          </div>
+          <div class="match-log-squad-controls">
+            <label>
+              Add official
+              <input type="text" data-match-manager-official-input="${escapeHtmlAttribute(houseId)}" list="${officialListId}" placeholder="Type staff name" autocomplete="off" />
+              <datalist id="${officialListId}">
+                ${availableOfficials.map((official) => `<option value="${escapeHtmlAttribute(official.name)}" label="${escapeHtmlAttribute(official.roleLabel || official.name)}"></option>`).join('')}
+              </datalist>
+            </label>
+            <label>
+              Role
+              <select data-match-manager-official-role="${escapeHtmlAttribute(houseId)}">
+                ${HOUSE_SPORT_OFFICIAL_ROLES.map((role) => `<option value="${escapeHtmlAttribute(role)}">${escapeHtmlText(role)}</option>`).join('')}
+              </select>
+            </label>
+            <div class="match-log-squad-control-actions">
+              <button type="button" class="btn btn-secondary" data-match-manager-add-official="${escapeHtmlAttribute(houseId)}">Add official</button>
+            </div>
+          </div>
+          <div class="match-log-squad-columns">
+            <section class="match-log-squad-group">
+              <header class="match-log-squad-group-head">
+                <h5>Registered players</h5>
+                <span>${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS}</span>
+              </header>
+              ${squad.players.length
+                ? `<ul class="match-log-squad-list">${squad.players
+                    .map(
+                      (player) => `
+                        <li class="match-log-squad-item">
+                          <div class="match-log-squad-item-main">
+                            <div class="match-log-squad-item-head">
+                              <strong>${escapeHtmlText(player.name)}</strong>
+                            </div>
+                            <span class="match-log-squad-item-meta">${escapeHtmlText(player.admissionNo ? `Adm ${player.admissionNo}` : 'Learner')}</span>
+                          </div>
+                          <div class="match-log-squad-item-actions">
+                            <button type="button" class="btn btn-secondary" data-match-manager-remove-player="${escapeHtmlAttribute(houseId)}" data-player-id="${escapeHtmlAttribute(player.id)}">Remove</button>
+                          </div>
+                        </li>
+                      `
+                    )
+                    .join('')}</ul>`
+                : '<p class="match-log-squad-empty">No registered players yet.</p>'}
+            </section>
+            <section class="match-log-squad-group">
+              <header class="match-log-squad-group-head">
+                <h5>Managerial roles</h5>
+                <span>${squad.officials.length}</span>
+              </header>
+              ${squad.officials.length
+                ? `<ul class="match-log-squad-list">${squad.officials
+                    .map(
+                      (official) => `
+                        <li class="match-log-squad-item">
+                          <div class="match-log-squad-item-main">
+                            <div class="match-log-squad-item-head">
+                              <strong>${escapeHtmlText(official.name)}</strong>
+                              <span class="match-log-squad-candidate-badge" data-tone="eligible">${escapeHtmlText(official.assignmentRole || official.roleLabel || 'Official')}</span>
+                            </div>
+                            <span class="match-log-squad-item-meta">${escapeHtmlText(official.assignmentRole || official.roleLabel || 'Official')}</span>
+                          </div>
+                          <div class="match-log-squad-item-actions">
+                            <button type="button" class="btn btn-secondary" data-match-manager-remove-official="${escapeHtmlAttribute(houseId)}" data-official-id="${escapeHtmlAttribute(official.id)}">Remove</button>
+                          </div>
+                        </li>
+                      `
+                    )
+                    .join('')}</ul>`
+                : '<p class="match-log-squad-empty">No managerial roles assigned yet.</p>'}
+            </section>
+          </div>
+        </article>
+      `;
+    });
+
+    managerSquadNode.innerHTML = `<div class="match-log-squad-grid">${cards.join('')}</div>`;
+    if (managerStatusNode instanceof HTMLElement) {
+      const summary = accessibleHouseIds
+        .map((houseId) => {
+          const squad = getManagedHouseSquad(houseId, sportKey);
+          return `${getHouseLabel(houseId)}: ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} players`;
+        })
+        .join(' · ');
+      managerStatusNode.textContent = `Managing ${sportLabel} squads. ${summary}.`;
+    }
+  };
 
   const getInitialScoreForTeam = (teamId) => {
     const raw = Number(baseInitialScores?.[teamId]);
@@ -3160,7 +3594,9 @@ function hydrateMatchLog(matchLogNode) {
     const cards = [
       { teamId: fixture.homeId, teamName: fixture.homeName },
       { teamId: fixture.awayId, teamName: fixture.awayName }
-    ].map(({ teamId, teamName }) => {
+    ]
+      .filter(({ teamId }) => canManageTeam(teamId))
+      .map(({ teamId, teamName }) => {
       const teamPlayers = getPlayersForTeam(teamId);
       const teamSheet = getTeamSheet(teamId);
       const savedTeamSheet = getTeamSheet(teamId, { saved: true });
@@ -3236,13 +3672,22 @@ function hydrateMatchLog(matchLogNode) {
       `;
     });
 
-    squadManagerNode.innerHTML = `<div class="match-log-squad-grid">${cards.join('')}</div>`;
-  [fixture.homeId, fixture.awayId].forEach((teamId) => renderSquadCandidatePreview(teamId));
+    squadManagerNode.innerHTML = cards.length
+      ? `<div class="match-log-squad-grid">${cards.join('')}</div>`
+      : '<div class="match-log-squad-empty">No team-list permissions are available for this fixture.</div>';
+    [fixture.homeId, fixture.awayId].filter((teamId) => canManageTeam(teamId)).forEach((teamId) => renderSquadCandidatePreview(teamId));
 
     if (squadStatusNode) {
       const homeSheet = getTeamSheet(fixture.homeId);
       const awaySheet = getTeamSheet(fixture.awayId);
-      squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
+      if (canManageTeam(fixture.homeId) && canManageTeam(fixture.awayId)) {
+        squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
+      } else {
+        const ownTeamId = canManageTeam(fixture.homeId) ? fixture.homeId : fixture.awayId;
+        const ownTeamName = ownTeamId === fixture.homeId ? fixture.homeName : fixture.awayName;
+        const ownSheet = ownTeamId === fixture.homeId ? homeSheet : awaySheet;
+        squadStatusNode.textContent = `${ownTeamName}: ${ownSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${ownSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
+      }
     }
   };
 
@@ -3563,18 +4008,9 @@ function hydrateMatchLog(matchLogNode) {
     activePauseStartedAt = Number.isFinite(Number(entry?.activePauseStartedAt)) ? Number(entry.activePauseStartedAt) : null;
     activePauseReason = String(entry?.activePauseReason || '').trim();
     pauseCompensationStartedAt = null;
-    currentPlayersByTeam = normalizeFixturePlayersByTeam(
-      fixture,
-      entry?.playersByTeam || {
-        homePlayers: entry?.homePlayers,
-        awayPlayers: entry?.awayPlayers
-      },
-      fixture.playersByTeam || {
-        homePlayers: fixture.homePlayers,
-        awayPlayers: fixture.awayPlayers
-      }
-    );
-    currentHousePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, '');
+    const resolvedPlayerPools = resolveFixturePlayersByTeam(fixture, entry);
+    currentPlayersByTeam = resolvedPlayerPools.playersByTeam;
+    currentHousePlayersByTeam = resolvedPlayerPools.housePlayersByTeam;
     currentStaffByTeam = loadEnrollmentStaffByHouse(fixture.homeId, fixture.awayId);
     savedSquadByTeam = normalizeFixtureSquadByTeam(fixture, entry?.squadByTeam, currentPlayersByTeam);
     currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, savedSquadByTeam, currentPlayersByTeam);
@@ -3628,6 +4064,10 @@ function hydrateMatchLog(matchLogNode) {
       })
       .filter(Boolean)
       .filter((entry) => entry.homeId && entry.awayId && entry.homeId !== entry.awayId)
+      .filter((entry) => {
+        if (!isStaffManagerMode) return true;
+        return entry.homeId === managedHouseId || entry.awayId === managedHouseId;
+      })
       .sort((left, right) => {
         const leftStamp = parseDateTimeStamp(left.stamp);
         const rightStamp = parseDateTimeStamp(right.stamp);
@@ -4213,6 +4653,7 @@ function hydrateMatchLog(matchLogNode) {
           button.disabled = true;
         }
       });
+      renderManagedHouseSquadWorkspace();
       renderSquadManager();
       renderClockStatus();
       syncModalTeamState();
@@ -4253,11 +4694,11 @@ function hydrateMatchLog(matchLogNode) {
           const minuteLabel = reference ? formatMatchMinuteLabel(reference.minute, reference.stoppage) : '';
           rows.push(`
             <tr>
-              <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type), { editable: canEditEvents }) : ''}</td>
+              <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type), { editable: canEditTeamEvents(homeEvent.teamId) }) : ''}</td>
               <td class="match-log-minute-cell">${neutralEvent
                 ? renderMatchEventItem(neutralEvent, eventTypeByKey.get(neutralEvent.type), { editable: false })
                 : escapeHtmlText(minuteLabel || '—')}</td>
-              <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type), { editable: canEditEvents }) : ''}</td>
+              <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type), { editable: canEditTeamEvents(awayEvent.teamId) }) : ''}</td>
             </tr>
           `);
         }
@@ -4383,11 +4824,15 @@ function hydrateMatchLog(matchLogNode) {
     }
 
     openButtons.forEach((button) => {
-      if (button instanceof HTMLButtonElement) {
-        button.disabled = false;
-      }
+      if (!(button instanceof HTMLButtonElement)) return;
+      const side = String(button.dataset.matchOpenEventSide || '').trim();
+      const teamId = side === 'right' ? fixture.awayId : fixture.homeId;
+      const allowed = canEditTeamEvents(teamId);
+      button.disabled = !allowed;
+      button.classList.toggle('is-hidden', !allowed && isStaffManagerMode);
     });
 
+    renderManagedHouseSquadWorkspace();
     renderSquadManager();
     renderClockStatus();
     syncModalTeamState();
@@ -4462,15 +4907,19 @@ function hydrateMatchLog(matchLogNode) {
     }
 
     const validTeamIds = new Set([fixture.homeId, fixture.awayId]);
-    if (!validTeamIds.has(activeTeamId)) {
-      activeTeamId = fixture.homeId;
+    const availableTeams = [
+      { id: fixture.homeId, name: fixture.homeName },
+      { id: fixture.awayId, name: fixture.awayName }
+    ].filter((entry) => validTeamIds.has(entry.id) && canEditTeamEvents(entry.id));
+
+    if (!validTeamIds.has(activeTeamId) || !canEditTeamEvents(activeTeamId)) {
+      activeTeamId = availableTeams[0]?.id || fixture.homeId;
     }
 
-    modalTeamSelect.disabled = false;
-    modalTeamSelect.innerHTML = `
-      <option value="${escapeHtmlAttribute(fixture.homeId)}">${escapeHtmlText(fixture.homeName)}</option>
-      <option value="${escapeHtmlAttribute(fixture.awayId)}">${escapeHtmlText(fixture.awayName)}</option>
-    `;
+    modalTeamSelect.disabled = availableTeams.length <= 1;
+    modalTeamSelect.innerHTML = availableTeams
+      .map((entry) => `<option value="${escapeHtmlAttribute(entry.id)}">${escapeHtmlText(entry.name)}</option>`)
+      .join('');
     modalTeamSelect.value = activeTeamId;
 
     if (teamLabel) {
@@ -4484,6 +4933,7 @@ function hydrateMatchLog(matchLogNode) {
   const openModalForTeam = (teamId) => {
     const fixture = getCurrentFixture();
     if (!fixture || !teamId) return;
+    if (!canEditTeamEvents(teamId)) return;
     if (Number.isFinite(Number(matchStartedAt)) && !Number.isFinite(Number(activePauseStartedAt))) {
       pauseCompensationStartedAt = Date.now();
     }
@@ -4501,6 +4951,7 @@ function hydrateMatchLog(matchLogNode) {
     const existing = currentEvents.find((entry) => String(entry.id || '') === String(eventId));
     if (!existing) return;
     if (existing.scope === 'match') return;
+    if (!canEditTeamEvents(existing.teamId)) return;
 
     openWorkspaceModal();
     workflowSteps?.expandStep('log-events');
@@ -4560,6 +5011,14 @@ function hydrateMatchLog(matchLogNode) {
   };
 
   const applyFixtureSelection = () => {
+    const fixture = getCurrentFixture();
+    const fixtureSportKey = normalizeManagedSportKey(fixture?.sport || '');
+    if (fixtureSportKey) {
+      selectedManagerSportKey = fixtureSportKey;
+      if (managerSportSelect instanceof HTMLSelectElement) {
+        managerSportSelect.value = fixtureSportKey;
+      }
+    }
     loadCurrentFixtureLog();
     render();
   };
@@ -4577,6 +5036,7 @@ function hydrateMatchLog(matchLogNode) {
       ? previousFixtureId
       : fixturesForDay[0]?.fixtureId || '';
 
+    houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
     renderFixturePickers();
     applyFixtureSelection();
   };
@@ -4760,7 +5220,6 @@ function hydrateMatchLog(matchLogNode) {
   });
 
   tableBodyNode?.addEventListener('click', (event) => {
-    if (!canEditEvents) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
 
@@ -4770,6 +5229,7 @@ function hydrateMatchLog(matchLogNode) {
       if (!eventId) return;
       const existing = currentEvents.find((entry) => String(entry.id || '') === eventId);
       if (!existing) return;
+      if (!canEditTeamEvents(existing.teamId)) return;
 
       const confirmed = window.confirm('Delete this event from the match log?');
       if (!confirmed) return;
@@ -4784,6 +5244,8 @@ function hydrateMatchLog(matchLogNode) {
     if (editButton instanceof HTMLElement) {
       const eventId = String(editButton.dataset.matchEditEvent || '').trim();
       if (!eventId) return;
+      const existing = currentEvents.find((entry) => String(entry.id || '') === eventId);
+      if (!existing || !canEditTeamEvents(existing.teamId)) return;
       openModalForEdit(eventId);
     }
   });
@@ -4837,6 +5299,7 @@ function hydrateMatchLog(matchLogNode) {
     if (saveButton instanceof HTMLElement) {
       const teamId = String(saveButton.dataset.teamId || '').trim();
       if (!teamId) return;
+      if (!canManageTeam(teamId)) return;
       saveTeamSheetForTeam(teamId);
       return;
     }
@@ -4845,6 +5308,7 @@ function hydrateMatchLog(matchLogNode) {
     if (addButton instanceof HTMLElement) {
       const teamId = String(addButton.dataset.teamId || '').trim();
       const group = String(addButton.dataset.matchSquadAdd || '').trim();
+      if (!canManageTeam(teamId)) return;
       const card = addButton.closest('[data-match-squad-card]');
       const input = card?.querySelector('[data-match-squad-search-input]');
       const typedName = input instanceof HTMLInputElement ? input.value : '';
@@ -4914,6 +5378,7 @@ function hydrateMatchLog(matchLogNode) {
     const clearButton = target.closest('[data-match-squad-clear]');
     if (clearButton instanceof HTMLElement) {
       const teamId = String(clearButton.dataset.teamId || '').trim();
+      if (!canManageTeam(teamId)) return;
       const confirmed = window.confirm('Clear the starting XI and substitutes for this team?');
       if (!confirmed) return;
 
@@ -4925,6 +5390,7 @@ function hydrateMatchLog(matchLogNode) {
     const removeButton = target.closest('[data-match-squad-remove]');
     if (removeButton instanceof HTMLElement) {
       const teamId = String(removeButton.dataset.teamId || '').trim();
+      if (!canManageTeam(teamId)) return;
       const group = String(removeButton.dataset.currentGroup || '').trim();
       const playerId = String(removeButton.dataset.playerId || '').trim();
       const current = getTeamSheet(teamId);
@@ -4939,6 +5405,7 @@ function hydrateMatchLog(matchLogNode) {
     const moveButton = target.closest('[data-match-squad-move]');
     if (moveButton instanceof HTMLElement) {
       const teamId = String(moveButton.dataset.teamId || '').trim();
+      if (!canManageTeam(teamId)) return;
       const currentGroup = String(moveButton.dataset.currentGroup || '').trim();
       const nextGroup = String(moveButton.dataset.matchSquadMove || '').trim();
       const playerId = String(moveButton.dataset.playerId || '').trim();
@@ -4960,6 +5427,106 @@ function hydrateMatchLog(matchLogNode) {
         ...current,
         [currentGroup]: (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).filter((entry) => entry.id !== playerId),
         [nextGroup]: [...(Array.isArray(current[nextGroup]) ? current[nextGroup] : []), player]
+      });
+      render();
+    }
+  });
+
+  managerSquadNode?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const addPlayerButton = target.closest('[data-match-manager-add-player]');
+    if (addPlayerButton instanceof HTMLElement) {
+      const houseId = String(addPlayerButton.dataset.matchManagerAddPlayer || '').trim().toLowerCase();
+      if (!canManageTeam(houseId)) return;
+      const card = addPlayerButton.closest('[data-match-manager-card]');
+      const input = card?.querySelector(`[data-match-manager-player-input="${CSS.escape(houseId)}"]`);
+      const typedName = input instanceof HTMLInputElement ? String(input.value || '').trim() : '';
+      const candidate = findManagedSquadPlayerByName(houseId, typedName);
+      if (!candidate) {
+        showSmartToast('Choose a learner from the suggested house list before adding them.', { tone: 'error' });
+        return;
+      }
+
+      const squad = getManagedHouseSquad(houseId);
+      if (squad.players.some((player) => player.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already in this sporting squad.`, { tone: 'error' });
+        return;
+      }
+      if (squad.players.length >= MAX_HOUSE_SPORT_SQUAD_PLAYERS) {
+        showSmartToast(`Only ${MAX_HOUSE_SPORT_SQUAD_PLAYERS} players can be registered for one sporting squad.`, { tone: 'error' });
+        return;
+      }
+
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        players: [...squad.players, candidate]
+      });
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+      loadCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const removePlayerButton = target.closest('[data-match-manager-remove-player]');
+    if (removePlayerButton instanceof HTMLElement) {
+      const houseId = String(removePlayerButton.dataset.matchManagerRemovePlayer || '').trim().toLowerCase();
+      const playerId = String(removePlayerButton.dataset.playerId || '').trim();
+      if (!canManageTeam(houseId) || !playerId) return;
+      const squad = getManagedHouseSquad(houseId);
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        players: squad.players.filter((player) => player.id !== playerId)
+      });
+      loadCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const addOfficialButton = target.closest('[data-match-manager-add-official]');
+    if (addOfficialButton instanceof HTMLElement) {
+      const houseId = String(addOfficialButton.dataset.matchManagerAddOfficial || '').trim().toLowerCase();
+      if (!canManageTeam(houseId)) return;
+      const card = addOfficialButton.closest('[data-match-manager-card]');
+      const input = card?.querySelector(`[data-match-manager-official-input="${CSS.escape(houseId)}"]`);
+      const roleSelect = card?.querySelector(`[data-match-manager-official-role="${CSS.escape(houseId)}"]`);
+      const typedName = input instanceof HTMLInputElement ? String(input.value || '').trim() : '';
+      const role = roleSelect instanceof HTMLSelectElement ? String(roleSelect.value || '').trim() : 'Team Manager';
+      const candidate = findManagedOfficialByName(houseId, typedName);
+      if (!candidate) {
+        showSmartToast('Choose a staff member from the suggested house list before adding them.', { tone: 'error' });
+        return;
+      }
+
+      const squad = getManagedHouseSquad(houseId);
+      if (squad.officials.some((official) => official.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already assigned to this sporting squad.`, { tone: 'error' });
+        return;
+      }
+
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        officials: [...squad.officials, { ...candidate, assignmentRole: role, roleLabel: role }]
+      });
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+      render();
+      return;
+    }
+
+    const removeOfficialButton = target.closest('[data-match-manager-remove-official]');
+    if (removeOfficialButton instanceof HTMLElement) {
+      const houseId = String(removeOfficialButton.dataset.matchManagerRemoveOfficial || '').trim().toLowerCase();
+      const officialId = String(removeOfficialButton.dataset.officialId || '').trim();
+      if (!canManageTeam(houseId) || !officialId) return;
+      const squad = getManagedHouseSquad(houseId);
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        officials: squad.officials.filter((official) => official.id !== officialId)
       });
       render();
     }
@@ -5008,6 +5575,13 @@ function hydrateMatchLog(matchLogNode) {
     applyFixtureSelection();
   });
 
+  managerSportSelect?.addEventListener('change', () => {
+    if (!(managerSportSelect instanceof HTMLSelectElement)) return;
+    selectedManagerSportKey = normalizeManagedSportKey(managerSportSelect.value) || managerSportOptions[0]?.key || 'soccer';
+    loadCurrentFixtureLog();
+    render();
+  });
+
   modalTeamSelect?.addEventListener('change', () => {
     const fixture = getCurrentFixture();
     if (!(modalTeamSelect instanceof HTMLSelectElement) || !fixture) return;
@@ -5019,6 +5593,14 @@ function hydrateMatchLog(matchLogNode) {
 
   pauseReasonSelect?.addEventListener('change', () => {
     renderClockStatus();
+  });
+
+  window.addEventListener('bhanoyi:house-sport-squad-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
+    loadCurrentFixtureLog();
+    render();
   });
 
   startClockButton?.addEventListener('click', () => {
@@ -5122,6 +5704,7 @@ function hydrateMatchLog(matchLogNode) {
   });
 
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
+    if (!isAdminModeEnabled()) return;
     const fixture = getCurrentFixture();
     if (!fixture) return;
     const confirmed = window.confirm(
@@ -5188,7 +5771,8 @@ function hydrateMatchLog(matchLogNode) {
     if (
       event.key !== fixtureCatalogStorageKey &&
       event.key !== fixtureDateStorageKey &&
-      event.key !== matchLogStoreStorageKey
+      event.key !== matchLogStoreStorageKey &&
+      event.key !== houseSportSquadStorageKey
     ) {
       return;
     }
@@ -5271,7 +5855,10 @@ function hydrateMatchLog(matchLogNode) {
     renderAutocompleteOptions();
   };
 
-  void syncLocalStoreFromRemote(matchLogStoreStorageKey)
+  void Promise.all([
+    syncLocalStoreFromRemote(matchLogStoreStorageKey),
+    syncLocalStoreFromRemote(houseSportSquadStorageKey)
+  ])
     .catch(() => null)
     .finally(() => {
       initializeMatchLogState();
