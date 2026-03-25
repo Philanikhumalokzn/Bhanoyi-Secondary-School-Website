@@ -8558,7 +8558,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const duplicate = staffMembers.some(
-      (entry) =>
+      (entry, index) =>
+        index !== editingStaffIndex &&
         String(entry.surname || '').toLowerCase() === String(normalized.surname || '').toLowerCase() &&
         String(entry.initials || '').toLowerCase() === String(normalized.initials || '').toLowerCase() &&
         String(entry.staffNumber || '').toLowerCase() === String(normalized.staffNumber || '').toLowerCase()
