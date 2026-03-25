@@ -411,23 +411,59 @@ if (typeof window !== 'undefined') {
 
 export const renderSite = async (siteContent, page) => {
   const params = new URLSearchParams(window.location.search);
-  let adminMode = params.get('admin') === '1';
+  const requestedAdminMode = params.get('admin') === '1';
+  let adminMode = requestedAdminMode;
   let staffMode = !adminMode && params.get('staff') === '1';
+
+  const configuredAdminEmails = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+    .split(',')
+    .map((entry) => String(entry || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  const isAllowedAdminEmail = (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail || !configuredAdminEmails.length) return false;
+    return configuredAdminEmails.includes(normalizedEmail);
+  };
+
+  const clearAdminQueryFlag = () => {
+    try {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete('admin');
+      window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+    } catch {
+      // ignore URL cleanup failures
+    }
+  };
+
+  const resolveAllowedAdminSession = async () => {
+    try {
+      const api = await import('../admin/api.ts');
+      if (!api || typeof api.getSession !== 'function') return null;
+      const session = await api.getSession().catch(() => null);
+      const email = String(session?.user?.email || '').trim().toLowerCase();
+      if (!session || !isAllowedAdminEmail(email)) return null;
+      return session;
+    } catch {
+      return null;
+    }
+  };
+
+  if (requestedAdminMode) {
+    const allowedAdminSession = await resolveAllowedAdminSession();
+    if (!allowedAdminSession) {
+      adminMode = false;
+      clearAdminQueryFlag();
+    }
+  }
 
   // If no explicit URL flag is present, try to detect a signed-in admin session
   // (e.g. Supabase session). This ensures admin UI surfaces appear for signed-in
   // admins without needing the `?admin=1` query param before components load.
   if (!adminMode && !staffMode) {
-    try {
-      const api = await import('../admin/api.ts');
-      if (api && typeof api.getSession === 'function') {
-        const session = await api.getSession().catch(() => null);
-        if (session) {
-          adminMode = true;
-        }
-      }
-    } catch {
-      // ignore - leave adminMode/staffMode as determined by URL
+    const allowedAdminSession = await resolveAllowedAdminSession();
+    if (allowedAdminSession) {
+      adminMode = true;
     }
   }
 

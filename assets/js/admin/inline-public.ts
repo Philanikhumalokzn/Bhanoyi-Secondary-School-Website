@@ -7783,10 +7783,21 @@ export const initInlinePublicAdmin = async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') !== '1') return;
 
+  const clearAdminModeUrl = () => {
+    try {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete('admin');
+      window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+    } catch {
+      // ignore
+    }
+  };
+
   const session = await getSession();
   const email = session?.user?.email ?? null;
   if (!isAllowed(email)) {
     await signOut();
+    clearAdminModeUrl();
     showStatus('Admin mode denied for this account.');
     return;
   }

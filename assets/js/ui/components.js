@@ -141,13 +141,13 @@ const renderCard = (item, clickable = false, context = {}) => {
 };
 
 const isAdminModeEnabled = () => {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('admin') === '1';
+  if (typeof document === 'undefined') return false;
+  return String(document.body?.dataset?.audience || '').trim() === 'admin';
 };
 
 const isStaffModeEnabled = () => {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('staff') === '1';
+  if (typeof document === 'undefined') return false;
+  return String(document.body?.dataset?.audience || '').trim() === 'staff';
 };
 
 const isPublicAudienceEnabled = () => !isAdminModeEnabled() && !isStaffModeEnabled();
