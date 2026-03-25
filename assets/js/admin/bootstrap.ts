@@ -1,5 +1,13 @@
 import { getSession, signIn, signOut } from './api';
+import {
+  readEnrollmentStoreLocal,
+  syncEnrollmentStoreFromRemote,
+  syncStaffAuthUsersRemote
+} from '../content/enrollment.persistence.js';
 import { initGlobalLocalStorageRemotePersistence } from '../content/localstore.remote.js';
+
+const enrollmentSectionKey = 'enrollment_manager';
+const enrollmentStorageKey = `bhanoyi.enrollmentClasses.${enrollmentSectionKey}`;
 
 const configuredAdmins = (import.meta.env.VITE_ADMIN_EMAILS ?? '')
   .split(',')
@@ -27,6 +35,15 @@ const setStatus = (message: string) => {
   refs.authStatus.textContent = message;
 };
 
+const syncStaffAuthAfterAdminSignIn = async () => {
+  const remoteStore = await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
+  const localStore = readEnrollmentStoreLocal(enrollmentStorageKey);
+  const source = remoteStore || localStore;
+  const staffMembers = Array.isArray(source?.staffMembers) ? source.staffMembers : [];
+  if (!staffMembers.length) return true;
+  return syncStaffAuthUsersRemote(enrollmentSectionKey, staffMembers);
+};
+
 const bindForms = () => {
   refs.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -41,6 +58,13 @@ const bindForms = () => {
       if (!isAllowedAdmin(sessionEmail)) {
         await signOut();
         setStatus('This account is not approved for admin access.');
+        return;
+      }
+
+      const staffSyncOk = await syncStaffAuthAfterAdminSignIn();
+      if (!staffSyncOk) {
+        setStatus('Admin login succeeded, but staff account sync did not complete. Open Enrollment and wait a moment before testing staff login.');
+        redirectToInlineAdmin();
         return;
       }
 
@@ -60,6 +84,7 @@ const init = async () => {
     const session = await getSession();
     const sessionEmail = session?.user?.email ?? null;
     if (session && isAllowedAdmin(sessionEmail)) {
+      await syncStaffAuthAfterAdminSignIn().catch(() => false);
       redirectToInlineAdmin();
       return;
     }

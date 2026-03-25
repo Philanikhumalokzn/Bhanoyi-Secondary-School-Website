@@ -75,6 +75,11 @@ const setStatus = (message: string) => {
   refs.status.textContent = message;
 };
 
+const isInvalidCredentialsError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /invalid login credentials/i.test(message);
+};
+
 const redirectToMyClass = () => {
   window.location.href = 'enrollment.html?staff=1';
 };
@@ -125,6 +130,11 @@ const bindForm = () => {
       setStatus('Login successful. Redirecting...');
       redirectToMyClass();
     } catch (error) {
+      if (knownStaff && isInvalidCredentialsError(error)) {
+        setStatus('Your staff profile exists, but the auth account is not synced yet. Ask admin to sign in and open Enrollment once, then try again.');
+        return;
+      }
+
       setStatus(error instanceof Error ? error.message : 'Invalid login credentials.');
     }
   });
