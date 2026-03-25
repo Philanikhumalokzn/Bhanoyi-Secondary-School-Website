@@ -65,6 +65,22 @@ const installPublicCrudSurfaceGuard = () => {
   if (params.get('admin') === '1' || params.get('staff') === '1') return;
   if (document.body.dataset.publicCrudGuardInstalled === 'true') return;
 
+  // If another initialization path has already determined the audience
+  // (e.g. `renderSite` detected an active admin/staff session and set
+  // `document.body.dataset.audience`), respect that and avoid sanitizing
+  // the DOM. This prevents a race where components render admin controls
+  // then the guard later removes them because it couldn't detect the
+  // session fast enough.
+  try {
+    const existingAudience = String(document.body.dataset.audience || '').trim();
+    if (existingAudience === 'admin' || existingAudience === 'staff') {
+      document.body.dataset.publicCrudGuardInstalled = 'true';
+      return;
+    }
+  } catch {
+    // ignore and continue with the async detection below
+  }
+
   // If the URL doesn't explicitly request admin/staff, detect a signed-in
   // admin session asynchronously (e.g. Supabase). If a session exists, do
   // not sanitize the DOM. This prevents logged-in admins from losing admin
