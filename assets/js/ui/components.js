@@ -1480,15 +1480,16 @@ const hydrateMatchLog = (matchLogNode) => {
     const maxMatchStarters = 11;
     const maxMatchSubstitutes = 6;
     const squadTemplateColumns = [
-      { key: 'slot', header: '#', width: 6, align: 'center' },
+      { key: 'slot', header: '#', width: 22, align: 'center' },
       { key: 'name', header: 'Name', width: 88 },
       { key: 'jerseyNumber', header: 'Jersey', width: 12, align: 'center' },
       { key: 'role', header: 'Position', width: 24 }
     ];
     const staffColumns = [
-      { key: 'role', header: 'Role', width: 59 },
+      { key: 'role', header: 'Role', width: 22 },
       { key: 'name', header: 'Name', width: 88 },
-      { key: 'notes', header: 'Notes', width: 36, wrapText: true }
+      { key: 'notes', header: 'Notes', width: 36, wrapText: true },
+      { key: 'spacer', header: '', width: 24 }
     ];
     const staffRoles = ['Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
 
@@ -1505,7 +1506,8 @@ const hydrateMatchLog = (matchLogNode) => {
       staffRoles.map((role) => ({
         role,
         name: '',
-        notes: ''
+        notes: '',
+        spacer: ''
       }));
 
     const buildSectionsForTeam = (teamName) => [
@@ -1635,6 +1637,7 @@ const hydrateMatchLog = (matchLogNode) => {
           }
         }
       });
+      sheet.properties.defaultRowHeight = 36;
 
       sheet.mergeCells(`A1:${endLabel}1`);
       sheet.mergeCells(`A2:${endLabel}2`);
@@ -1729,7 +1732,7 @@ const hydrateMatchLog = (matchLogNode) => {
 
         section.rows.forEach((rowValue, rowIndex) => {
           const row = sheet.getRow(currentRow + rowIndex);
-          row.height = 72;
+          row.height = 36;
           section.columns.forEach((column, columnIndex) => {
             const key = String(column.key || `col_${columnIndex + 1}`);
             const cell = row.getCell(columnIndex + 1);
