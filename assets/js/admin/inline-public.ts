@@ -103,6 +103,10 @@ type InlineSessionResponse = {
   revoked?: boolean;
 };
 
+type InlineAdminApiError = Error & {
+  status?: number;
+};
+
 const createInlineAdminDeviceSessionId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `adm-${crypto.randomUUID()}`;
@@ -135,10 +139,22 @@ const getSessionAccessToken = (session: unknown) => {
   return typeof token === 'string' ? token.trim() : '';
 };
 
+const createInlineAdminApiError = (message: string, status: number): InlineAdminApiError => {
+  const error = new Error(message) as InlineAdminApiError;
+  error.status = status;
+  return error;
+};
+
+const isInlineAdminAuthError = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+  const status = Number((error as InlineAdminApiError).status);
+  return status === 401;
+};
+
 const parseInlineAdminSessionResponse = async (response: Response): Promise<InlineSessionResponse> => {
   const parsed = (await response.json().catch(() => ({}))) as InlineSessionResponse;
   if (!response.ok) {
-    throw new Error(String(parsed?.error || 'Admin session request failed.'));
+    throw createInlineAdminApiError(String(parsed?.error || 'Admin session request failed.'), response.status);
   }
   return parsed;
 };
@@ -171,8 +187,8 @@ const callInlineAdminSessionsApi = async (
 };
 
 const initAdminSessionSideMenu = (session: unknown) => {
-  const accessToken = getSessionAccessToken(session);
-  if (!accessToken) {
+  const initialAccessToken = getSessionAccessToken(session);
+  if (!initialAccessToken) {
     showStatus('Admin session is missing an access token. Please sign in again.');
     return;
   }
@@ -183,6 +199,11 @@ const initAdminSessionSideMenu = (session: unknown) => {
     .toLowerCase();
 
   let pollTimer: number | null = null;
+
+  const readCurrentAccessToken = async () => {
+    const latestSession = await getSession().catch(() => null);
+    return getSessionAccessToken(latestSession || session);
+  };
 
   const setLocalStatus = (message: string) => {
     showStatus(message);
@@ -358,12 +379,20 @@ const initAdminSessionSideMenu = (session: unknown) => {
 
       try {
         setModalStatus('Loading active admin devices...');
+        const accessToken = await readCurrentAccessToken();
+        if (!accessToken) {
+          throw createInlineAdminApiError('Admin session expired. Please sign in again.', 401);
+        }
         const response = await callInlineAdminSessionsApi('GET', accessToken, null, unlockedPin);
         const sessions = Array.isArray(response.sessions) ? response.sessions : [];
         const visible = sessions.filter((entry) => String(entry.email || '').toLowerCase() === currentEmail);
         renderSessionList(visible, listNode);
         setModalStatus(`Loaded ${visible.length} active admin device${visible.length === 1 ? '' : 's'}.`);
       } catch (error) {
+        if (isInlineAdminAuthError(error)) {
+          await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+          return;
+        }
         setModalStatus(error instanceof Error ? error.message : 'Could not load admin devices.');
       }
     };
@@ -401,9 +430,17 @@ const initAdminSessionSideMenu = (session: unknown) => {
 
       try {
         logoutAllButton.disabled = true;
+        const accessToken = await readCurrentAccessToken();
+        if (!accessToken) {
+          throw createInlineAdminApiError('Admin session expired. Please sign in again.', 401);
+        }
         await callInlineAdminSessionsApi('DELETE', accessToken, { scope: 'all' }, unlockedPin);
         await forceLogoutCurrentDevice('All admin devices were logged out.');
       } catch (error) {
+        if (isInlineAdminAuthError(error)) {
+          await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+          return;
+        }
         setModalStatus(error instanceof Error ? error.message : 'Could not log out all devices.');
       } finally {
         logoutAllButton.disabled = false;
@@ -424,6 +461,10 @@ const initAdminSessionSideMenu = (session: unknown) => {
 
       try {
         button.disabled = true;
+        const accessToken = await readCurrentAccessToken();
+        if (!accessToken) {
+          throw createInlineAdminApiError('Admin session expired. Please sign in again.', 401);
+        }
         await callInlineAdminSessionsApi(
           'DELETE',
           accessToken,
@@ -443,6 +484,10 @@ const initAdminSessionSideMenu = (session: unknown) => {
         setModalStatus('Selected admin device was logged out.');
         await loadSessions();
       } catch (error) {
+        if (isInlineAdminAuthError(error)) {
+          await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+          return;
+        }
         setModalStatus(error instanceof Error ? error.message : 'Could not log out selected device.');
       } finally {
         button.disabled = false;
@@ -459,6 +504,12 @@ const initAdminSessionSideMenu = (session: unknown) => {
 
   const sendHeartbeat = async () => {
     try {
+      const accessToken = await readCurrentAccessToken();
+      if (!accessToken) {
+        await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+        return;
+      }
+
       const response = await callInlineAdminSessionsApi(
         'POST',
         accessToken,
@@ -473,8 +524,10 @@ const initAdminSessionSideMenu = (session: unknown) => {
       if (response.revoked) {
         await forceLogoutCurrentDevice('This device was logged out from the admin session control panel.');
       }
-    } catch {
-      // no-op: heartbeat issues should not block editing flows
+    } catch (error) {
+      if (isInlineAdminAuthError(error)) {
+        await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+      }
     }
   };
 

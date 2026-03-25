@@ -190,6 +190,9 @@ export const persistEnrollmentStoreRemote = async (sectionKey, payload) => {
   }
 
   const { staffEmail, staffPassword } = readStaffSessionCredentials(sectionKey);
+  if (!staffEmail || !staffPassword) {
+    return false;
+  }
 
   try {
     const response = await fetch('/api/enrollment-store', {
