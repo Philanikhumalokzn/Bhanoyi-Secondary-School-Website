@@ -1486,7 +1486,7 @@ const hydrateMatchLog = (matchLogNode) => {
       { key: 'role', header: 'Position', width: 24 }
     ];
     const staffColumns = [
-      { key: 'role', header: 'Role', width: 22 },
+      { key: 'role', header: 'Role', width: 24.5 },
       { key: 'name', header: 'Name', width: 88 },
       { key: 'notes', header: 'Notes', width: 36, wrapText: true }
     ];
