@@ -391,8 +391,27 @@ export const renderSite = async (siteContent, page) => {
   } = await loadComponentsModule();
 
   const params = new URLSearchParams(window.location.search);
-  const adminMode = params.get('admin') === '1';
-  const staffMode = !adminMode && params.get('staff') === '1';
+  let adminMode = params.get('admin') === '1';
+  let staffMode = !adminMode && params.get('staff') === '1';
+
+  // If no explicit URL flag is present, try to detect a signed-in admin session
+  // (e.g. Supabase session). This mirrors the global logout visibility detection
+  // and ensures admin UI surfaces appear for signed-in admins without needing
+  // the `?admin=1` query param.
+  if (!adminMode && !staffMode) {
+    try {
+      /* eslint-disable global-require */
+      const api = await import('../admin/api.ts');
+      if (api && typeof api.getSession === 'function') {
+        const session = await api.getSession().catch(() => null);
+        if (session) {
+          adminMode = true;
+        }
+      }
+    } catch {
+      // ignore - leave adminMode/staffMode as determined by URL
+    }
+  }
   document.body.dataset.audience = adminMode ? 'admin' : staffMode ? 'staff' : 'public';
 
   document.title = page.metaTitle;
