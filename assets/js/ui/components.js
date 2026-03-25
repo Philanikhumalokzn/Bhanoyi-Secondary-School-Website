@@ -7592,19 +7592,7 @@ const hydrateEnrollmentManager = (managerNode) => {
           )
           .join('');
 
-        // determine if this staff is house manager for their assigned house
-        let isHouseManager = false;
-        try {
-          const rawRoles = localStorage.getItem('bhanoyi.houseRoleAssignments');
-          if (rawRoles) {
-            const parsedRoles = JSON.parse(rawRoles || '{}');
-            const houseEntry = parsedRoles[staff.houseId] || {};
-            const rolesForMember = (houseEntry.staffRoles && houseEntry.staffRoles[`${sectionKey}|staff|${index}`]) || [];
-            if (Array.isArray(rolesForMember) && rolesForMember.includes('house_manager')) isHouseManager = true;
-          }
-        } catch {
-          isHouseManager = false;
-        }
+        
 
         return `
           <div class="enrollment-learner-item">
@@ -8168,13 +8156,34 @@ const hydrateEnrollmentManager = (managerNode) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
 
-    const removeButton = target.closest('[data-enrollment-remove-letter]');
-    if (removeButton instanceof HTMLButtonElement) {
+    const removeLetterBtn = target.closest('[data-enrollment-remove-letter]');
+    if (removeLetterBtn instanceof HTMLButtonElement) {
       if (!isAdminMode) return;
+      const grade = String(removeLetterBtn.dataset.enrollmentRemoveGrade || '').trim();
+      const letter = normalizeLetter(removeLetterBtn.dataset.enrollmentRemoveLetter || '');
+      if (!grade || !letter) return;
 
-      const grade = String(removeButton.dataset.enrollmentRemoveGrade || '').trim();
-    return;
-      const letter = normalizeLetter(removeButton.dataset.enrollmentRemoveLetter || '');
+      const confirmRemove = window.confirm(`Remove class ${grade}${letter}?`);
+      if (!confirmRemove) return;
+
+      classesByGrade[grade] = dedupeLetters((classesByGrade[grade] || []).filter((entry) => normalizeLetter(entry) !== letter));
+      if (
+        classProfilesByGrade[grade] &&
+        typeof classProfilesByGrade[grade] === 'object' &&
+        !Array.isArray(classProfilesByGrade[grade])
+      ) {
+        delete classProfilesByGrade[grade][letter];
+      }
+      saveStore();
+      render();
+      if (statusNode) {
+        statusNode.textContent = `Class ${grade}${letter} removed.`;
+      }
+      if (selectedManageGrade === grade && selectedManageLetter === letter) {
+        closeManageModal();
+      }
+      return;
+    }
 
     const editButton = target.closest('[data-enrollment-edit-staff-index]');
     if (editButton instanceof HTMLButtonElement) {
@@ -8239,28 +8248,6 @@ const hydrateEnrollmentManager = (managerNode) => {
         if (statusNode) statusNode.textContent = `${resolveStaffDisplayName(staff)} ${isManager ? 'removed as' : 'set as'} house manager for ${houseId}.`;
       } catch {
         if (statusNode) statusNode.textContent = 'Could not update house manager assignment.';
-      }
-      return;
-      if (!grade || !letter) return;
-
-      const confirmRemove = window.confirm(`Remove class ${grade}${letter}?`);
-      if (!confirmRemove) return;
-
-      classesByGrade[grade] = dedupeLetters((classesByGrade[grade] || []).filter((entry) => normalizeLetter(entry) !== letter));
-      if (
-        classProfilesByGrade[grade] &&
-        typeof classProfilesByGrade[grade] === 'object' &&
-        !Array.isArray(classProfilesByGrade[grade])
-      ) {
-        delete classProfilesByGrade[grade][letter];
-      }
-      saveStore();
-      render();
-      if (statusNode) {
-        statusNode.textContent = `Class ${grade}${letter} removed.`;
-      }
-      if (selectedManageGrade === grade && selectedManageLetter === letter) {
-        closeManageModal();
       }
       return;
     }
