@@ -6058,8 +6058,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     refreshManageModalWorkflowHeights();
   });
 
-  const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
-  const isStaffMode = !isAdminMode && new URLSearchParams(window.location.search).get('staff') === '1';
+  const isAdminMode = isAdminModeEnabled();
+  const isStaffMode = isStaffModeEnabled();
   const sectionKey = String(config.sectionKey || 'enrollment_manager').trim() || 'enrollment_manager';
   const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
   const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
