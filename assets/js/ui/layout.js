@@ -65,7 +65,26 @@ const installPublicCrudSurfaceGuard = () => {
   if (params.get('admin') === '1' || params.get('staff') === '1') return;
   if (document.body.dataset.publicCrudGuardInstalled === 'true') return;
 
-  const sensitiveSelectors = [
+  // If the URL doesn't explicitly request admin/staff, detect a signed-in
+  // admin session asynchronously (e.g. Supabase). If a session exists, do
+  // not sanitize the DOM. This prevents logged-in admins from losing admin
+  // controls when `?admin=1` is not present.
+  (async () => {
+    try {
+      const api = await import('../admin/api.ts');
+      if (api && typeof api.getSession === 'function') {
+        const session = await api.getSession().catch(() => null);
+        if (session) {
+          // mark installed to avoid repeated work and exit without sanitizing
+          document.body.dataset.publicCrudGuardInstalled = 'true';
+          return;
+        }
+      }
+    } catch {
+      // ignore and fall back to sanitizing
+    }
+
+    const sensitiveSelectors = [
     '[data-post-news]',
     '[data-standings-export]',
     '[data-standings-export-combined]',
@@ -115,18 +134,19 @@ const installPublicCrudSurfaceGuard = () => {
     });
   };
 
-  sanitize(document);
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      mutation.addedNodes.forEach((node) => {
-        if (!(node instanceof HTMLElement)) return;
-        sanitize(node);
+    sanitize(document);
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          sanitize(node);
+        });
       });
     });
-  });
 
-  observer.observe(document.body, { childList: true, subtree: true });
-  document.body.dataset.publicCrudGuardInstalled = 'true';
+    observer.observe(document.body, { childList: true, subtree: true });
+    document.body.dataset.publicCrudGuardInstalled = 'true';
+  })();
 };
 
 const initCollapsiblePageSections = (pageKey) => {
