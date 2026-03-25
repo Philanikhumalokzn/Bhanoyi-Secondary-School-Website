@@ -35,6 +35,22 @@ const setStatus = (message: string) => {
   refs.authStatus.textContent = message;
 };
 
+const redirectToStaffLogin = () => {
+  window.location.href = 'staff.html';
+};
+
+const isKnownStaffAccount = async (email?: string | null) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return false;
+
+  const remoteStore = await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
+  const localStore = readEnrollmentStoreLocal(enrollmentStorageKey);
+  const source = remoteStore || localStore;
+  const staffMembers = Array.isArray(source?.staffMembers) ? source.staffMembers : [];
+
+  return staffMembers.some((entry) => String(entry?.loginEmail || entry?.staffEmail || '').trim().toLowerCase() === normalizedEmail);
+};
+
 const syncStaffAuthAfterAdminSignIn = async () => {
   const remoteStore = await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
   const localStore = readEnrollmentStoreLocal(enrollmentStorageKey);
@@ -56,8 +72,14 @@ const bindForms = () => {
       const sessionEmail = session?.user?.email ?? null;
 
       if (!isAllowedAdmin(sessionEmail)) {
+        if (await isKnownStaffAccount(sessionEmail)) {
+          setStatus('This is the admin login. Redirecting staff account to the staff workspace...');
+          redirectToStaffLogin();
+          return;
+        }
+
         await signOut();
-        setStatus('This account is not approved for admin access.');
+        setStatus('This account is not approved for admin access. Use staff login for staff accounts.');
         return;
       }
 
@@ -90,8 +112,14 @@ const init = async () => {
     }
 
     if (session && !isAllowedAdmin(sessionEmail)) {
+      if (await isKnownStaffAccount(sessionEmail)) {
+        setStatus('This is the admin login. Redirecting staff account to the staff workspace...');
+        redirectToStaffLogin();
+        return;
+      }
+
       await signOut();
-      setStatus('This account is not approved for admin access.');
+      setStatus('This account is not approved for admin access. Use staff login for staff accounts.');
     }
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Configuration error.');
