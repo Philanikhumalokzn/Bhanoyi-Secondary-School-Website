@@ -98,6 +98,19 @@ const readSessionAccessToken = async () => {
   }
 };
 
+const postJsonWithAccessToken = async (url, accessToken, body) => {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  return response;
+};
+
 const readStaffSessionCredentials = (sectionKey) => {
   if (typeof window === 'undefined') {
     return { staffEmail: '', staffPassword: '' };
@@ -150,53 +163,39 @@ export const persistEnrollmentStoreRemote = async (sectionKey, payload) => {
 
   if (accessToken) {
     try {
-      const adminResponse = await fetch('/api/enrollment-store-admin', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+      const staffSyncResponse = await postJsonWithAccessToken('/api/staff-auth-sync', accessToken, {
+        sectionKey: normalizeSectionKey(sectionKey),
+        staffMembers: Array.isArray(normalized.staffMembers) ? normalized.staffMembers : []
+      });
+
+      if (staffSyncResponse.ok) {
+        const adminResponse = await postJsonWithAccessToken('/api/enrollment-store-admin', accessToken, {
           sectionKey: normalizeSectionKey(sectionKey),
           payload: normalized
-        })
-      });
+        });
 
-      if (adminResponse.ok) {
-        return true;
+        if (adminResponse.ok) {
+          return true;
+        }
+
+        return false;
       }
 
-      const response = await fetch(`${url}/rest/v1/site_settings?on_conflict=setting_key`, {
-        method: 'POST',
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          Prefer: 'resolution=merge-duplicates,return=minimal'
-        },
-        body: JSON.stringify([
-          {
-            setting_key: settingKey,
-            setting_value: JSON.stringify(normalized)
-          }
-        ])
-      });
-
-      if (response.ok) {
-        return true;
+      if (staffSyncResponse.status !== 401 && staffSyncResponse.status !== 403) {
+        return false;
       }
     } catch {
-      // fallback to staff endpoint below
+      return false;
     }
   }
 
   const { staffEmail, staffPassword } = readStaffSessionCredentials(sectionKey);
-  if (!staffEmail || !staffPassword) return false;
 
   try {
     const response = await fetch('/api/enrollment-store', {
       method: 'POST',
       headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -205,6 +204,21 @@ export const persistEnrollmentStoreRemote = async (sectionKey, payload) => {
         staffPassword,
         payload: normalized
       })
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+export const syncStaffAuthUsersRemote = async (sectionKey, staffMembers) => {
+  const accessToken = await readSessionAccessToken();
+  if (!accessToken) return false;
+
+  try {
+    const response = await postJsonWithAccessToken('/api/staff-auth-sync', accessToken, {
+      sectionKey: normalizeSectionKey(sectionKey),
+      staffMembers: Array.isArray(staffMembers) ? staffMembers : []
     });
     return response.ok;
   } catch {

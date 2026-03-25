@@ -1,4 +1,4 @@
-import { normalize, readJsonBody, sendJson } from './http.js';
+import { normalize, readJsonBody, requireSupabaseUserRequest, sendJson } from './http.js';
 
 const sectionKeyAllowed = 'enrollment_manager';
 
@@ -148,21 +148,38 @@ export default async function handler(request, response) {
     return sendJson(response, 400, { error: 'Missing or invalid payload.' });
   }
 
-  const staffEmail = normalize(body.staffEmail || getHeader(request, 'x-staff-email')).toLowerCase();
-  const staffPassword = normalize(body.staffPassword || getHeader(request, 'x-staff-password'));
-  if (!staffEmail || !staffPassword) {
-    return sendJson(response, 401, { error: 'Staff credentials required for enrollment sync.' });
-  }
-
   try {
     const existingStore = await fetchCurrentStore(url, serviceRoleKey, sectionKey);
     if (!existingStore) {
       return sendJson(response, 404, { error: 'Enrollment store does not exist yet.' });
     }
 
-    const validStaff = verifyStaffCredentials(existingStore, staffEmail, staffPassword);
+    const hasAuthorizationHeader = Boolean(getHeader(request, 'authorization'));
+    let validStaff = false;
+
+    if (hasAuthorizationHeader) {
+      const authenticatedUser = await requireSupabaseUserRequest(request, response);
+      if (!authenticatedUser) return;
+
+      const normalizedEmail = normalize(authenticatedUser.email).toLowerCase();
+      const staffMembers = Array.isArray(existingStore.staffMembers) ? existingStore.staffMembers : [];
+      validStaff = staffMembers.some((entry) => {
+        if (!entry || typeof entry !== 'object') return false;
+        const loginEmail = normalize(entry.loginEmail || entry.staffEmail).toLowerCase();
+        return loginEmail === normalizedEmail;
+      });
+    } else {
+      const staffEmail = normalize(body.staffEmail || getHeader(request, 'x-staff-email')).toLowerCase();
+      const staffPassword = normalize(body.staffPassword || getHeader(request, 'x-staff-password'));
+      if (!staffEmail || !staffPassword) {
+        return sendJson(response, 401, { error: 'Staff authentication required for enrollment sync.' });
+      }
+
+      validStaff = verifyStaffCredentials(existingStore, staffEmail, staffPassword);
+    }
+
     if (!validStaff) {
-      return sendJson(response, 403, { error: 'Invalid staff credentials for enrollment sync.' });
+      return sendJson(response, 403, { error: 'This account is not authorized for staff enrollment sync.' });
     }
 
     const mergedStore = buildPatchedStore(existingStore, payload);

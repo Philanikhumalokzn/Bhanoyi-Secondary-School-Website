@@ -5,6 +5,7 @@ import {
   persistEnrollmentStore,
   readEnrollmentStoreLocal,
   stampEnrollmentStorePayload,
+  syncStaffAuthUsersRemote,
   syncEnrollmentStoreFromRemote
 } from '../content/enrollment.persistence.js';
 import { persistLocalStore, syncLocalStoreFromRemote } from '../content/localstore.remote.js';
@@ -6156,6 +6157,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   let hasAutoOpenedAssignedClass = false;
   let pendingRemoteEnrollmentPayload = null;
   let isRemoteEnrollmentSaveInFlight = false;
+  let hasTriggeredStaffAuthSync = false;
 
   const staffPostLevelRanks = {
     PL1: 'Educator',
@@ -7069,6 +7071,12 @@ const hydrateEnrollmentManager = (managerNode) => {
     classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade),
     staffMembers: normalizeStaffMembers(staffMembers)
   });
+
+  const maybeSyncStaffAuthUsers = () => {
+    if (!isAdminMode || hasTriggeredStaffAuthSync || !staffMembers.length) return;
+    hasTriggeredStaffAuthSync = true;
+    void syncStaffAuthUsersRemote(sectionKey, staffMembers);
+  };
 
   const flushRemoteEnrollmentSave = async () => {
     if (isRemoteEnrollmentSaveInFlight || !pendingRemoteEnrollmentPayload) return;
@@ -8139,6 +8147,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   renderStaffAssignedClassOptions();
   renderStaffMembers();
   render();
+  maybeSyncStaffAuthUsers();
 
   const hydrateStoreFromRemote = async () => {
     const remoteStore = await syncEnrollmentStoreFromRemote(sectionKey, storageKey);
@@ -8167,6 +8176,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     renderStaffAssignedClassOptions();
     renderStaffMembers();
     render();
+    maybeSyncStaffAuthUsers();
   };
 
   void hydrateStoreFromRemote();

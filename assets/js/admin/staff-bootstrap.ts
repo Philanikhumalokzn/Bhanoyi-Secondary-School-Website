@@ -1,3 +1,4 @@
+import { getSession, signIn, signOut } from './api';
 import { syncEnrollmentStoreFromRemote } from '../content/enrollment.persistence.js';
 
 const enrollmentSectionKey = 'enrollment_manager';
@@ -78,13 +79,13 @@ const redirectToMyClass = () => {
   window.location.href = 'enrollment.html?staff=1';
 };
 
-const isStoredSessionValid = async () => {
-  const email = normalizeText(sessionStorage.getItem(staffSessionKey), 120).toLowerCase();
-  const password = normalizeText(sessionStorage.getItem(staffSessionPasswordKey), 120);
-  if (!email) return false;
-  if (!password) return false;
+const resolveSignedInStaff = async () => {
+  const session = await getSession().catch(() => null);
+  const email = normalizeText(session?.user?.email, 120).toLowerCase();
+  if (!email) return null;
+
   const rows = await loadStaffCredentials();
-  return rows.some((row) => row.loginEmail === email && row.loginPassword === password);
+  return rows.find((row) => row.loginEmail === email) || null;
 };
 
 const bindForm = () => {
@@ -104,26 +105,43 @@ const bindForm = () => {
       return;
     }
 
-    const matched = rows.find((row) => row.loginEmail === loginEmail && row.loginPassword === loginPassword);
-    if (!matched) {
-      setStatus('Invalid staff credentials.');
+    const knownStaff = rows.find((row) => row.loginEmail === loginEmail);
+    if (!knownStaff) {
+      setStatus('This email is not assigned to a staff profile yet.');
       return;
     }
 
-    sessionStorage.setItem(staffSessionKey, matched.loginEmail);
-    sessionStorage.setItem(staffSessionPasswordKey, matched.loginPassword);
-    setStatus('Login successful. Redirecting...');
-    redirectToMyClass();
+    try {
+      await signIn(loginEmail, loginPassword);
+      const matched = await resolveSignedInStaff();
+      if (!matched) {
+        await signOut().catch(() => null);
+        setStatus('This account is not linked to an active staff profile.');
+        return;
+      }
+
+      sessionStorage.setItem(staffSessionKey, matched.loginEmail);
+      sessionStorage.setItem(staffSessionPasswordKey, loginPassword);
+      setStatus('Login successful. Redirecting...');
+      redirectToMyClass();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Invalid login credentials.');
+    }
   });
 };
 
 const init = async () => {
   bindForm();
 
-  if (await isStoredSessionValid()) {
+  const matched = await resolveSignedInStaff();
+  if (matched) {
+    sessionStorage.setItem(staffSessionKey, matched.loginEmail);
     redirectToMyClass();
     return;
   }
+
+  sessionStorage.removeItem(staffSessionKey);
+  sessionStorage.removeItem(staffSessionPasswordKey);
 
   if ((await loadStaffCredentials()).length === 0) {
     setStatus('No staff profiles found yet.');
