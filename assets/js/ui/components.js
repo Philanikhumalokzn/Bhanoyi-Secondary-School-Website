@@ -5,6 +5,7 @@ import {
   persistEnrollmentStore,
   readEnrollmentStoreLocal,
   stampEnrollmentStorePayload,
+  syncStaffAuthUsersRemoteDetailed,
   syncStaffAuthUsersRemote,
   syncEnrollmentStoreFromRemote
 } from '../content/enrollment.persistence.js';
@@ -5728,8 +5729,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
             <div class="sports-workflow-body enrollment-workflow-body" data-enrollment-workflow-body>
               <div class="enrollment-manager-actions">
                 <button type="button" class="btn btn-secondary" data-enrollment-open-add-grade>Add grade</button>
+                <button type="button" class="btn btn-secondary" data-enrollment-sync-staff-auth data-enrollment-admin-only>Sync staff accounts</button>
               </div>
               <p class="enrollment-class-empty">Grades/classes are saved automatically when you click Add grade or Add class.</p>
+                <p class="enrollment-class-empty" data-enrollment-staff-auth-status data-enrollment-admin-only>Staff auth sync status will appear here.</p>
               <div class="enrollment-grade-list" data-enrollment-grade-list></div>
               <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
             </div>
@@ -5877,7 +5880,9 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const gradeListNode = managerNode.querySelector('[data-enrollment-grade-list]');
   const statusNode = managerNode.querySelector('[data-enrollment-status]');
+  const staffAuthStatusNode = managerNode.querySelector('[data-enrollment-staff-auth-status]');
   const addGradeTrigger = managerNode.querySelector('[data-enrollment-open-add-grade]');
+  const syncStaffAuthButton = managerNode.querySelector('[data-enrollment-sync-staff-auth]');
   const gradeModal = managerNode.querySelector('[data-enrollment-grade-modal]');
   const gradeSelect = managerNode.querySelector('[data-enrollment-grade-select]');
   const addGradeButton = managerNode.querySelector('[data-enrollment-add-grade]');
@@ -5980,7 +5985,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(staffSortSelect instanceof HTMLSelectElement) ||
     !(staffHouseRowNode instanceof HTMLElement) ||
     !(staffListNode instanceof HTMLElement) ||
-    !saveManageButtons.length
+    !saveManageButtons.length ||
+    !(syncStaffAuthButton instanceof HTMLButtonElement)
   ) {
     return;
   }
@@ -7072,10 +7078,39 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffMembers: normalizeStaffMembers(staffMembers)
   });
 
+  const setStaffAuthStatus = (message) => {
+    if (!(staffAuthStatusNode instanceof HTMLElement)) return;
+    staffAuthStatusNode.textContent = String(message || '').trim();
+  };
+
+  const runStaffAuthSync = async ({ manual = false } = {}) => {
+    if (!isAdminMode) {
+      setStaffAuthStatus('Staff auth sync is only available in admin mode.');
+      return false;
+    }
+
+    const normalizedStaff = normalizeStaffMembers(staffMembers);
+    if (!normalizedStaff.length) {
+      setStaffAuthStatus('No staff profiles available to sync.');
+      return false;
+    }
+
+    setStaffAuthStatus(manual ? 'Syncing staff accounts...' : 'Checking staff account sync...');
+    const result = await syncStaffAuthUsersRemoteDetailed(sectionKey, normalizedStaff);
+
+    if (result.ok) {
+      setStaffAuthStatus(`Staff auth sync complete. ${result.syncedCount} account${result.syncedCount === 1 ? '' : 's'} processed.`);
+      return true;
+    }
+
+    setStaffAuthStatus(`Staff auth sync failed (${result.status || 'network'}): ${result.error || 'Unknown error.'}`);
+    return false;
+  };
+
   const maybeSyncStaffAuthUsers = () => {
     if (!isAdminMode || hasTriggeredStaffAuthSync || !staffMembers.length) return;
     hasTriggeredStaffAuthSync = true;
-    void syncStaffAuthUsersRemote(sectionKey, staffMembers);
+    void runStaffAuthSync();
   };
 
   const flushRemoteEnrollmentSave = async () => {
@@ -7118,6 +7153,15 @@ const hydrateEnrollmentManager = (managerNode) => {
     pendingRemoteEnrollmentPayload = payload;
     void flushRemoteEnrollmentSave();
   };
+
+  syncStaffAuthButton.addEventListener('click', async () => {
+    syncStaffAuthButton.disabled = true;
+    try {
+      await runStaffAuthSync({ manual: true });
+    } finally {
+      syncStaffAuthButton.disabled = false;
+    }
+  });
 
   const getMissingGrades = () => gradeNumbers.filter((grade) => !activeGrades.includes(grade));
 

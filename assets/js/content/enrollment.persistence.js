@@ -111,6 +111,18 @@ const postJsonWithAccessToken = async (url, accessToken, body) => {
   return response;
 };
 
+const readJsonResponse = async (response) => {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+};
+
+const toErrorMessage = (payload, fallback) =>
+  String(payload?.error || payload?.message || payload?.msg || fallback || '')
+    .trim();
+
 const readStaffSessionCredentials = (sectionKey) => {
   if (typeof window === 'undefined') {
     return { staffEmail: '', staffPassword: '' };
@@ -215,17 +227,41 @@ export const persistEnrollmentStoreRemote = async (sectionKey, payload) => {
 };
 
 export const syncStaffAuthUsersRemote = async (sectionKey, staffMembers) => {
+  const result = await syncStaffAuthUsersRemoteDetailed(sectionKey, staffMembers);
+  return result.ok;
+};
+
+export const syncStaffAuthUsersRemoteDetailed = async (sectionKey, staffMembers) => {
   const accessToken = await readSessionAccessToken();
-  if (!accessToken) return false;
+  if (!accessToken) {
+    return {
+      ok: false,
+      status: 401,
+      error: 'No active admin session was found. Please sign in again.',
+      syncedCount: 0
+    };
+  }
 
   try {
     const response = await postJsonWithAccessToken('/api/staff-auth-sync', accessToken, {
       sectionKey: normalizeSectionKey(sectionKey),
       staffMembers: Array.isArray(staffMembers) ? staffMembers : []
     });
-    return response.ok;
+
+    const payload = await readJsonResponse(response);
+    return {
+      ok: response.ok,
+      status: response.status,
+      error: response.ok ? '' : toErrorMessage(payload, 'Staff auth sync failed.'),
+      syncedCount: Number(payload?.syncedCount) || 0
+    };
   } catch {
-    return false;
+    return {
+      ok: false,
+      status: 0,
+      error: 'Could not reach /api/staff-auth-sync. Check deployment and try again.',
+      syncedCount: 0
+    };
   }
 };
 
