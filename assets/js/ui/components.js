@@ -805,6 +805,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
                 </div>
                 <div class="match-log-header-actions">
                   <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
+                  <button type="button" class="btn btn-secondary" data-match-export-template>Export team sheet template</button>
                   <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
                 </div>
               </header>
@@ -1109,6 +1110,7 @@ const hydrateMatchLog = (matchLogNode) => {
   const teamLabel = matchLogNode.querySelector('[data-match-modal-team]');
   const modalTeamSelect = matchLogNode.querySelector('[data-match-modal-team-select]');
   const exportButton = matchLogNode.querySelector('[data-match-export]');
+  const exportTemplateButton = matchLogNode.querySelector('[data-match-export-template]');
   const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
   const detailsStep = matchLogNode.querySelector('[data-match-step="details"]');
   const typeListNode = matchLogNode.querySelector('[data-match-event-types]');
@@ -1470,6 +1472,295 @@ const hydrateMatchLog = (matchLogNode) => {
     });
 
     return lines.join('\n');
+  };
+
+  const buildMatchTeamSheetTemplateSections = (fixture) => {
+    if (!fixture) return [];
+
+    const maxMatchStarters = 11;
+    const maxMatchSubstitutes = 6;
+    const squadTemplateColumns = [
+      { key: 'slot', header: '#', width: 6, align: 'center' },
+      { key: 'name', header: 'Name', width: 88 },
+      { key: 'jerseyNumber', header: 'Jersey', width: 12, align: 'center' },
+      { key: 'role', header: 'Position', width: 24 }
+    ];
+    const staffColumns = [
+      { key: 'role', header: 'Role', width: 22 },
+      { key: 'name', header: 'Name', width: 88 },
+      { key: 'notes', header: 'Notes', width: 36, wrapText: true }
+    ];
+    const staffRoles = ['Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
+
+    const buildBlankSquadRows = (count) =>
+      Array.from({ length: count }, (_, index) => ({
+        slot: index + 1,
+        name: '',
+        jerseyNumber: '',
+        role: '',
+        notes: ''
+      }));
+
+    const buildStaffRows = () =>
+      staffRoles.map((role) => ({
+        role,
+        name: '',
+        notes: ''
+      }));
+
+    const buildSectionsForTeam = (teamName) => [
+      {
+        title: `${teamName} Starting XI Template`,
+        metaLine: `${maxMatchStarters} slots`,
+        columns: squadTemplateColumns,
+        rows: buildBlankSquadRows(maxMatchStarters)
+      },
+      {
+        title: `${teamName} Substitutes Template`,
+        metaLine: `${maxMatchSubstitutes} slots`,
+        columns: squadTemplateColumns,
+        rows: buildBlankSquadRows(maxMatchSubstitutes)
+      },
+      {
+        title: `${teamName} Team Officials`,
+        metaLine: 'Support staff and match-day officials',
+        columns: staffColumns,
+        rows: buildStaffRows()
+      }
+    ];
+
+    return [...buildSectionsForTeam(fixture.homeName), ...buildSectionsForTeam(fixture.awayName)];
+  };
+
+  const exportMatchTeamSheetTemplate = async () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+
+    const sections = buildMatchTeamSheetTemplateSections(fixture);
+    if (!sections.length) return;
+
+    const perTeam = Math.ceil(sections.length / 2);
+    const homeSections = sections.slice(0, perTeam);
+    const awaySections = sections.slice(perTeam);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Bhanoyi Secondary School Website';
+    workbook.created = new Date();
+
+    const toColumnLabel = (index) => {
+      let value = Math.max(1, Number(index) || 1);
+      let label = '';
+      while (value > 0) {
+        const remainder = (value - 1) % 26;
+        label = String.fromCharCode(65 + remainder) + label;
+        value = Math.floor((value - 1) / 26);
+      }
+      return label;
+    };
+
+    const theme = {
+      primaryBlue: '1F6FCB',
+      deepBlue: '173A5E',
+      headerBlue: '1B4E7C',
+      lightBlue: 'EAF3FF',
+      white: 'FFFFFF',
+      metaBlue: 'F5FAFF',
+      borderColor: 'D0E0F0'
+    };
+
+    const applyDataRowCellStyle = (cell, style, rowIndex) => {
+      const align = style?.align || 'left';
+      cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${theme.deepBlue}` } };
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: align,
+        wrapText: Boolean(style?.wrapText)
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${rowIndex % 2 === 0 ? theme.white : theme.lightBlue}` }
+      };
+      cell.border = {
+        top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        bottom: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+        right: { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
+      };
+    };
+
+    const styleHeaderRow = (row, columnsForRow) => {
+      row.values = columnsForRow.map((entry) => entry.header || '');
+      row.height = 20;
+      row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.white}` } };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: `FF${theme.headerBlue}` }
+        };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
+          bottom: { style: 'medium', color: { argb: `FF${theme.borderColor}` } },
+          right: { style: 'thin', color: { argb: `FF${theme.borderColor}` } }
+        };
+      });
+    };
+
+    const renderTeamSheet = async (teamName, teamSections) => {
+      const effectiveCols = teamSections.reduce(
+        (widest, entry) => (entry.columns.length > (widest?.length || 0) ? entry.columns : widest),
+        teamSections[0]?.columns || []
+      );
+      const endLabel = toColumnLabel(effectiveCols.length);
+      const sheetName = `${teamName} Team Sheet`.slice(0, 31);
+      const sheet = workbook.addWorksheet(sheetName, {
+        pageSetup: {
+          paperSize: 9,
+          orientation: 'portrait',
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          horizontalCentered: true,
+          margins: {
+            left: 0.35,
+            right: 0.35,
+            top: 0.55,
+            bottom: 0.5,
+            header: 0.2,
+            footer: 0.2
+          }
+        }
+      });
+
+      sheet.mergeCells(`A1:${endLabel}1`);
+      sheet.mergeCells(`A2:${endLabel}2`);
+      sheet.mergeCells(`A3:${endLabel}3`);
+      sheet.mergeCells(`A4:${endLabel}4`);
+      sheet.mergeCells(`A5:${endLabel}5`);
+      sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
+      sheet.getCell('A2').value = `${teamName} Team Sheet Template`;
+      sheet.getCell('A3').value = `${fixture.homeName} vs ${fixture.awayName}`;
+      sheet.getCell('A4').value = config.venue ? `Venue: ${config.venue}` : '';
+      sheet.getCell('A5').value = `Generated on: ${new Date().toLocaleString('en-GB')}`;
+
+      ['A1', 'A2', 'A3', 'A4', 'A5'].forEach((ref, index) => {
+        const cell = sheet.getCell(ref);
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = {
+          name: 'Calibri',
+          size: index === 0 ? 17 : index === 1 ? 13 : 10.5,
+          bold: index <= 2,
+          color: { argb: index <= 2 ? `FF${theme.white}` : `FF${theme.deepBlue}` }
+        };
+        if (index <= 2) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${index === 0 ? theme.deepBlue : theme.primaryBlue}` }
+          };
+        } else {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${theme.metaBlue}` }
+          };
+        }
+      });
+
+      sheet.getRow(1).height = 28;
+      sheet.getRow(2).height = 22;
+      sheet.getRow(3).height = 20;
+      sheet.getRow(4).height = 18;
+      sheet.getRow(5).height = 18;
+
+      try {
+        const logoResponse = await fetch('/branding/bhanoyi-logo.png');
+        if (logoResponse.ok) {
+          const logoBlob = await logoResponse.blob();
+          const logoBuffer = await logoBlob.arrayBuffer();
+          const imageId = workbook.addImage({ buffer: logoBuffer, extension: 'png' });
+          sheet.addImage(imageId, {
+            tl: { col: 0.1, row: 0.15 },
+            ext: { width: 86, height: 86 }
+          });
+        }
+      } catch {
+        // Branding image is optional.
+      }
+
+      sheet.columns = effectiveCols.map((column) => ({
+        header: column.header || '',
+        key: column.key || '',
+        width: Math.max(8, Number(column.width) || 16)
+      }));
+
+      let currentRow = 7;
+      teamSections.forEach((section) => {
+        if (section.title) {
+          sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+          const titleCell = sheet.getCell(`A${currentRow}`);
+          titleCell.value = section.title;
+          titleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${theme.deepBlue}` } };
+          titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+          titleCell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: `FF${theme.metaBlue}` }
+          };
+          currentRow += 1;
+        }
+
+        if (section.metaLine) {
+          sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+          const metaCell = sheet.getCell(`A${currentRow}`);
+          metaCell.value = section.metaLine;
+          metaCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+          metaCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          currentRow += 1;
+        }
+
+        const headerRow = sheet.getRow(currentRow);
+        styleHeaderRow(headerRow, section.columns);
+        currentRow += 1;
+
+        section.rows.forEach((rowValue, rowIndex) => {
+          const row = sheet.getRow(currentRow + rowIndex);
+          row.height = 36;
+          section.columns.forEach((column, columnIndex) => {
+            const key = String(column.key || `col_${columnIndex + 1}`);
+            const cell = row.getCell(columnIndex + 1);
+            cell.value = rowValue && typeof rowValue === 'object' ? rowValue[key] ?? '' : '';
+            applyDataRowCellStyle(cell, column, rowIndex);
+          });
+        });
+        currentRow += section.rows.length + 1;
+      });
+
+      sheet.pageSetup.printArea = `A1:${endLabel}${Math.max(1, currentRow - 1)}`;
+    };
+
+    await renderTeamSheet(fixture.homeName, homeSections);
+    await renderTeamSheet(fixture.awayName, awaySections);
+
+    const workbookBuffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([workbookBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const fileName = `${(fixture.homeName || 'home')}-vs-${(fixture.awayName || 'away')}-team-sheet-template-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+
+    showSmartToast('Team sheet template exported (.xlsx).', { tone: 'success' });
   };
 
   const render = () => {
@@ -1843,6 +2134,12 @@ const hydrateMatchLog = (matchLogNode) => {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  });
+
+  exportTemplateButton?.addEventListener('click', () => {
+    void exportMatchTeamSheetTemplate().catch(() => {
+      showSmartToast('Unable to export the team sheet template.', { tone: 'error' });
+    });
   });
 
   window.addEventListener('storage', (event) => {
@@ -6805,7 +7102,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
         ];
-        row.height = 36;
+        row.height = 18;
 
         row.eachCell((cell, columnIndex) => {
           cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${deepBlue}` } };
