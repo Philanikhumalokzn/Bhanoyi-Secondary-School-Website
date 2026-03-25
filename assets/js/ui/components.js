@@ -5696,6 +5696,8 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   </select>
                   <select data-enrollment-staff-assigned-class></select>
                   <input type="text" maxlength="80" data-enrollment-staff-subject placeholder="Subject / Department (optional)" />
+                  <input type="email" maxlength="120" data-enrollment-staff-login-email placeholder="Login email" />
+                  <input type="text" maxlength="120" data-enrollment-staff-login-password placeholder="Login password" />
                   <input type="email" maxlength="120" data-enrollment-staff-email placeholder="Email (optional)" />
                   <input type="text" maxlength="30" data-enrollment-staff-phone placeholder="Phone (optional)" />
                   <textarea rows="2" maxlength="280" data-enrollment-staff-notes placeholder="Notes (optional)"></textarea>
@@ -5915,6 +5917,8 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffPostLevelSelect = managerNode.querySelector('[data-enrollment-staff-post-level]');
   const staffAssignedClassSelect = managerNode.querySelector('[data-enrollment-staff-assigned-class]');
   const staffSubjectInput = managerNode.querySelector('[data-enrollment-staff-subject]');
+  const staffLoginEmailInput = managerNode.querySelector('[data-enrollment-staff-login-email]');
+  const staffLoginPasswordInput = managerNode.querySelector('[data-enrollment-staff-login-password]');
   const staffEmailInput = managerNode.querySelector('[data-enrollment-staff-email]');
   const staffPhoneInput = managerNode.querySelector('[data-enrollment-staff-phone]');
   const staffNotesInput = managerNode.querySelector('[data-enrollment-staff-notes]');
@@ -5965,6 +5969,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(staffPostLevelSelect instanceof HTMLSelectElement) ||
     !(staffAssignedClassSelect instanceof HTMLSelectElement) ||
     !(staffSubjectInput instanceof HTMLInputElement) ||
+    !(staffLoginEmailInput instanceof HTMLInputElement) ||
+    !(staffLoginPasswordInput instanceof HTMLInputElement) ||
     !(staffEmailInput instanceof HTMLInputElement) ||
     !(staffPhoneInput instanceof HTMLInputElement) ||
     !(staffNotesInput instanceof HTMLTextAreaElement) ||
@@ -7759,6 +7765,19 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffListNode.innerHTML = filteredStaff
       .map(({ staff, index }) => {
         const displayName = resolveStaffDisplayName(staff);
+        let isHouseManager = false;
+        try {
+          const rawRoles = localStorage.getItem('bhanoyi.houseRoleAssignments');
+          const parsedRoles = rawRoles ? JSON.parse(rawRoles) : {};
+          const houseId = String(staff.houseId || '').trim();
+          const houseEntry = houseId && parsedRoles && typeof parsedRoles === 'object' ? parsedRoles[houseId] : null;
+          const memberKey = `${sectionKey}|staff|${index}`;
+          const rolesForMember = Array.isArray(houseEntry?.staffRoles?.[memberKey]) ? houseEntry.staffRoles[memberKey] : [];
+          isHouseManager = rolesForMember.includes('house_manager');
+        } catch {
+          isHouseManager = false;
+        }
+
         const details = [
           staff.staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff',
           staff.postLevel ? `${staff.postLevel} · ${staff.rank || staffPostLevelRanks[staff.postLevel] || ''}` : '',
