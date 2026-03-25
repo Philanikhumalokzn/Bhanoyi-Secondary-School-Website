@@ -6805,7 +6805,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
           teamNameById(fixture.homeId),
           teamNameById(fixture.awayId)
         ];
-        row.height = 18;
+        row.height = 36;
 
         row.eachCell((cell, columnIndex) => {
           cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${deepBlue}` } };
