@@ -49,7 +49,7 @@ export const fallbackSiteContent = {
           title: 'Follow Live Match Events',
           sectionKey: 'sports_match_log',
           body: 'Follow football or netball match events as they happen, with score updates shown live.',
-          sport: 'Football / Netball',
+          sport: 'Netball/Football',
           competition: 'Inter-House Friendly',
           venue: 'Main Field',
           houseOptions: [
@@ -83,7 +83,7 @@ export const fallbackSiteContent = {
           title: 'View Season Fixtures',
           sectionKey: 'sports_fixture_creator',
           body: 'View the full home-and-away round-robin schedule for the selected houses.',
-          sport: 'Football / Netball',
+          sport: 'Netball/Football',
           competition: 'Inter-House League',
           venue: 'Main Field',
           houseOptions: [

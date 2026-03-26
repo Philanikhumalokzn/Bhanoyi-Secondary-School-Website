@@ -70,10 +70,10 @@ const resolveSupabaseConfig = () => {
   return { url, anonKey };
 };
 
-export const requireAdminRequest = async (request, response) => {
+export const requireSupabaseUserRequest = async (request, response) => {
   const token = extractBearerToken(request);
   if (!token) {
-    sendJson(response, 401, { error: 'Admin authentication required.' });
+    sendJson(response, 401, { error: 'Authentication required.' });
     return null;
   }
 
@@ -94,17 +94,34 @@ export const requireAdminRequest = async (request, response) => {
       }
     });
   } catch {
-    sendJson(response, 502, { error: 'Could not validate admin session.' });
+    sendJson(response, 502, { error: 'Could not validate session.' });
     return null;
   }
 
   if (!upstream.ok) {
-    sendJson(response, 401, { error: 'Invalid or expired admin session.' });
+    sendJson(response, 401, { error: 'Invalid or expired session.' });
     return null;
   }
 
   const userPayload = await upstream.json().catch(() => ({}));
   const email = normalize(userPayload?.email).toLowerCase();
+  if (!email) {
+    sendJson(response, 401, { error: 'Authenticated account is missing an email address.' });
+    return null;
+  }
+
+  return {
+    email,
+    token,
+    user: userPayload
+  };
+};
+
+export const requireAdminRequest = async (request, response) => {
+  const authenticatedUser = await requireSupabaseUserRequest(request, response);
+  if (!authenticatedUser) return null;
+
+  const { email } = authenticatedUser;
   const allowedEmails = configuredAdminEmails();
 
   if (!allowedEmails.length) {

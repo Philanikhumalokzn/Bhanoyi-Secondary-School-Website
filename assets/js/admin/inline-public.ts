@@ -14,6 +14,8 @@ import {
   uploadNewsImage,
   signOut
 } from './api';
+import { persistEnrollmentStore, syncEnrollmentStoreFromRemote } from '../content/enrollment.persistence.js';
+import { exportProfessionalWorkbook } from '../content/professional-export.js';
 
 type AnnouncementRecord = {
   id: string;
@@ -80,6 +82,480 @@ const showStatus = (message: string) => {
   status.className = 'inline-admin-status';
   status.textContent = message;
   document.body.appendChild(status);
+};
+
+const ADMIN_DEVICE_SESSION_KEY = 'bhanoyi.inlineAdminDeviceSessionId';
+const ADMIN_SESSION_HEARTBEAT_MS = 45_000;
+
+type InlineAdminSessionRow = {
+  sessionId: string;
+  email: string;
+  userAgent: string;
+  createdAt: number;
+  lastSeenAt: number;
+  revokedAt: number;
+};
+
+type InlineSessionResponse = {
+  ok?: boolean;
+  error?: string;
+  sessions?: InlineAdminSessionRow[];
+  revoked?: boolean;
+};
+
+type InlineAdminApiError = Error & {
+  status?: number;
+};
+
+const createInlineAdminDeviceSessionId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `adm-${crypto.randomUUID()}`;
+  }
+  return `adm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const getInlineAdminDeviceSessionId = () => {
+  const existing = String(localStorage.getItem(ADMIN_DEVICE_SESSION_KEY) || '').trim();
+  if (existing) return existing;
+  const next = createInlineAdminDeviceSessionId();
+  localStorage.setItem(ADMIN_DEVICE_SESSION_KEY, next);
+  return next;
+};
+
+const toShortDateTime = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return 'Unknown';
+  return new Date(value).toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const getSessionAccessToken = (session: unknown) => {
+  if (!session || typeof session !== 'object') return '';
+  const token = (session as { access_token?: unknown }).access_token;
+  return typeof token === 'string' ? token.trim() : '';
+};
+
+const createInlineAdminApiError = (message: string, status: number): InlineAdminApiError => {
+  const error = new Error(message) as InlineAdminApiError;
+  error.status = status;
+  return error;
+};
+
+const isInlineAdminAuthError = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+  const status = Number((error as InlineAdminApiError).status);
+  return status === 401;
+};
+
+const parseInlineAdminSessionResponse = async (response: Response): Promise<InlineSessionResponse> => {
+  const parsed = (await response.json().catch(() => ({}))) as InlineSessionResponse;
+  if (!response.ok) {
+    throw createInlineAdminApiError(String(parsed?.error || 'Admin session request failed.'), response.status);
+  }
+  return parsed;
+};
+
+const callInlineAdminSessionsApi = async (
+  method: 'GET' | 'POST' | 'DELETE',
+  accessToken: string,
+  payload: Record<string, unknown> | null,
+  adminPin = ''
+) => {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`
+  };
+
+  if (adminPin) {
+    headers['x-admin-extra-pin'] = adminPin;
+  }
+
+  if (payload) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch('/api/admin-sessions', {
+    method,
+    headers,
+    body: payload ? JSON.stringify(payload) : undefined
+  });
+
+  return parseInlineAdminSessionResponse(response);
+};
+
+const initAdminSessionSideMenu = (session: unknown) => {
+  const initialAccessToken = getSessionAccessToken(session);
+  if (!initialAccessToken) {
+    showStatus('Admin session is missing an access token. Please sign in again.');
+    return;
+  }
+
+  const deviceSessionId = getInlineAdminDeviceSessionId();
+  const currentEmail = String((session as { user?: { email?: string | null } }).user?.email || '')
+    .trim()
+    .toLowerCase();
+
+  let pollTimer: number | null = null;
+
+  const readCurrentAccessToken = async () => {
+    const latestSession = await getSession().catch(() => null);
+    return getSessionAccessToken(latestSession || session);
+  };
+
+  const setLocalStatus = (message: string) => {
+    showStatus(message);
+  };
+
+  const forceLogoutCurrentDevice = async (message: string) => {
+    try {
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer);
+      }
+      await signOut();
+    } catch {
+      // no-op
+    }
+    showStatus(message);
+    window.location.href = 'admin.html';
+  };
+
+  const requestLogoutReason = (isCurrentDevice: boolean) =>
+    new Promise<string | null>((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'news-overlay';
+      overlay.innerHTML = `
+        <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Confirm device logout">
+          <h3>Confirm device logout</h3>
+          <p>${isCurrentDevice ? 'You are about to log out this device.' : 'You are about to log out another admin device.'}</p>
+          <form class="news-overlay-form" data-admin-logout-reason-form>
+            <label>
+              Reason (required)
+              <textarea rows="3" maxlength="240" data-admin-logout-reason-input placeholder="Example: device lost, finished editing, security cleanup" required></textarea>
+            </label>
+            <div class="news-overlay-actions">
+              <button type="button" data-admin-logout-reason-cancel>Cancel</button>
+              <button type="submit" class="btn btn-secondary">Confirm logout</button>
+            </div>
+          </form>
+        </div>
+      `;
+
+      lockOverlayBackgroundScroll();
+      document.body.appendChild(overlay);
+
+      const form = overlay.querySelector('[data-admin-logout-reason-form]') as HTMLFormElement | null;
+      const reasonInput = overlay.querySelector('[data-admin-logout-reason-input]') as HTMLTextAreaElement | null;
+      const cancelButton = overlay.querySelector('[data-admin-logout-reason-cancel]') as HTMLButtonElement | null;
+
+      const close = (reason: string | null) => {
+        overlay.remove();
+        unlockOverlayBackgroundScroll();
+        resolve(reason);
+      };
+
+      if (!form || !reasonInput || !cancelButton) {
+        close(null);
+        return;
+      }
+
+      reasonInput.focus();
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const reason = reasonInput.value.trim();
+        if (!reason) {
+          reasonInput.focus();
+          return;
+        }
+        close(reason);
+      });
+
+      cancelButton.addEventListener('click', () => {
+        close(null);
+      });
+
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+    });
+
+  const renderSessionList = (sessions: InlineAdminSessionRow[], listNode: HTMLElement) => {
+    if (!sessions.length) {
+      listNode.innerHTML = '<li class="inline-admin-session-empty">No active admin devices found.</li>';
+      return;
+    }
+
+    listNode.innerHTML = sessions
+      .map((entry) => {
+        const safeAgent = (entry.userAgent || 'Unknown browser').replace(/</g, '&lt;');
+        const isCurrent = entry.sessionId === deviceSessionId;
+        return `
+          <li class="inline-admin-session-item">
+            <div>
+              <strong>${isCurrent ? 'This device' : 'Admin device'}</strong>
+              <p>${safeAgent}</p>
+              <p>Last active: ${toShortDateTime(entry.lastSeenAt)}</p>
+            </div>
+            <button type="button" class="btn btn-secondary" data-admin-session-logout-one="${entry.sessionId}">
+              Log out ${isCurrent ? 'this' : 'device'}
+            </button>
+          </li>
+        `;
+      })
+      .join('');
+  };
+
+  const openSessionControlModal = () => {
+    const existing = document.querySelector('[data-admin-session-control-modal="true"]') as HTMLElement | null;
+    if (existing) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'news-overlay';
+    overlay.setAttribute('data-admin-session-control-modal', 'true');
+    overlay.innerHTML = `
+      <div class="news-overlay-panel" role="dialog" aria-modal="true" aria-label="Admin session control">
+        <h3>Admin Session Control</h3>
+        <p>View devices logged in with admin credentials and revoke access.</p>
+        <div class="inline-admin-side-menu-pin" data-admin-session-pin-block>
+          <label>
+            Extra Admin PIN
+            <input type="password" data-admin-session-pin-input autocomplete="one-time-code" placeholder="Enter extra PIN" />
+          </label>
+          <button type="button" class="btn btn-secondary" data-admin-session-unlock>Unlock</button>
+        </div>
+        <p class="inline-admin-side-menu-status" data-admin-session-status aria-live="polite"></p>
+        <div class="inline-admin-side-menu-content is-hidden" data-admin-session-content>
+          <div class="inline-admin-side-menu-actions">
+            <button type="button" class="btn btn-secondary" data-admin-session-refresh>Refresh list</button>
+            <button type="button" class="btn btn-secondary" data-admin-session-logout-all>Log out all devices</button>
+          </div>
+          <ul class="inline-admin-session-list" data-admin-session-list></ul>
+        </div>
+        <div class="news-overlay-actions">
+          <button type="button" data-admin-session-close>Close</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    lockOverlayBackgroundScroll();
+
+    const pinInput = overlay.querySelector('[data-admin-session-pin-input]') as HTMLInputElement | null;
+    const unlockButton = overlay.querySelector('[data-admin-session-unlock]') as HTMLButtonElement | null;
+    const statusNode = overlay.querySelector('[data-admin-session-status]') as HTMLElement | null;
+    const contentNode = overlay.querySelector('[data-admin-session-content]') as HTMLElement | null;
+    const listNode = overlay.querySelector('[data-admin-session-list]') as HTMLElement | null;
+    const refreshButton = overlay.querySelector('[data-admin-session-refresh]') as HTMLButtonElement | null;
+    const logoutAllButton = overlay.querySelector('[data-admin-session-logout-all]') as HTMLButtonElement | null;
+    const closeButton = overlay.querySelector('[data-admin-session-close]') as HTMLButtonElement | null;
+
+    if (!pinInput || !unlockButton || !statusNode || !contentNode || !listNode || !refreshButton || !logoutAllButton) {
+      overlay.remove();
+      unlockOverlayBackgroundScroll();
+      return;
+    }
+
+    let unlockedPin = '';
+
+    const setModalStatus = (message: string) => {
+      statusNode.textContent = message;
+    };
+
+    const closeModal = () => {
+      overlay.remove();
+      unlockOverlayBackgroundScroll();
+    };
+
+    const loadSessions = async () => {
+      if (!unlockedPin) {
+        setModalStatus('Enter the extra admin PIN to unlock this menu.');
+        return;
+      }
+
+      try {
+        setModalStatus('Loading active admin devices...');
+        const accessToken = await readCurrentAccessToken();
+        if (!accessToken) {
+          throw createInlineAdminApiError('Admin session expired. Please sign in again.', 401);
+        }
+        const response = await callInlineAdminSessionsApi('GET', accessToken, null, unlockedPin);
+        const sessions = Array.isArray(response.sessions) ? response.sessions : [];
+        const visible = sessions.filter((entry) => String(entry.email || '').toLowerCase() === currentEmail);
+        renderSessionList(visible, listNode);
+        setModalStatus(`Loaded ${visible.length} active admin device${visible.length === 1 ? '' : 's'}.`);
+      } catch (error) {
+        if (isInlineAdminAuthError(error)) {
+          await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+          return;
+        }
+        setModalStatus(error instanceof Error ? error.message : 'Could not load admin devices.');
+      }
+    };
+
+    unlockButton.addEventListener('click', async () => {
+      const candidatePin = pinInput.value.trim();
+      if (!candidatePin) {
+        setModalStatus('Enter the extra admin PIN first.');
+        return;
+      }
+
+      try {
+        unlockButton.disabled = true;
+        unlockedPin = candidatePin;
+        contentNode.classList.remove('is-hidden');
+        await loadSessions();
+        pinInput.value = '';
+      } finally {
+        unlockButton.disabled = false;
+      }
+    });
+
+    refreshButton.addEventListener('click', async () => {
+      await loadSessions();
+    });
+
+    logoutAllButton.addEventListener('click', async () => {
+      if (!unlockedPin) {
+        setModalStatus('Unlock with the extra admin PIN first.');
+        return;
+      }
+
+      const confirmed = window.confirm('Log out all active admin devices, including this one?');
+      if (!confirmed) return;
+
+      try {
+        logoutAllButton.disabled = true;
+        const accessToken = await readCurrentAccessToken();
+        if (!accessToken) {
+          throw createInlineAdminApiError('Admin session expired. Please sign in again.', 401);
+        }
+        await callInlineAdminSessionsApi('DELETE', accessToken, { scope: 'all' }, unlockedPin);
+        await forceLogoutCurrentDevice('All admin devices were logged out.');
+      } catch (error) {
+        if (isInlineAdminAuthError(error)) {
+          await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+          return;
+        }
+        setModalStatus(error instanceof Error ? error.message : 'Could not log out all devices.');
+      } finally {
+        logoutAllButton.disabled = false;
+      }
+    });
+
+    listNode.addEventListener('click', async (event) => {
+      const target = event.target as HTMLElement;
+      const button = target.closest('button[data-admin-session-logout-one]') as HTMLButtonElement | null;
+      if (!button) return;
+
+      const targetSessionId = String(button.dataset.adminSessionLogoutOne || '').trim();
+      if (!targetSessionId || !unlockedPin) return;
+
+      const isCurrentDevice = targetSessionId === deviceSessionId;
+      const reason = await requestLogoutReason(isCurrentDevice);
+      if (!reason) return;
+
+      try {
+        button.disabled = true;
+        const accessToken = await readCurrentAccessToken();
+        if (!accessToken) {
+          throw createInlineAdminApiError('Admin session expired. Please sign in again.', 401);
+        }
+        await callInlineAdminSessionsApi(
+          'DELETE',
+          accessToken,
+          {
+            scope: 'one',
+            sessionId: targetSessionId,
+            reason
+          },
+          unlockedPin
+        );
+
+        if (targetSessionId === deviceSessionId) {
+          await forceLogoutCurrentDevice('This device was logged out from admin session control.');
+          return;
+        }
+
+        setModalStatus('Selected admin device was logged out.');
+        await loadSessions();
+      } catch (error) {
+        if (isInlineAdminAuthError(error)) {
+          await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+          return;
+        }
+        setModalStatus(error instanceof Error ? error.message : 'Could not log out selected device.');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    closeButton?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) {
+        closeModal();
+      }
+    });
+  };
+
+  const sendHeartbeat = async () => {
+    try {
+      const accessToken = await readCurrentAccessToken();
+      if (!accessToken) {
+        await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+        return;
+      }
+
+      const response = await callInlineAdminSessionsApi(
+        'POST',
+        accessToken,
+        {
+          action: 'heartbeat',
+          sessionId: deviceSessionId,
+          userAgent: navigator.userAgent || 'Unknown browser'
+        },
+        ''
+      );
+
+      if (response.revoked) {
+        await forceLogoutCurrentDevice('This device was logged out from the admin session control panel.');
+      }
+    } catch (error) {
+      if (isInlineAdminAuthError(error)) {
+        await forceLogoutCurrentDevice('Admin session expired. Please sign in again.');
+      }
+    }
+  };
+
+  const footerHost =
+    (document.querySelector('.footer-admin-tools') as HTMLElement | null) ||
+    (document.querySelector('.site-footer .footer-bottom') as HTMLElement | null) ||
+    (document.querySelector('.site-footer .container') as HTMLElement | null);
+
+  const actionHost = footerHost || document.body;
+  const existingButton = actionHost.querySelector('[data-admin-session-control-open="true"]') as HTMLButtonElement | null;
+  if (!existingButton) {
+    const triggerButton = document.createElement('button');
+    triggerButton.type = 'button';
+    triggerButton.className = 'btn btn-secondary';
+    triggerButton.dataset.adminSessionControlOpen = 'true';
+    triggerButton.textContent = 'Admin Session Control';
+    triggerButton.addEventListener('click', () => {
+      openSessionControlModal();
+    });
+    actionHost.appendChild(triggerButton);
+  }
+
+  setLocalStatus('Admin session control is available in the footer button.');
+
+  void sendHeartbeat();
+  pollTimer = window.setInterval(() => {
+    void sendHeartbeat();
+  }, ADMIN_SESSION_HEARTBEAT_MS);
 };
 
 let overlayScrollLockCount = 0;
@@ -3408,7 +3884,10 @@ const wireSportsHouseManagerInline = () => {
     { label: 'Black', value: '#111827' },
     { label: 'Grey', value: '#475569' }
   ];
+  const enrollmentSectionKey = 'enrollment_manager';
+  const enrollmentStorageKey = `bhanoyi.enrollmentClasses.${enrollmentSectionKey}`;
   const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
+  const learnerSurnameNameMigrationFlag = 'bhanoyi.migrations.learnerSurnameName.v1';
 
   const normalizeHouseColor = (value: unknown, fallback = '#64748b') => {
     const raw = String(value || '').trim();
@@ -3416,6 +3895,21 @@ const wireSportsHouseManagerInline = () => {
       return raw.toLowerCase();
     }
     return fallback;
+  };
+
+  const resolveHouseColorLabel = (value: unknown) => {
+    const normalizedColor = normalizeHouseColor(value, '#64748b');
+    const exactClassicColor = CLASSIC_HOUSE_COLOR_OPTIONS.find((entry) => normalizeHouseColor(entry.value, '') === normalizedColor);
+    if (exactClassicColor) {
+      return exactClassicColor.label;
+    }
+
+    const shortHex = /^#([0-9a-f]{3})$/i;
+    const shortMatch = normalizedColor.match(shortHex);
+    if (shortMatch) {
+      return `#${shortMatch[1].toUpperCase()}`;
+    }
+    return normalizedColor.toUpperCase();
   };
 
   const normalizeHouseId = (value: unknown, fallback: string) => {
@@ -3432,6 +3926,16 @@ const wireSportsHouseManagerInline = () => {
       .replace(/\s+/g, ' ')
       .slice(0, maxLength);
 
+  const escapeHtmlText = (value: unknown) =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const escapeHtmlAttribute = (value: unknown) => escapeHtmlText(value).replace(/`/g, '&#96;');
+
   const parseConfig = (raw: string) => {
     try {
       const parsed = JSON.parse((raw || '{}').trim());
@@ -3445,6 +3949,12 @@ const wireSportsHouseManagerInline = () => {
     houseOptions?: Array<{ id: string; name: string; color?: string }>;
     leftTeamId?: string;
     rightTeamId?: string;
+    disciplinePolicy?: {
+      straightRedSuspensionMatches?: number;
+      secondYellowSuspensionMatches?: number;
+      yellowAccumulationThreshold?: number;
+      yellowAccumulationSuspensionMatches?: number;
+    };
   };
   const fixtureConfig = parseConfig(fixtureShell?.dataset.fixtureConfig || '{}') as {
     houseOptions?: Array<{ id: string; name: string; color?: string }>;
@@ -3504,14 +4014,102 @@ const wireSportsHouseManagerInline = () => {
   }
   controlsHost.appendChild(controls);
 
+  // If a staff session exists and the staff member is a house manager, expose a "Manage my house" quick action.
+  try {
+    const staffSessionEmail = String(sessionStorage.getItem(staffSessionKey) || '').trim().toLowerCase();
+    if (staffSessionEmail) {
+      const enrollmentRaw = localStorage.getItem(enrollmentStorageKey);
+      if (enrollmentRaw) {
+        try {
+          const parsed = JSON.parse(enrollmentRaw) as Record<string, unknown>;
+          const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
+          const managedHouseIds: string[] = [];
+
+          // build helper to compute default staff email as in staff-bootstrap
+          const normalizeLoginToken = (value: unknown) =>
+            String(value ?? '')
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '');
+
+          const buildDefaultCredentialsEmail = (entry: Record<string, unknown>) => {
+            const surnameToken = normalizeLoginToken(entry.surname).slice(0, 16) || 'staff';
+            const firstToken = normalizeLoginToken(entry.firstName);
+            const initialsToken = normalizeLoginToken(entry.initials);
+            const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
+            const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+            return `${handle}@bhanoyi.education`;
+          };
+
+          // find matching staff member keys
+          const membersByKey = new Map<string, Record<string, unknown>>();
+          staffMembers.forEach((entry, idx) => {
+            if (!entry || typeof entry !== 'object') return;
+            const loginEmail = String((entry as Record<string, unknown>).loginEmail || (entry as Record<string, unknown>).staffEmail || buildDefaultCredentialsEmail(entry as Record<string, unknown>)).trim().toLowerCase();
+            const storageKey = `${enrollmentStorageKey}|staff|${idx}`;
+            if (loginEmail === staffSessionEmail) {
+              membersByKey.set(storageKey, entry as Record<string, unknown>);
+            }
+          });
+
+          if (membersByKey.size) {
+            const roleStore = loadHouseRoleAssignments();
+            Object.entries(roleStore).forEach(([houseId, entry]) => {
+              Object.entries(entry.staffRoles || {}).forEach(([memberKey, roles]) => {
+                if (membersByKey.has(memberKey) && Array.isArray(roles) && roles.includes('house_manager')) {
+                  managedHouseIds.push(houseId);
+                }
+              });
+            });
+          }
+
+          if (managedHouseIds.length) {
+            const quickWrap = document.createElement('div');
+            quickWrap.className = 'inline-house-quick-actions';
+            managedHouseIds.forEach((hid) => {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'btn btn-primary';
+              btn.textContent = 'Manage My House';
+              btn.addEventListener('click', () => {
+                void openHouseModal(hid);
+              });
+              quickWrap.appendChild(btn);
+            });
+            controls.insertBefore(quickWrap, controls.firstChild);
+          }
+        } catch {
+          // ignore parsing errors
+        }
+      }
+    }
+  } catch {
+    // ignore any session access errors
+  }
+
   const readState = {
     options: baseOptions,
     leftTeamId: String(matchConfig.leftTeamId || baseOptions[0]?.id || '').trim(),
-    rightTeamId: String(matchConfig.rightTeamId || baseOptions[1]?.id || baseOptions[0]?.id || '').trim()
+    rightTeamId: String(matchConfig.rightTeamId || baseOptions[1]?.id || baseOptions[0]?.id || '').trim(),
+    disciplinePolicy: {
+      straightRedSuspensionMatches: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.straightRedSuspensionMatches) || 1)),
+      secondYellowSuspensionMatches: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.secondYellowSuspensionMatches) || 1)),
+      yellowAccumulationThreshold: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.yellowAccumulationThreshold) || 2)),
+      yellowAccumulationSuspensionMatches: Math.max(1, Math.floor(Number(matchConfig.disciplinePolicy?.yellowAccumulationSuspensionMatches) || 1))
+    }
   };
 
   let editorWrap: HTMLElement | null = null;
-  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement }> = [];
+  let editors: Array<{ id: string; nameInput: HTMLInputElement; colorInput: HTMLSelectElement; summaryNode: HTMLElement }> = [];
+  let overallStatsNode: HTMLElement | null = null;
+  let disciplinePolicyEditor:
+    | {
+        straightRedInput: HTMLInputElement;
+        secondYellowInput: HTMLInputElement;
+        yellowThresholdInput: HTMLInputElement;
+        yellowSuspensionInput: HTMLInputElement;
+      }
+    | null = null;
 
   type EnrollmentStoreRoot = Record<string, unknown>;
   type EnrollmentLearnerRecord = {
@@ -3537,9 +4135,41 @@ const wireSportsHouseManagerInline = () => {
   };
   type HouseSportsAssignments = Record<string, Record<string, string[]>>;
   type SportsRuleStore = Record<string, SportEligibility>;
+  type HouseRoleAssignments = Record<
+    string,
+    {
+      staffRoles: Record<string, string[]>;
+      learnerCaptaincies: Record<string, string[]>;
+    }
+  >;
+
+  type HouseSummarySnapshot = {
+    learners: number;
+    teachers: number;
+    sportingAssigned: number;
+    houseManagers: number;
+    captaincies: number;
+  };
+
+  type AllocationSnapshot = {
+    totalLearners: number;
+    allocatedLearners: number;
+    unallocatedLearners: number;
+    totalTeachers: number;
+    unallocatedRecords: EnrollmentLearnerRecord[];
+    byHouse: Record<string, HouseSummarySnapshot>;
+  };
 
   const sportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
   const sportsRuleStorageKey = 'bhanoyi.houseSportsCodeRules';
+  const houseRoleStorageKey = 'bhanoyi.houseRoleAssignments';
+  const baseStaffRoleOptions = [
+    { id: 'house_manager', label: 'House Manager' },
+    { id: 'house_secretary', label: 'House Secretary' },
+    { id: 'house_discipline_coordinator', label: 'Discipline Coordinator' },
+    { id: 'house_welfare_coordinator', label: 'Welfare Coordinator' },
+    { id: 'house_activities_coordinator', label: 'Activities Coordinator' }
+  ];
 
   const toSportCodeId = (value: string, index: number) => {
     const normalized = normalizeText(value, 80)
@@ -3651,25 +4281,103 @@ const wireSportsHouseManagerInline = () => {
     localStorage.setItem(sportsAssignmentStorageKey, JSON.stringify(store));
   };
 
+  const loadHouseRoleAssignments = (): HouseRoleAssignments => {
+    try {
+      const raw = localStorage.getItem(houseRoleStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+      const normalized: HouseRoleAssignments = {};
+      Object.entries(parsed as Record<string, unknown>).forEach(([houseId, value]) => {
+        const normalizedHouseId = normalizeHouseId(houseId, '');
+        if (!normalizedHouseId || !value || typeof value !== 'object' || Array.isArray(value)) return;
+
+        const rawEntry = value as Record<string, unknown>;
+        const rawStaff = rawEntry.staffRoles;
+        const rawLearner = rawEntry.learnerCaptaincies;
+        const entry = {
+          staffRoles: {} as Record<string, string[]>,
+          learnerCaptaincies: {} as Record<string, string[]>
+        };
+
+        if (rawStaff && typeof rawStaff === 'object' && !Array.isArray(rawStaff)) {
+          Object.entries(rawStaff as Record<string, unknown>).forEach(([memberKey, roleIds]) => {
+            const normalizedValues = Array.isArray(roleIds)
+              ? Array.from(
+                  new Set(
+                    roleIds
+                      .map((roleId) => normalizeHouseId(roleId, ''))
+                      .filter((roleId) => Boolean(roleId))
+                  )
+                )
+              : [];
+            if (!normalizedValues.length) return;
+            entry.staffRoles[memberKey] = normalizedValues;
+          });
+        }
+
+        if (rawLearner && typeof rawLearner === 'object' && !Array.isArray(rawLearner)) {
+          Object.entries(rawLearner as Record<string, unknown>).forEach(([memberKey, codeIds]) => {
+            const normalizedValues = Array.isArray(codeIds)
+              ? Array.from(
+                  new Set(
+                    codeIds
+                      .map((codeId) => normalizeHouseId(codeId, ''))
+                      .filter((codeId) => Boolean(codeId))
+                  )
+                )
+              : [];
+            if (!normalizedValues.length) return;
+            entry.learnerCaptaincies[memberKey] = normalizedValues;
+          });
+        }
+
+        normalized[normalizedHouseId] = entry;
+      });
+
+      return normalized;
+    } catch {
+      return {};
+    }
+  };
+
+  const persistHouseRoleAssignments = (store: HouseRoleAssignments) => {
+    localStorage.setItem(houseRoleStorageKey, JSON.stringify(store));
+  };
+
   const houseModal = document.createElement('div');
   houseModal.className = 'inline-house-members-modal is-hidden';
   houseModal.innerHTML = `
     <div class="inline-house-members-backdrop" data-house-members-close="true"></div>
-    <article class="panel inline-house-members-panel" role="dialog" aria-modal="true" aria-label="Manage house members">
+    <article class="panel inline-house-members-panel" data-house-members-panel role="dialog" aria-modal="true" aria-label="Manage house members">
       <div class="inline-house-members-head">
         <h3 data-house-members-title>Manage House</h3>
-        <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-members-export="true">Export house list</button>
+          <button type="button" class="btn btn-secondary" data-house-members-executive-form-export="true">Export executive form</button>
+          <button type="button" class="btn btn-secondary" data-house-members-close="true">Close</button>
+        </div>
       </div>
       <p class="inline-house-members-meta" data-house-members-meta></p>
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <div class="inline-house-members-overview" data-house-members-overview></div>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="search_filter">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Search and Filter Members
         </button>
         <div class="sports-workflow-body" data-house-members-body>
           <div class="inline-house-members-filter-grid">
             <label>
-              Search learner
+              Search people
               <input type="search" placeholder="Name, admission, class" data-house-members-search />
+            </label>
+            <label>
+              Sort by
+              <select data-house-members-sort>
+                <option value="surname_asc">Surname (A–Z)</option>
+                <option value="surname_desc">Surname (Z–A)</option>
+              </select>
             </label>
             <label>
               Gender
@@ -3692,7 +4400,7 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </section>
 
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="sport_rules">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Sporting Code Rules
         </button>
@@ -3702,7 +4410,26 @@ const wireSportsHouseManagerInline = () => {
         </div>
       </section>
 
-      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section>
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="roles_leadership">
+        <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
+          House Roles and Leadership (Admin)
+        </button>
+        <div class="sports-workflow-body" data-house-members-body>
+          <p class="inline-house-members-meta">Assign staff leadership roles and learner captains by sporting code.</p>
+          <div class="inline-house-role-grid">
+            <div class="inline-house-role-panel">
+              <h4>Staff Roles</h4>
+              <div class="inline-house-role-list" data-house-role-staff-list></div>
+            </div>
+            <div class="inline-house-role-panel">
+              <h4>Learner Captains</h4>
+              <div class="inline-house-role-list" data-house-role-learner-list></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sports-workflow-step is-collapsed inline-house-members-section" data-house-members-section data-house-members-section-key="current_members">
         <button type="button" class="sports-workflow-toggle" data-house-members-toggle aria-expanded="false">
           Current Members
         </button>
@@ -3734,40 +4461,158 @@ const wireSportsHouseManagerInline = () => {
 
   const houseModalTitle = houseModal.querySelector('[data-house-members-title]');
   const houseModalMeta = houseModal.querySelector('[data-house-members-meta]');
+  const houseModalPanel = houseModal.querySelector('[data-house-members-panel]');
+  const houseModalOverview = houseModal.querySelector('[data-house-members-overview]');
   const houseModalList = houseModal.querySelector('[data-house-members-list]');
   const houseModalSearch = houseModal.querySelector('[data-house-members-search]');
+  const houseModalSort = houseModal.querySelector('[data-house-members-sort]');
   const houseModalGenderFilter = houseModal.querySelector('[data-house-members-gender-filter]');
   const houseModalSportFilter = houseModal.querySelector('[data-house-members-sport-filter]');
   const houseModalRuleList = houseModal.querySelector('[data-house-sport-rules]');
+  const houseRoleStaffList = houseModal.querySelector('[data-house-role-staff-list]');
+  const houseRoleLearnerList = houseModal.querySelector('[data-house-role-learner-list]');
   const houseModalBulkSportSelect = houseModal.querySelector('[data-house-members-bulk-sport]');
   const houseModalAssignSportButton = houseModal.querySelector('[data-house-members-assign-sport]');
   const houseModalRemoveSportButton = houseModal.querySelector('[data-house-members-remove-sport]');
   const houseModalPullSelect = houseModal.querySelector('[data-house-members-pull-select]');
   const houseModalPullButton = houseModal.querySelector('[data-house-members-pull]');
+  const houseModalExportButton = houseModal.querySelector('[data-house-members-export="true"]');
+  const houseModalExecutiveFormExportButton = houseModal.querySelector('[data-house-members-executive-form-export="true"]');
   const houseModalCloseButtons = Array.from(houseModal.querySelectorAll('[data-house-members-close="true"]'));
 
   if (
     !(houseModalTitle instanceof HTMLElement) ||
     !(houseModalMeta instanceof HTMLElement) ||
+    !(houseModalPanel instanceof HTMLElement) ||
+    !(houseModalOverview instanceof HTMLElement) ||
     !(houseModalList instanceof HTMLElement) ||
     !(houseModalSearch instanceof HTMLInputElement) ||
+    !(houseModalSort instanceof HTMLSelectElement) ||
     !(houseModalGenderFilter instanceof HTMLSelectElement) ||
     !(houseModalSportFilter instanceof HTMLSelectElement) ||
     !(houseModalRuleList instanceof HTMLElement) ||
+    !(houseRoleStaffList instanceof HTMLElement) ||
+    !(houseRoleLearnerList instanceof HTMLElement) ||
     !(houseModalBulkSportSelect instanceof HTMLSelectElement) ||
     !(houseModalAssignSportButton instanceof HTMLButtonElement) ||
     !(houseModalRemoveSportButton instanceof HTMLButtonElement) ||
     !(houseModalPullSelect instanceof HTMLSelectElement) ||
-    !(houseModalPullButton instanceof HTMLButtonElement)
+    !(houseModalPullButton instanceof HTMLButtonElement) ||
+    !(houseModalExportButton instanceof HTMLButtonElement) ||
+    !(houseModalExecutiveFormExportButton instanceof HTMLButtonElement)
   ) {
     return;
   }
 
   let activeHouseId = '';
   let memberSearchValue = '';
+  let memberSortValue = 'surname_asc';
   let memberGenderFilterValue = 'all';
   let memberSportFilterValue = 'all';
+  let unallocatedSearchValue = '';
+  let unallocatedSortValue: 'surname_asc' | 'surname_desc' | 'class_asc' | 'class_desc' = 'surname_asc';
+  let isRenderingHouseMembersModal = false;
   let selectedMemberKeys = new Set<string>();
+
+  const unallocatedOverlay = document.createElement('div');
+  unallocatedOverlay.className = 'inline-house-unallocated-modal is-hidden';
+  unallocatedOverlay.innerHTML = `
+    <div class="inline-house-unallocated-backdrop" data-house-unallocated-close="true"></div>
+    <article class="panel inline-house-unallocated-panel" role="dialog" aria-modal="true" aria-label="Manage unallocated learners">
+      <div class="inline-house-unallocated-head">
+        <h3>Unallocated Learners</h3>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-unallocated-auto="true">Auto-allocate randomly</button>
+          <button type="button" class="btn btn-secondary" data-house-unallocated-close="true">Close</button>
+        </div>
+      </div>
+      <p class="inline-house-members-meta" data-house-unallocated-meta></p>
+      <div class="inline-house-unallocated-controls">
+        <label>
+          Search
+          <input type="search" data-house-unallocated-search placeholder="Search by surname, name, class, or admission no." autocomplete="off" />
+        </label>
+        <label>
+          Sort
+          <select data-house-unallocated-sort>
+            <option value="surname_asc">Surname (A–Z)</option>
+            <option value="surname_desc">Surname (Z–A)</option>
+            <option value="class_asc">Class (Low–High)</option>
+            <option value="class_desc">Class (High–Low)</option>
+          </select>
+        </label>
+      </div>
+      <div class="inline-house-unallocated-list" data-house-unallocated-list></div>
+    </article>
+  `;
+  document.body.appendChild(unallocatedOverlay);
+
+  const unallocatedMeta = unallocatedOverlay.querySelector('[data-house-unallocated-meta]');
+  const unallocatedSearchInput = unallocatedOverlay.querySelector('[data-house-unallocated-search]');
+  const unallocatedSortSelect = unallocatedOverlay.querySelector('[data-house-unallocated-sort]');
+  const unallocatedList = unallocatedOverlay.querySelector('[data-house-unallocated-list]');
+  const unallocatedAutoButton = unallocatedOverlay.querySelector('[data-house-unallocated-auto="true"]');
+  const unallocatedCloseButtons = Array.from(unallocatedOverlay.querySelectorAll('[data-house-unallocated-close="true"]'));
+
+  if (
+    !(unallocatedMeta instanceof HTMLElement) ||
+    !(unallocatedSearchInput instanceof HTMLInputElement) ||
+    !(unallocatedSortSelect instanceof HTMLSelectElement) ||
+    !(unallocatedList instanceof HTMLElement) ||
+    !(unallocatedAutoButton instanceof HTMLButtonElement)
+  ) {
+    return;
+  }
+
+  const allLearnersOverlay = document.createElement('div');
+  allLearnersOverlay.className = 'inline-house-unallocated-modal is-hidden';
+  allLearnersOverlay.innerHTML = `
+    <div class="inline-house-unallocated-backdrop" data-house-total-learners-close="true"></div>
+    <article class="panel inline-house-unallocated-panel" role="dialog" aria-modal="true" aria-label="Manage all learners">
+      <div class="inline-house-unallocated-head">
+        <h3>All Learners</h3>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-total-learners-close="true">Close</button>
+        </div>
+      </div>
+      <p class="inline-house-members-meta" data-house-total-learners-meta></p>
+      <div class="inline-house-unallocated-list" data-house-total-learners-list></div>
+    </article>
+  `;
+  document.body.appendChild(allLearnersOverlay);
+
+  const allTeachersOverlay = document.createElement('div');
+  allTeachersOverlay.className = 'inline-house-unallocated-modal is-hidden';
+  allTeachersOverlay.innerHTML = `
+    <div class="inline-house-unallocated-backdrop" data-house-total-teachers-close="true"></div>
+    <article class="panel inline-house-unallocated-panel" role="dialog" aria-modal="true" aria-label="Manage all teachers">
+      <div class="inline-house-unallocated-head">
+        <h3>All Teachers</h3>
+        <div class="inline-house-members-head-actions">
+          <button type="button" class="btn btn-secondary" data-house-total-teachers-close="true">Close</button>
+        </div>
+      </div>
+      <p class="inline-house-members-meta" data-house-total-teachers-meta></p>
+      <div class="inline-house-unallocated-list" data-house-total-teachers-list></div>
+    </article>
+  `;
+  document.body.appendChild(allTeachersOverlay);
+
+  const allLearnersMeta = allLearnersOverlay.querySelector('[data-house-total-learners-meta]');
+  const allLearnersList = allLearnersOverlay.querySelector('[data-house-total-learners-list]');
+  const allLearnersCloseButtons = Array.from(allLearnersOverlay.querySelectorAll('[data-house-total-learners-close="true"]'));
+  const allTeachersMeta = allTeachersOverlay.querySelector('[data-house-total-teachers-meta]');
+  const allTeachersList = allTeachersOverlay.querySelector('[data-house-total-teachers-list]');
+  const allTeachersCloseButtons = Array.from(allTeachersOverlay.querySelectorAll('[data-house-total-teachers-close="true"]'));
+
+  if (
+    !(allLearnersMeta instanceof HTMLElement) ||
+    !(allLearnersList instanceof HTMLElement) ||
+    !(allTeachersMeta instanceof HTMLElement) ||
+    !(allTeachersList instanceof HTMLElement)
+  ) {
+    return;
+  }
 
   const getExpandedHouseSectionMaxHeight = (body: HTMLElement) => {
     return `${Math.max(0, body.scrollHeight)}px`;
@@ -3779,12 +4624,16 @@ const wireSportsHouseManagerInline = () => {
       const toggle = sectionNode.querySelector('[data-house-members-toggle]');
       const body = sectionNode.querySelector('[data-house-members-body]');
       if (!(toggle instanceof HTMLButtonElement) || !(body instanceof HTMLElement)) return null;
-      return { sectionNode, toggle, body };
+      const sectionKey = normalizeHouseId(sectionNode.dataset.houseMembersSectionKey || '', '');
+      return { sectionNode, toggle, body, sectionKey };
     })
-    .filter((entry): entry is { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement } => Boolean(entry));
+    .filter(
+      (entry): entry is { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement; sectionKey: string } =>
+        Boolean(entry)
+    );
 
   const setHouseSectionExpanded = (
-    entry: { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement },
+    entry: { sectionNode: HTMLElement; toggle: HTMLButtonElement; body: HTMLElement; sectionKey: string },
     expanded: boolean
   ) => {
     entry.sectionNode.classList.toggle('is-expanded', expanded);
@@ -3807,6 +4656,13 @@ const wireSportsHouseManagerInline = () => {
     houseSections.forEach((entry) => {
       setHouseSectionExpanded(entry, false);
     });
+  };
+
+  const expandHouseSection = (sectionKey: string) => {
+    if (!sectionKey) return;
+    const target = houseSections.find((entry) => entry.sectionKey === sectionKey);
+    if (!target) return;
+    setHouseSectionExpanded(target, true);
   };
 
   const refreshExpandedHouseSectionHeights = () => {
@@ -3868,20 +4724,155 @@ const wireSportsHouseManagerInline = () => {
   };
 
   const resolveStaffDisplayName = (staffRef: Record<string, unknown>) => {
-    const override = normalizeText(staffRef.displayNameOverride || staffRef.displayName || '', 120);
-    if (override) return override;
-
-    const title = normalizeText(staffRef.title || '', 20);
-    const initials = normalizeStaffInitials(staffRef.initials || inferInitialsFromFirstName(staffRef.firstName || ''));
     const surname = normalizeText(staffRef.surname || '', 80);
-    const formatted = [title, initials, surname].filter(Boolean).join(' ').trim();
+    const firstName = normalizeText(staffRef.firstName || '', 80);
+    const formatted = [surname, firstName].filter(Boolean).join(' ').trim();
     if (formatted) return formatted;
 
     const fallbackName = normalizeText(staffRef.name || '', 120);
-    if (fallbackName) return fallbackName;
+    if (fallbackName) {
+      const parts = fallbackName.split(/\s+/).filter(Boolean);
+      if (parts.length <= 1) return fallbackName;
+      const legacySurname = parts[parts.length - 1];
+      const legacyNames = parts.slice(0, -1).join(' ');
+      return [legacySurname, legacyNames].filter(Boolean).join(' ').trim();
+    }
 
-    return normalizeText(staffRef.firstName || '', 80);
+    return 'Staff';
   };
+
+  const normalizeStaffType = (value: unknown) =>
+    String(value || '')
+      .trim()
+      .toLowerCase() === 'non_teaching_staff'
+      ? 'non_teaching_staff'
+      : 'teaching_staff';
+
+  const staffTitleTokens = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'coach', 'mx']);
+  const normalizeToken = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\./g, '');
+  const resolveSurnameSortKey = (displayName: unknown, options?: { staffLike?: boolean }) => {
+    const normalizedName = normalizeText(displayName, 160).toLowerCase();
+    if (!normalizedName) return '';
+    const parts = normalizedName.split(/\s+/).filter(Boolean);
+    if (!parts.length) return '';
+    if (options?.staffLike && staffTitleTokens.has(normalizeToken(parts[0]))) {
+      parts.shift();
+    }
+    if (!parts.length) return normalizedName;
+    const surname = parts[0];
+    const rest = parts.slice(1).join(' ');
+    return `${surname} ${rest}`.trim();
+  };
+
+  const comparePeopleBySurname = (
+    leftName: unknown,
+    rightName: unknown,
+    options?: { staffLeft?: boolean; staffRight?: boolean; descending?: boolean }
+  ) => {
+    const leftKey = resolveSurnameSortKey(leftName, { staffLike: Boolean(options?.staffLeft) });
+    const rightKey = resolveSurnameSortKey(rightName, { staffLike: Boolean(options?.staffRight) });
+    const comparison = leftKey.localeCompare(rightKey);
+    return options?.descending ? -comparison : comparison;
+  };
+
+  const resolveLearnerDisplayName = (learnerRef: Record<string, unknown>) => {
+    const surname = normalizeText(learnerRef.surname || '', 80);
+    const firstName = normalizeText(learnerRef.firstName || learnerRef.givenName || '', 80);
+    if (surname || firstName) {
+      return [surname, firstName].filter(Boolean).join(' ').trim();
+    }
+
+    const rawName = normalizeText(learnerRef.name || '', 120);
+    if (!rawName) return '';
+
+    if (rawName.includes(',')) {
+      const [surnamePart, ...rest] = rawName
+        .split(',')
+        .map((entry) => normalizeText(entry, 120))
+        .filter(Boolean);
+      const cleanRest = rest
+        .join(' ')
+        .split(/\s+/)
+        .filter((token) => !staffTitleTokens.has(normalizeToken(token)))
+        .join(' ');
+      return [surnamePart, cleanRest].filter(Boolean).join(' ').trim();
+    }
+
+    const parts = rawName
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((token) => !staffTitleTokens.has(normalizeToken(token)));
+    if (parts.length <= 1) return rawName;
+    const detectedSurname = parts[parts.length - 1];
+    const detectedNames = parts.slice(0, -1).join(' ');
+    return [detectedSurname, detectedNames].filter(Boolean).join(' ').trim();
+  };
+
+  const runLearnerSurnameNameMigration = () => {
+    if (localStorage.getItem(learnerSurnameNameMigrationFlag) === 'done') {
+      return;
+    }
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(enrollmentStoragePrefix)) continue;
+
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+
+        const rootStore = parsed as Record<string, unknown>;
+        const classProfilesByGrade = rootStore.classProfilesByGrade;
+        if (!classProfilesByGrade || typeof classProfilesByGrade !== 'object' || Array.isArray(classProfilesByGrade)) {
+          continue;
+        }
+
+        Object.entries(classProfilesByGrade as Record<string, unknown>).forEach(([, gradeValue]) => {
+          if (!gradeValue || typeof gradeValue !== 'object' || Array.isArray(gradeValue)) return;
+
+          Object.entries(gradeValue as Record<string, unknown>).forEach(([, classProfile]) => {
+            if (!classProfile || typeof classProfile !== 'object' || Array.isArray(classProfile)) return;
+            const profileObject = classProfile as Record<string, unknown>;
+            const learners = Array.isArray(profileObject.learners) ? profileObject.learners : [];
+
+            const normalizedLearners = learners
+              .map((entry) => {
+                if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+                const learnerRef = entry as Record<string, unknown>;
+                const normalizedName = resolveLearnerDisplayName(learnerRef);
+                return {
+                  ...learnerRef,
+                  name: normalizedName || normalizeText(learnerRef.name || '', 120)
+                };
+              })
+              .sort((left, right) => {
+                const leftName =
+                  left && typeof left === 'object' && !Array.isArray(left)
+                    ? resolveLearnerDisplayName(left as Record<string, unknown>)
+                    : '';
+                const rightName =
+                  right && typeof right === 'object' && !Array.isArray(right)
+                    ? resolveLearnerDisplayName(right as Record<string, unknown>)
+                    : '';
+                return leftName.localeCompare(rightName);
+              });
+
+            profileObject.learners = normalizedLearners;
+          });
+        });
+
+        localStorage.setItem(key, JSON.stringify(parsed));
+      } catch {
+        continue;
+      }
+    }
+
+    localStorage.setItem(learnerSurnameNameMigrationFlag, 'done');
+  };
+
+  runLearnerSurnameNameMigration();
 
   const collectEnrollmentLearners = (): EnrollmentLearnerRecord[] => {
     const records: EnrollmentLearnerRecord[] = [];
@@ -3914,7 +4905,7 @@ const wireSportsHouseManagerInline = () => {
             learners.forEach((learnerEntry, learnerIndex) => {
               if (!learnerEntry || typeof learnerEntry !== 'object' || Array.isArray(learnerEntry)) return;
               const learnerRef = learnerEntry as Record<string, unknown>;
-              const displayName = normalizeText(learnerRef.name, 120);
+              const displayName = resolveLearnerDisplayName(learnerRef);
               if (!displayName) return;
 
               const admissionNo = normalizeText(learnerRef.admissionNo || learnerRef.admission, 40);
@@ -3947,7 +4938,9 @@ const wireSportsHouseManagerInline = () => {
 
           const postLevel = normalizeText(staffRef.postLevel, 10).toUpperCase();
           const rank = normalizeText(staffRef.rank, 60);
-          const roleLabel = postLevel || rank ? `Teacher · ${[postLevel, rank].filter(Boolean).join(' ')}` : 'Teacher';
+          const staffType = normalizeStaffType(staffRef.staffType || staffRef.roleType);
+          const rolePrefix = staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff';
+          const roleLabel = postLevel || rank ? `${rolePrefix} · ${[postLevel, rank].filter(Boolean).join(' ')}` : rolePrefix;
           const staffNumber = normalizeText(staffRef.staffNumber || '', 40);
           const gender = normalizeGender(staffRef.gender || '');
           const houseId = normalizeEnrollmentHouseId(staffRef.houseId || staffRef.house);
@@ -3985,8 +4978,497 @@ const wireSportsHouseManagerInline = () => {
       const firstRecord = records.find((record) => record.storageKey === storageKey);
       if (!firstRecord) return;
       localStorage.setItem(storageKey, JSON.stringify(firstRecord.rootStore));
+      if (storageKey === enrollmentStorageKey) {
+        void persistEnrollmentStore(enrollmentSectionKey, enrollmentStorageKey, firstRecord.rootStore);
+      }
     });
   };
+
+  const buildAllocationSnapshot = (): AllocationSnapshot => {
+    const emptyByHouse = readState.options.reduce<Record<string, HouseSummarySnapshot>>((accumulator, house) => {
+      accumulator[house.id] = {
+        learners: 0,
+        teachers: 0,
+        sportingAssigned: 0,
+        houseManagers: 0,
+        captaincies: 0
+      };
+      return accumulator;
+    }, {});
+
+    try {
+      const records = collectEnrollmentLearners();
+      const learners = records.filter((record) => record.memberType === 'learner');
+      const teachers = records.filter((record) => record.memberType === 'teacher');
+      const allowedHouseIds = new Set(readState.options.map((entry) => entry.id));
+      const unallocatedRecords = learners.filter((record) => !record.houseId || !allowedHouseIds.has(record.houseId));
+      const assignmentStore = loadHouseSportsAssignments();
+      const roleStore = loadHouseRoleAssignments();
+
+      const byHouse = readState.options.reduce<Record<string, HouseSummarySnapshot>>((accumulator, house) => {
+        const houseLearners = learners.filter((record) => record.houseId === house.id);
+        const houseTeachers = teachers.filter((record) => record.houseId === house.id);
+        const houseAssignments = assignmentStore[house.id] || {};
+        const roleEntry = roleStore[house.id] || { staffRoles: {}, learnerCaptaincies: {} };
+        const sportingAssigned = houseLearners.filter(
+          (record) => Array.isArray(houseAssignments[record.key]) && houseAssignments[record.key].length
+        ).length;
+        const houseManagers = Object.values(roleEntry.staffRoles).filter(
+          (roles) => Array.isArray(roles) && roles.includes('house_manager')
+        ).length;
+        const captaincies = Object.keys(roleEntry.learnerCaptaincies).length;
+
+        accumulator[house.id] = {
+          learners: houseLearners.length,
+          teachers: houseTeachers.length,
+          sportingAssigned,
+          houseManagers,
+          captaincies
+        };
+        return accumulator;
+      }, {});
+
+      return {
+        totalLearners: learners.length,
+        allocatedLearners: learners.length - unallocatedRecords.length,
+        unallocatedLearners: unallocatedRecords.length,
+        totalTeachers: teachers.length,
+        unallocatedRecords,
+        byHouse
+      };
+    } catch {
+      return {
+        totalLearners: 0,
+        allocatedLearners: 0,
+        unallocatedLearners: 0,
+        totalTeachers: 0,
+        unallocatedRecords: [],
+        byHouse: emptyByHouse
+      };
+    }
+  };
+
+  const renderHouseEditorSummaries = () => {
+    if (!editors.length) return;
+    const snapshot = buildAllocationSnapshot();
+
+    editors.forEach((entry) => {
+      const house = readState.options.find((option) => option.id === entry.id);
+      const metrics = snapshot.byHouse[entry.id] || {
+        learners: 0,
+        teachers: 0,
+        sportingAssigned: 0,
+        houseManagers: 0,
+        captaincies: 0
+      };
+      const color = normalizeHouseColor(entry.colorInput.value || house?.color || '', '#64748b');
+      const colorLabel = resolveHouseColorLabel(color);
+      entry.summaryNode.innerHTML = `
+        <p class="inline-house-summary-title">
+          <span class="enrollment-house-avatar" style="--house-color:${color};"></span>
+          <strong>${escapeHtmlText(normalizeText(entry.nameInput.value || house?.name || '', 80) || 'House')}</strong>
+        </p>
+        <p class="inline-house-summary-meta">Colour: ${escapeHtmlText(colorLabel)}</p>
+        <p class="inline-house-summary-meta">Learners: ${metrics.learners} · Teachers: ${metrics.teachers}</p>
+        <p class="inline-house-summary-meta">Sporting assigned: ${metrics.sportingAssigned} · Captains: ${metrics.captaincies}</p>
+        <p class="inline-house-summary-meta">House managers: ${metrics.houseManagers}</p>
+      `;
+    });
+  };
+
+  const renderOverallAllocationStats = () => {
+    if (!overallStatsNode) return;
+    const snapshot = buildAllocationSnapshot();
+    overallStatsNode.innerHTML = `
+      <span class="inline-house-stat-chip">Allocated learners: <strong>${snapshot.allocatedLearners}</strong></span>
+      <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-unallocated="true">Unallocated learners: <strong>${snapshot.unallocatedLearners}</strong></button>
+      <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-total-learners="true">Total learners: <strong>${snapshot.totalLearners}</strong></button>
+      <button type="button" class="inline-house-stat-chip inline-house-stat-chip-action" data-house-open-total-teachers="true">Total teachers: <strong>${snapshot.totalTeachers}</strong></button>
+    `;
+
+    const openUnallocatedButton = overallStatsNode.querySelector('[data-house-open-unallocated="true"]');
+    if (openUnallocatedButton instanceof HTMLButtonElement) {
+      openUnallocatedButton.addEventListener('click', () => {
+        renderUnallocatedOverlay();
+        unallocatedOverlay.classList.remove('is-hidden');
+      });
+    }
+
+    const openTotalLearnersButton = overallStatsNode.querySelector('[data-house-open-total-learners="true"]');
+    if (openTotalLearnersButton instanceof HTMLButtonElement) {
+      openTotalLearnersButton.addEventListener('click', () => {
+        renderAllLearnersOverlay();
+        allLearnersOverlay.classList.remove('is-hidden');
+      });
+    }
+
+    const openTotalTeachersButton = overallStatsNode.querySelector('[data-house-open-total-teachers="true"]');
+    if (openTotalTeachersButton instanceof HTMLButtonElement) {
+      openTotalTeachersButton.addEventListener('click', () => {
+        renderAllTeachersOverlay();
+        allTeachersOverlay.classList.remove('is-hidden');
+      });
+    }
+  };
+
+  const closeUnallocatedOverlay = () => {
+    unallocatedOverlay.classList.add('is-hidden');
+  };
+
+  const closeAllLearnersOverlay = () => {
+    allLearnersOverlay.classList.add('is-hidden');
+  };
+
+  const closeAllTeachersOverlay = () => {
+    allTeachersOverlay.classList.add('is-hidden');
+  };
+
+  const resolveHouseLabelById = (houseId: string) => {
+    if (!houseId) return 'Unassigned';
+    return readState.options.find((entry) => entry.id === houseId)?.name || 'Unassigned';
+  };
+
+  const renderAllLearnersOverlay = () => {
+    const learners = collectEnrollmentLearners()
+      .filter((record) => record.memberType === 'learner')
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName));
+
+    allLearnersMeta.textContent = `${learners.length} learner${learners.length === 1 ? '' : 's'} available for house assignment management.`;
+
+    if (!learners.length) {
+      allLearnersList.innerHTML = '<p class="inline-house-members-empty">No learners found.</p>';
+      return;
+    }
+
+    allLearnersList.innerHTML = learners
+      .map((record) => {
+        const classLabel = resolveClassLabel(record);
+        const currentHouse = resolveHouseLabelById(record.houseId);
+        return `
+          <div class="inline-house-unallocated-item" data-house-total-learner-key="${escapeHtmlAttribute(record.key)}">
+            <div class="inline-house-unallocated-main">
+              <p class="inline-house-unallocated-name">${escapeHtmlText(record.displayName)}</p>
+              <p class="inline-house-unallocated-meta">${escapeHtmlText(classLabel)}${record.admissionNo ? ` · Adm: ${escapeHtmlText(record.admissionNo)}` : ''} · House: ${escapeHtmlText(currentHouse)}</p>
+            </div>
+            <div class="inline-house-unallocated-actions">
+              <select data-house-total-learner-target="${escapeHtmlAttribute(record.key)}">
+                ${readState.options
+                  .map((house) => `<option value="${escapeHtmlAttribute(house.id)}" ${record.houseId === house.id ? 'selected' : ''}>${escapeHtmlText(house.name)}</option>`)
+                  .join('')}
+              </select>
+              <button type="button" class="btn btn-primary" data-house-total-learner-assign="${escapeHtmlAttribute(record.key)}">Save</button>
+              <button type="button" class="btn btn-secondary" data-house-total-learner-clear="${escapeHtmlAttribute(record.key)}">Remove house</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const renderAllTeachersOverlay = () => {
+    const teachers = collectEnrollmentLearners()
+      .filter((record) => record.memberType === 'teacher')
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName, { staffLeft: true, staffRight: true }));
+
+    allTeachersMeta.textContent = `${teachers.length} teacher${teachers.length === 1 ? '' : 's'} available for house assignment management.`;
+
+    if (!teachers.length) {
+      allTeachersList.innerHTML = '<p class="inline-house-members-empty">No teachers found.</p>';
+      return;
+    }
+
+    allTeachersList.innerHTML = teachers
+      .map((record) => {
+        const currentHouse = resolveHouseLabelById(record.houseId);
+        return `
+          <div class="inline-house-unallocated-item" data-house-total-teacher-key="${escapeHtmlAttribute(record.key)}">
+            <div class="inline-house-unallocated-main">
+              <p class="inline-house-unallocated-name">${escapeHtmlText(record.displayName)}</p>
+              <p class="inline-house-unallocated-meta">${escapeHtmlText(record.roleLabel || 'Teacher')}${record.admissionNo ? ` · Staff No: ${escapeHtmlText(record.admissionNo)}` : ''}${record.gender ? ` · ${escapeHtmlText(record.gender)}` : ''} · House: ${escapeHtmlText(currentHouse)}</p>
+            </div>
+            <div class="inline-house-unallocated-actions">
+              <select data-house-total-teacher-target="${escapeHtmlAttribute(record.key)}">
+                ${readState.options
+                  .map((house) => `<option value="${escapeHtmlAttribute(house.id)}" ${record.houseId === house.id ? 'selected' : ''}>${escapeHtmlText(house.name)}</option>`)
+                  .join('')}
+              </select>
+              <button type="button" class="btn btn-primary" data-house-total-teacher-assign="${escapeHtmlAttribute(record.key)}">Save</button>
+              <button type="button" class="btn btn-secondary" data-house-total-teacher-clear="${escapeHtmlAttribute(record.key)}">Remove house</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const resolveClassLabel = (record: EnrollmentLearnerRecord) =>
+    record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'Class not set';
+
+  const resolveGradeRank = (record: EnrollmentLearnerRecord) => {
+    const normalized = normalizeText(record.grade, 20);
+    const numeric = Number.parseInt(normalized.replace(/[^0-9]/g, ''), 10);
+    return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+  };
+
+  const resolveClassRank = (record: EnrollmentLearnerRecord) => {
+    const gradeRank = resolveGradeRank(record);
+    const letterRank = normalizeText(record.classLetter, 20)
+      .toUpperCase()
+      .charCodeAt(0);
+    const safeLetterRank = Number.isFinite(letterRank) ? letterRank : Number.POSITIVE_INFINITY;
+    return { gradeRank, letterRank: safeLetterRank };
+  };
+
+  const getFilteredAndSortedUnallocatedRecords = (records: EnrollmentLearnerRecord[]) => {
+    const normalizedSearch = unallocatedSearchValue.trim().toLowerCase();
+    const filtered = records.filter((record) => {
+      if (!normalizedSearch) return true;
+      const classLabel = resolveClassLabel(record);
+      const haystack = [record.displayName, record.admissionNo, classLabel, record.gender]
+        .map((value) => normalizeText(value, 160).toLowerCase())
+        .join(' ');
+      return haystack.includes(normalizedSearch);
+    });
+
+    filtered.sort((left, right) => {
+      if (unallocatedSortValue === 'surname_desc') {
+        return comparePeopleBySurname(left.displayName, right.displayName, { descending: true });
+      }
+      if (unallocatedSortValue === 'class_asc' || unallocatedSortValue === 'class_desc') {
+        const leftRank = resolveClassRank(left);
+        const rightRank = resolveClassRank(right);
+        const gradeDiff = leftRank.gradeRank - rightRank.gradeRank;
+        if (gradeDiff !== 0) {
+          return unallocatedSortValue === 'class_desc' ? -gradeDiff : gradeDiff;
+        }
+        const letterDiff = leftRank.letterRank - rightRank.letterRank;
+        if (letterDiff !== 0) {
+          return unallocatedSortValue === 'class_desc' ? -letterDiff : letterDiff;
+        }
+      }
+      return comparePeopleBySurname(left.displayName, right.displayName, {
+        descending: unallocatedSortValue === 'class_desc' ? false : unallocatedSortValue === 'surname_desc'
+      });
+    });
+
+    return filtered;
+  };
+
+  const renderUnallocatedOverlay = () => {
+    const snapshot = buildAllocationSnapshot();
+    if (unallocatedSearchInput.value !== unallocatedSearchValue) {
+      unallocatedSearchInput.value = unallocatedSearchValue;
+    }
+    if (unallocatedSortSelect.value !== unallocatedSortValue) {
+      unallocatedSortSelect.value = unallocatedSortValue;
+    }
+    const visibleRecords = getFilteredAndSortedUnallocatedRecords(snapshot.unallocatedRecords);
+    unallocatedMeta.textContent = `${snapshot.unallocatedLearners} learner${snapshot.unallocatedLearners === 1 ? '' : 's'} currently have no house allocation.${
+      visibleRecords.length !== snapshot.unallocatedRecords.length
+        ? ` Showing ${visibleRecords.length} result${visibleRecords.length === 1 ? '' : 's'}.`
+        : ''
+    }`;
+
+    if (!snapshot.unallocatedRecords.length) {
+      unallocatedList.innerHTML = '<p class="inline-house-members-empty">All learners are already allocated to houses.</p>';
+      return;
+    }
+
+    if (!visibleRecords.length) {
+      unallocatedList.innerHTML = '<p class="inline-house-members-empty">No unallocated learners match your search.</p>';
+      return;
+    }
+
+    const rows = visibleRecords
+      .map((record) => {
+        const classLabel = resolveClassLabel(record);
+        return `
+          <div class="inline-house-unallocated-item" data-house-unallocated-key="${escapeHtmlAttribute(record.key)}">
+            <div class="inline-house-unallocated-main">
+              <p class="inline-house-unallocated-name">${escapeHtmlText(record.displayName)}</p>
+              <p class="inline-house-unallocated-meta">${escapeHtmlText(classLabel)}${record.admissionNo ? ` · Adm: ${escapeHtmlText(record.admissionNo)}` : ''}${record.gender ? ` · ${escapeHtmlText(record.gender)}` : ''}</p>
+            </div>
+            <div class="inline-house-unallocated-actions">
+              <select data-house-unallocated-target="${escapeHtmlAttribute(record.key)}">
+                ${readState.options
+                  .map((house) => `<option value="${escapeHtmlAttribute(house.id)}">${escapeHtmlText(house.name)}</option>`)
+                  .join('')}
+              </select>
+              <button type="button" class="btn btn-primary" data-house-unallocated-assign="${escapeHtmlAttribute(record.key)}">Allocate</button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    unallocatedList.innerHTML = rows;
+  };
+
+  unallocatedCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeUnallocatedOverlay);
+  });
+
+  allLearnersCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeAllLearnersOverlay);
+  });
+
+  allTeachersCloseButtons.forEach((button) => {
+    button.addEventListener('click', closeAllTeachersOverlay);
+  });
+
+  unallocatedSearchInput.addEventListener('input', () => {
+    unallocatedSearchValue = unallocatedSearchInput.value;
+    renderUnallocatedOverlay();
+  });
+
+  unallocatedSortSelect.addEventListener('change', () => {
+    const nextValue = unallocatedSortSelect.value;
+    if (nextValue === 'surname_desc' || nextValue === 'class_asc' || nextValue === 'class_desc') {
+      unallocatedSortValue = nextValue;
+    } else {
+      unallocatedSortValue = 'surname_asc';
+    }
+    renderUnallocatedOverlay();
+  });
+
+  unallocatedAutoButton.addEventListener('click', () => {
+    const snapshot = buildAllocationSnapshot();
+    if (!snapshot.unallocatedRecords.length) {
+      showStatus('All learners are already allocated.');
+      return;
+    }
+
+    const candidateHouses = readState.options.map((entry) => entry.id).filter(Boolean);
+    if (!candidateHouses.length) {
+      showStatus('No house options available for allocation.');
+      return;
+    }
+
+    snapshot.unallocatedRecords.forEach((record) => {
+      const randomHouseId = candidateHouses[Math.floor(Math.random() * candidateHouses.length)];
+      record.learnerRef.houseId = randomHouseId;
+    });
+    persistEnrollmentRecords(snapshot.unallocatedRecords);
+    renderUnallocatedOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    showStatus(`Randomly allocated ${snapshot.unallocatedRecords.length} learner${snapshot.unallocatedRecords.length === 1 ? '' : 's'}.`);
+  });
+
+  unallocatedList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const assignButton = target.closest('[data-house-unallocated-assign]') as HTMLButtonElement | null;
+    if (!assignButton) return;
+
+    const memberKey = String(assignButton.dataset.houseUnallocatedAssign || '').trim();
+    if (!memberKey) return;
+
+    const row = assignButton.closest('[data-house-unallocated-key]') as HTMLElement | null;
+    if (!row) return;
+    const selector = row.querySelector('[data-house-unallocated-target]') as HTMLSelectElement | null;
+    if (!(selector instanceof HTMLSelectElement)) return;
+    const houseId = normalizeHouseId(selector.value, '');
+    if (!houseId) return;
+
+    const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'learner');
+    if (!targetRecord) return;
+    targetRecord.learnerRef.houseId = houseId;
+    persistEnrollmentRecords([targetRecord]);
+    renderUnallocatedOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    const houseName = readState.options.find((entry) => entry.id === houseId)?.name || 'selected house';
+    showStatus(`${targetRecord.displayName} allocated to ${houseName}.`);
+  });
+
+  allLearnersList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const assignButton = target.closest('[data-house-total-learner-assign]') as HTMLButtonElement | null;
+    if (assignButton) {
+      const memberKey = String(assignButton.dataset.houseTotalLearnerAssign || '').trim();
+      if (!memberKey) return;
+      const row = assignButton.closest('[data-house-total-learner-key]') as HTMLElement | null;
+      if (!row) return;
+      const selector = row.querySelector('[data-house-total-learner-target]') as HTMLSelectElement | null;
+      if (!(selector instanceof HTMLSelectElement)) return;
+      const houseId = normalizeHouseId(selector.value, '');
+      if (!houseId) return;
+
+      const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'learner');
+      if (!targetRecord) return;
+      targetRecord.learnerRef.houseId = houseId;
+      persistEnrollmentRecords([targetRecord]);
+      renderAllLearnersOverlay();
+      renderUnallocatedOverlay();
+      renderHouseEditorSummaries();
+      renderOverallAllocationStats();
+      renderHouseMembersModal();
+      showStatus(`${targetRecord.displayName} moved to ${resolveHouseLabelById(houseId)}.`);
+      return;
+    }
+
+    const clearButton = target.closest('[data-house-total-learner-clear]') as HTMLButtonElement | null;
+    if (!clearButton) return;
+    const memberKey = String(clearButton.dataset.houseTotalLearnerClear || '').trim();
+    if (!memberKey) return;
+    const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'learner');
+    if (!targetRecord) return;
+    targetRecord.learnerRef.houseId = '';
+    persistEnrollmentRecords([targetRecord]);
+    renderAllLearnersOverlay();
+    renderUnallocatedOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    showStatus(`${targetRecord.displayName} is now unassigned from houses.`);
+  });
+
+  allTeachersList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const assignButton = target.closest('[data-house-total-teacher-assign]') as HTMLButtonElement | null;
+    if (assignButton) {
+      const memberKey = String(assignButton.dataset.houseTotalTeacherAssign || '').trim();
+      if (!memberKey) return;
+      const row = assignButton.closest('[data-house-total-teacher-key]') as HTMLElement | null;
+      if (!row) return;
+      const selector = row.querySelector('[data-house-total-teacher-target]') as HTMLSelectElement | null;
+      if (!(selector instanceof HTMLSelectElement)) return;
+      const houseId = normalizeHouseId(selector.value, '');
+      if (!houseId) return;
+
+      const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'teacher');
+      if (!targetRecord) return;
+      targetRecord.learnerRef.houseId = houseId;
+      persistEnrollmentRecords([targetRecord]);
+      renderAllTeachersOverlay();
+      renderHouseEditorSummaries();
+      renderOverallAllocationStats();
+      renderHouseMembersModal();
+      showStatus(`${targetRecord.displayName} assigned to ${resolveHouseLabelById(houseId)}.`);
+      return;
+    }
+
+    const clearButton = target.closest('[data-house-total-teacher-clear]') as HTMLButtonElement | null;
+    if (!clearButton) return;
+    const memberKey = String(clearButton.dataset.houseTotalTeacherClear || '').trim();
+    if (!memberKey) return;
+    const targetRecord = collectEnrollmentLearners().find((record) => record.key === memberKey && record.memberType === 'teacher');
+    if (!targetRecord) return;
+    targetRecord.learnerRef.houseId = '';
+    persistEnrollmentRecords([targetRecord]);
+    renderAllTeachersOverlay();
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+    renderHouseMembersModal();
+    showStatus(`${targetRecord.displayName} is now unassigned from houses.`);
+  });
 
   const closeHouseModal = () => {
     houseModal.classList.add('is-hidden');
@@ -4042,6 +5524,9 @@ const wireSportsHouseManagerInline = () => {
   };
 
   const renderHouseMembersModal = () => {
+    if (isRenderingHouseMembersModal) return;
+    isRenderingHouseMembersModal = true;
+    try {
     if (!activeHouseId) return;
     const activeHouse = readState.options.find((entry) => entry.id === activeHouseId);
     if (!activeHouse) {
@@ -4074,14 +5559,58 @@ const wireSportsHouseManagerInline = () => {
 
     const filteredSelected = Array.from(selectedMemberKeys).filter((key) => validMemberKeys.has(key));
     selectedMemberKeys = new Set(filteredSelected);
+    const canManageHouseRoles = document.body.classList.contains('inline-admin-active');
+    const roleStore = loadHouseRoleAssignments();
+    const houseRoleEntry = roleStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
 
     const learnerCount = learnerMembers.length;
     const teacherCount = members.filter((record) => record.memberType === 'teacher').length;
+    const allocatedLearnerCount = learnerMembers.filter((record) => {
+      const assigned = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
+      return assigned.length > 0;
+    }).length;
+    const unassignedLearnerCount = Math.max(0, learnerCount - allocatedLearnerCount);
+    const staffLeadershipAssignments = Object.values(houseRoleEntry.staffRoles).reduce(
+      (count, roleIds) => count + (Array.isArray(roleIds) ? roleIds.length : 0),
+      0
+    );
+    const learnerCaptaincyAssignments = Object.values(houseRoleEntry.learnerCaptaincies).reduce(
+      (count, codeIds) => count + (Array.isArray(codeIds) ? codeIds.length : 0),
+      0
+    );
+    const houseColor = normalizeHouseColor(activeHouse.color, '#64748b');
 
-    houseModalTitle.textContent = `Manage ${activeHouse.name}`;
+    houseModalPanel.style.setProperty('--house-color', houseColor);
+    houseModalTitle.innerHTML = `
+      <span class="enrollment-house-avatar" style="--house-color:${houseColor};"></span>
+      <span>${escapeHtmlText(activeHouse.name)} House Members</span>
+    `;
     houseModalMeta.textContent = `${learnerCount} learner${learnerCount === 1 ? '' : 's'}, ${teacherCount} teacher${teacherCount === 1 ? '' : 's'} in this house. ${selectedMemberKeys.size} selected.`;
+    houseModalOverview.innerHTML = `
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Total Members</p>
+        <p class="inline-house-members-kpi-value">${members.length}</p>
+        <p class="inline-house-members-kpi-meta">${learnerCount} learners · ${teacherCount} teachers</p>
+      </article>
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Sporting Allocation</p>
+        <p class="inline-house-members-kpi-value">${allocatedLearnerCount}</p>
+        <p class="inline-house-members-kpi-meta">Assigned learners · ${unassignedLearnerCount} unassigned</p>
+      </article>
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Leadership</p>
+        <p class="inline-house-members-kpi-value">${staffLeadershipAssignments + learnerCaptaincyAssignments}</p>
+        <p class="inline-house-members-kpi-meta">${staffLeadershipAssignments} staff roles · ${learnerCaptaincyAssignments} captaincies</p>
+      </article>
+      <article class="inline-house-members-kpi">
+        <p class="inline-house-members-kpi-label">Selection</p>
+        <p class="inline-house-members-kpi-value">${selectedMemberKeys.size}</p>
+        <p class="inline-house-members-kpi-meta">Learners selected for bulk actions</p>
+      </article>
+    `;
 
     houseModalSearch.value = memberSearchValue;
+    houseModalSort.value = memberSortValue;
     houseModalGenderFilter.value = memberGenderFilterValue;
 
     const selectedSportFilter = memberSportFilterValue;
@@ -4144,7 +5673,161 @@ const wireSportsHouseManagerInline = () => {
       houseModalRuleList.appendChild(row);
     });
 
+    const staffRoleOptions = [
+      ...baseStaffRoleOptions,
+      ...sportCodes.map((entry) => ({ id: `coach_${entry.id}`, label: `Coach (${entry.title})` }))
+    ];
+
     const normalizedSearch = memberSearchValue.trim().toLowerCase();
+    const descendingSort = memberSortValue === 'surname_desc';
+    const matchesSearch = (record: EnrollmentLearnerRecord) => {
+      if (!normalizedSearch) return true;
+      const classLabel = record.grade ? `grade ${record.grade}${record.classLetter || ''}` : '';
+      const haystack = [record.displayName, record.admissionNo, record.gender, classLabel]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(normalizedSearch);
+    };
+
+    houseRoleStaffList.innerHTML = '';
+    const staffMembers = members
+      .filter((record) => record.memberType === 'teacher')
+      .filter(matchesSearch)
+      .sort((left, right) =>
+        comparePeopleBySurname(left.displayName, right.displayName, {
+          staffLeft: true,
+          staffRight: true,
+          descending: descendingSort
+        })
+      );
+    if (!staffMembers.length) {
+      const empty = document.createElement('p');
+      empty.className = 'inline-house-members-empty';
+      empty.textContent = 'No staff members assigned to this house yet.';
+      houseRoleStaffList.appendChild(empty);
+    } else {
+      staffMembers.forEach((record) => {
+        const row = document.createElement('div');
+        row.className = 'inline-house-role-item';
+
+        const title = document.createElement('p');
+        title.className = 'inline-house-role-item-title';
+        title.textContent = record.displayName;
+
+        const select = document.createElement('select');
+        select.multiple = true;
+        select.size = Math.min(8, Math.max(4, staffRoleOptions.length));
+        const selectedRoles = new Set(Array.isArray(houseRoleEntry.staffRoles[record.key]) ? houseRoleEntry.staffRoles[record.key] : []);
+        staffRoleOptions.forEach((optionValue) => {
+          const option = document.createElement('option');
+          option.value = optionValue.id;
+          option.textContent = optionValue.label;
+          option.selected = selectedRoles.has(optionValue.id);
+          select.appendChild(option);
+        });
+        select.disabled = !canManageHouseRoles;
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.className = 'btn btn-secondary';
+        saveButton.textContent = 'Save roles';
+        saveButton.disabled = !canManageHouseRoles;
+        saveButton.addEventListener('click', () => {
+          if (!canManageHouseRoles) return;
+          const selected = Array.from(select.selectedOptions)
+            .map((entry) => normalizeHouseId(entry.value, ''))
+            .filter((entry) => Boolean(entry));
+          const nextStore = loadHouseRoleAssignments();
+          const nextEntry = nextStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+          if (selected.length) {
+            nextEntry.staffRoles[record.key] = Array.from(new Set(selected));
+          } else {
+            delete nextEntry.staffRoles[record.key];
+          }
+          nextStore[activeHouse.id] = nextEntry;
+          persistHouseRoleAssignments(nextStore);
+          showStatus(`Updated staff roles for ${record.displayName}.`);
+          renderHouseMembersModal();
+        });
+
+        const actions = document.createElement('div');
+        actions.className = 'inline-house-members-actions';
+        actions.appendChild(saveButton);
+
+        row.appendChild(title);
+        row.appendChild(select);
+        row.appendChild(actions);
+        houseRoleStaffList.appendChild(row);
+      });
+    }
+
+    houseRoleLearnerList.innerHTML = '';
+    const searchableLearnerMembers = learnerMembers
+      .filter(matchesSearch)
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName, { descending: descendingSort }));
+    if (!searchableLearnerMembers.length) {
+      const empty = document.createElement('p');
+      empty.className = 'inline-house-members-empty';
+      empty.textContent = 'No learners assigned to this house yet.';
+      houseRoleLearnerList.appendChild(empty);
+    } else {
+      searchableLearnerMembers.forEach((record) => {
+        const row = document.createElement('div');
+        row.className = 'inline-house-role-item';
+
+        const title = document.createElement('p');
+        title.className = 'inline-house-role-item-title';
+        title.textContent = record.displayName;
+
+        const select = document.createElement('select');
+        select.multiple = true;
+        select.size = Math.min(8, Math.max(4, sportCodes.length || 4));
+        const selectedCodes = new Set(
+          Array.isArray(houseRoleEntry.learnerCaptaincies[record.key]) ? houseRoleEntry.learnerCaptaincies[record.key] : []
+        );
+        sportCodes.forEach((entry) => {
+          const option = document.createElement('option');
+          option.value = entry.id;
+          option.textContent = `Captain (${entry.title})`;
+          option.selected = selectedCodes.has(entry.id);
+          select.appendChild(option);
+        });
+        select.disabled = !canManageHouseRoles || !sportCodes.length;
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.className = 'btn btn-secondary';
+        saveButton.textContent = 'Save captaincies';
+        saveButton.disabled = !canManageHouseRoles || !sportCodes.length;
+        saveButton.addEventListener('click', () => {
+          if (!canManageHouseRoles) return;
+          const selected = Array.from(select.selectedOptions)
+            .map((entry) => normalizeHouseId(entry.value, ''))
+            .filter((entry) => Boolean(entry));
+          const nextStore = loadHouseRoleAssignments();
+          const nextEntry = nextStore[activeHouse.id] || { staffRoles: {}, learnerCaptaincies: {} };
+          if (selected.length) {
+            nextEntry.learnerCaptaincies[record.key] = Array.from(new Set(selected));
+          } else {
+            delete nextEntry.learnerCaptaincies[record.key];
+          }
+          nextStore[activeHouse.id] = nextEntry;
+          persistHouseRoleAssignments(nextStore);
+          showStatus(`Updated captaincies for ${record.displayName}.`);
+          renderHouseMembersModal();
+        });
+
+        const actions = document.createElement('div');
+        actions.className = 'inline-house-members-actions';
+        actions.appendChild(saveButton);
+
+        row.appendChild(title);
+        row.appendChild(select);
+        row.appendChild(actions);
+        houseRoleLearnerList.appendChild(row);
+      });
+    }
+
     const filteredMembers = members
       .map((record) => {
         const assignedCodeIds = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
@@ -4189,10 +5872,11 @@ const wireSportsHouseManagerInline = () => {
         return true;
       })
       .sort((left, right) => {
-        if (left.record.memberType !== right.record.memberType) {
-          return left.record.memberType === 'teacher' ? -1 : 1;
-        }
-        return left.record.displayName.localeCompare(right.record.displayName);
+        return comparePeopleBySurname(left.record.displayName, right.record.displayName, {
+          staffLeft: left.record.memberType === 'teacher',
+          staffRight: right.record.memberType === 'teacher',
+          descending: descendingSort
+        });
       });
 
     houseModalList.innerHTML = '';
@@ -4239,6 +5923,10 @@ const wireSportsHouseManagerInline = () => {
           if (record.admissionNo) details.push(`Adm: ${record.admissionNo}`);
           if (record.gender) details.push(record.gender);
           summary.textContent = `${record.displayName} · ${details.join(' · ')}`;
+
+          const typeBadge = document.createElement('span');
+          typeBadge.className = `inline-house-member-type-badge ${record.memberType === 'teacher' ? 'is-teacher' : 'is-learner'}`;
+          typeBadge.textContent = record.memberType === 'teacher' ? 'Staff' : 'Learner';
 
           const assignmentWrap = document.createElement('div');
           assignmentWrap.className = 'inline-house-member-codes';
@@ -4314,6 +6002,7 @@ const wireSportsHouseManagerInline = () => {
 
           const memberMain = document.createElement('div');
           memberMain.className = 'inline-house-member-main';
+          memberMain.appendChild(typeBadge);
           memberMain.appendChild(summary);
           memberMain.appendChild(assignmentWrap);
           memberMain.appendChild(quickAssign);
@@ -4353,7 +6042,8 @@ const wireSportsHouseManagerInline = () => {
 
     houseModalPullSelect.innerHTML = '';
     available
-      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      .filter(matchesSearch)
+      .sort((left, right) => comparePeopleBySurname(left.displayName, right.displayName, { descending: descendingSort }))
       .forEach((record) => {
         const option = document.createElement('option');
         option.value = record.key;
@@ -4365,13 +6055,183 @@ const wireSportsHouseManagerInline = () => {
 
     houseModalPullButton.disabled = !available.length;
 
+    renderHouseEditorSummaries();
+    renderOverallAllocationStats();
+
     requestAnimationFrame(() => {
       refreshExpandedHouseSectionHeights();
     });
+    } finally {
+      isRenderingHouseMembersModal = false;
+    }
+  };
+
+  const buildHouseExportRows = (houseId: string) => {
+    const activeHouse = readState.options.find((entry) => entry.id === houseId);
+    if (!activeHouse) {
+      return {
+        activeHouse: null,
+        rows: [] as Array<Record<string, string>>,
+        managementRows: [] as Array<Record<string, string>>
+      };
+    }
+
+    const sportCodes = loadSportingCodes();
+    const sportCodeById = new Map(sportCodes.map((entry) => [entry.id, entry]));
+    const assignmentStore = loadHouseSportsAssignments();
+    const houseAssignments = assignmentStore[activeHouse.id] || {};
+
+    const members = collectEnrollmentLearners()
+      .filter((record) => record.houseId === activeHouse.id)
+      .sort((left, right) => {
+        return comparePeopleBySurname(left.displayName, right.displayName, {
+          staffLeft: left.memberType === 'teacher',
+          staffRight: right.memberType === 'teacher'
+        });
+      });
+
+    const resolvePostLevelRank = (value: unknown) => {
+      const raw = normalizeText(value, 12).toUpperCase();
+      const parsed = Number.parseInt(raw.replace(/[^0-9]/g, ''), 10);
+      return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+    };
+
+    const resolveManagementDisplayName = (record: EnrollmentLearnerRecord) => {
+      const staffRef = record.learnerRef || {};
+      const title = normalizeText(staffRef.title, 20) || 'Mr.';
+      const surname =
+        normalizeText(staffRef.surname, 80) ||
+        normalizeText(record.displayName, 120).split(/\s+/).filter(Boolean)[0] ||
+        'Staff';
+      const initials = normalizeStaffInitials(staffRef.initials || '') || inferInitialsFromFirstName(staffRef.firstName || '');
+      return `${title} ${surname}${initials ? ` ${initials}` : ''}`.trim();
+    };
+
+    const managementMembers = members
+      .filter((record) => record.memberType !== 'learner')
+      .sort((left, right) => {
+        const leftRank = resolvePostLevelRank(left.learnerRef?.postLevel);
+        const rightRank = resolvePostLevelRank(right.learnerRef?.postLevel);
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return comparePeopleBySurname(resolveManagementDisplayName(left), resolveManagementDisplayName(right), {
+          staffLeft: true,
+          staffRight: true
+        });
+      });
+
+    const managementRows = managementMembers.map((record) => {
+      const staffRef = record.learnerRef || {};
+      const postLevel = normalizeText(staffRef.postLevel, 12).toUpperCase() || 'PL1';
+      const staffType = normalizeStaffType(staffRef.staffType || staffRef.roleType);
+      return {
+        role: staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff',
+        fullName: resolveManagementDisplayName(record),
+        identifier: record.admissionNo || '-',
+        postLevel,
+        gender: record.gender || 'Unspecified'
+      };
+    });
+
+    const rows = members
+      .filter((record) => record.memberType === 'learner')
+      .map((record) => {
+      const assignedCodeIds = Array.isArray(houseAssignments[record.key]) ? houseAssignments[record.key] : [];
+      const assignedCodes = assignedCodeIds
+        .map((codeId) => sportCodeById.get(codeId)?.title || '')
+        .filter((entry) => Boolean(entry));
+      const classLabel = record.grade ? `Grade ${record.grade}${record.classLetter || ''}` : 'N/A';
+      return {
+        role: 'Learner',
+        fullName: record.displayName,
+        identifier: record.admissionNo || '-',
+        gender: record.gender || 'Unspecified',
+        className: classLabel,
+        sportingCodes: assignedCodes.join(', ') || 'Unassigned'
+      };
+    });
+
+    return { activeHouse, rows, managementRows };
+  };
+
+  const buildHouseExecutiveFormRows = (houseId: string) => {
+    const activeHouse = readState.options.find((entry) => entry.id === houseId);
+    if (!activeHouse) {
+      return {
+        activeHouse: null,
+        rows: [] as Array<Record<string, string> & { _section?: string }>,
+        rolesCount: 0
+      };
+    }
+
+    const sportCodes = loadSportingCodes();
+    const staffRoleOptions = [
+      ...baseStaffRoleOptions,
+      ...sportCodes.map((entry) => ({ id: `coach_${entry.id}`, label: `Coach (${entry.title})` }))
+    ];
+
+    const rows: Array<Record<string, string> & { _section?: string }> = [];
+    let sectionNumber = 0;
+    const pushSection = (label: string) => {
+      sectionNumber += 1;
+      const sectionLabel = `${sectionNumber}. ${label}`;
+      rows.push({ section: sectionLabel, field: '', response: '', notes: '', _section: sectionLabel });
+    };
+    const pushField = (_section: string, field: string, notes = '') => {
+      rows.push({ field, response: '', notes });
+    };
+
+    pushSection('House Identity');
+    pushField('House Identity', 'Current house name', activeHouse.name);
+    pushField('House Identity', 'New inspirational house name (required)', 'Example: Determined, House Excel');
+    pushField('House Identity', 'House slogan / motto (optional)', 'Short, inspiring phrase');
+    pushField('House Identity', 'Short motivation for the new name', 'One or two short lines');
+
+    pushSection('Staff Executive Roles');
+    staffRoleOptions.forEach((entry) => {
+      pushField('Staff Executive Roles', entry.label, 'Write title, surname, initials');
+    });
+
+    pushSection('Sporting Captains');
+    sportCodes.forEach((entry) => {
+      pushField('Sporting Captains', `Captain (${entry.title})`, 'Learner full name');
+    });
+
+    return {
+      activeHouse,
+      rows,
+      rolesCount: staffRoleOptions.length + sportCodes.length
+    };
+  };
+
+  const resolveHouseManagerSignatureName = (houseId: string) => {
+    const roleStore = loadHouseRoleAssignments();
+    const houseRoleEntry = roleStore[houseId] || { staffRoles: {}, learnerCaptaincies: {} };
+    const staffByKey = new Map(
+      collectEnrollmentLearners()
+        .filter((record) => record.houseId === houseId && record.memberType === 'teacher')
+        .map((record) => [record.key, record.displayName])
+    );
+    const managerNames = Object.entries(houseRoleEntry.staffRoles)
+      .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
+      .map(([memberKey]) => staffByKey.get(memberKey) || '')
+      .filter((entry) => Boolean(entry));
+
+    return managerNames[0] || '____________________________';
+  };
+
+  const resolveSportsCoordinatorSignatureName = async () => {
+    const configuredName = String(await getSiteSetting('sports_committee_coordinator_name') || '').trim();
+    return configuredName || 'Mr. B.C Dlamini';
   };
 
   houseModalSearch.addEventListener('input', () => {
     memberSearchValue = houseModalSearch.value;
+    renderHouseMembersModal();
+  });
+
+  houseModalSort.addEventListener('change', () => {
+    memberSortValue = houseModalSort.value === 'surname_desc' ? 'surname_desc' : 'surname_asc';
+    houseModalSort.value = memberSortValue;
     renderHouseMembersModal();
   });
 
@@ -4497,13 +6357,229 @@ const wireSportsHouseManagerInline = () => {
     showStatus(`Pulled ${selectedRecords.length} learner${selectedRecords.length === 1 ? '' : 's'} into ${houseName}.`);
   });
 
-  const openHouseModal = (houseId: string) => {
+  houseModalExportButton.addEventListener('click', async () => {
+    if (!activeHouseId) {
+      showStatus('Open a house first, then export its list.');
+      return;
+    }
+
+    try {
+      const { activeHouse, rows, managementRows } = buildHouseExportRows(activeHouseId);
+      if (!activeHouse) {
+        showStatus('House details could not be resolved for export.');
+        return;
+      }
+
+      const safeHouseName = activeHouse.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'house';
+
+      const houseManagerSignatureName = resolveHouseManagerSignatureName(activeHouse.id);
+      const sportsCoordinatorSignatureName = await resolveSportsCoordinatorSignatureName();
+
+      await exportProfessionalWorkbook({
+        fileName: `${safeHouseName}-house-register.xlsx`,
+        sheetName: 'House Register',
+        title: 'Official House Register',
+        contextLine: `${activeHouse.name} • ${resolveHouseColorLabel(activeHouse.color)}`,
+        contextLineRich: [
+          {
+            text: `${activeHouse.name} `,
+            color: 'FFFFFF'
+          },
+          {
+            text: '• ',
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          },
+          {
+            text: resolveHouseColorLabel(activeHouse.color),
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          }
+        ],
+        metaLine: `Members: ${rows.length}`,
+        managementSection: {
+          title: `${activeHouse.name} Management (Non-learners)` ,
+          borderColor: normalizeHouseColor(activeHouse.color, '#64748b'),
+          rows: managementRows
+        },
+        columns: [
+          { header: 'Position', key: 'role', width: 12, align: 'center' },
+          { header: 'Full Name', key: 'fullName', width: 30, align: 'left' },
+          { header: 'Gender', key: 'gender', width: 14, align: 'center' },
+          { header: 'Class', key: 'className', width: 16, align: 'center' },
+          { header: 'Sporting Codes', key: 'sportingCodes', width: 40, align: 'left', wrapText: true }
+        ],
+        rows,
+        note: 'Notice: This register is generated from the current enrollment and house assignment records.',
+        signatures: [
+          {
+            anchor: 'left',
+            name: houseManagerSignatureName,
+            role: 'House Manager'
+          },
+          {
+            anchor: 'right',
+            name: sportsCoordinatorSignatureName,
+            role: 'Sports Committee Coordinator',
+            shiftColumns: 2
+          }
+        ]
+      });
+
+      showStatus(`${activeHouse.name} house list exported (.xlsx).`);
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to export house list.');
+    }
+  });
+
+  houseModalExecutiveFormExportButton.addEventListener('click', async () => {
+    if (!activeHouseId) {
+      showStatus('Open a house first, then export its executive form.');
+      return;
+    }
+
+    try {
+      const { activeHouse, rows, rolesCount } = buildHouseExecutiveFormRows(activeHouseId);
+      if (!activeHouse) {
+        showStatus('House details could not be resolved for export.');
+        return;
+      }
+
+      const safeHouseName = activeHouse.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'house';
+
+      const houseManagerSignatureName = resolveHouseManagerSignatureName(activeHouse.id);
+      const sportsCoordinatorSignatureName = await resolveSportsCoordinatorSignatureName();
+
+      await exportProfessionalWorkbook({
+        fileName: `${safeHouseName}-executive-election-form.xlsx`,
+        sheetName: 'Executive Form',
+        title: 'House Executive Election Form',
+        contextLine: `${activeHouse.name} • ${resolveHouseColorLabel(activeHouse.color)}`,
+        contextLineRich: [
+          {
+            text: `${activeHouse.name} `,
+            color: 'FFFFFF'
+          },
+          {
+            text: '• ',
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          },
+          {
+            text: resolveHouseColorLabel(activeHouse.color),
+            color: normalizeHouseColor(activeHouse.color, '#64748b').replace('#', '').toUpperCase()
+          }
+        ],
+        metaLine: `Positions to fill: ${rolesCount}`,
+        columns: [
+          { header: 'Field', key: 'field', width: 44, align: 'left', wrapText: true },
+          { header: 'House response', key: 'response', width: 42, align: 'left', wrapText: true },
+          { header: 'Notes', key: 'notes', width: 28, align: 'left', wrapText: true }
+        ],
+        rows,
+        note: 'Please keep entries clear and concise. Choose a values-based, inspirational house name and slogan/motto that reflect both school and house identity.',
+        footerSections: [
+          {
+            title: 'Inclusion note',
+            lines: [
+              'Include permanent non-teaching staff in the house executive where appropriate.'
+            ]
+          }
+        ],
+        signatures: [
+          {
+            anchor: 'left',
+            name: houseManagerSignatureName,
+            role: 'House Manager'
+          },
+          {
+            anchor: 'right',
+            name: sportsCoordinatorSignatureName,
+            role: 'Sports Committee Coordinator',
+            shiftColumns: 2
+          }
+        ],
+        afterRows: ({ sheet, dataStartRow }) => {
+          const headerRowNumber = dataStartRow - 1;
+          const headerRow = sheet.getRow(headerRowNumber);
+          headerRow.height = 22;
+          headerRow.eachCell((cell) => {
+            cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          });
+
+          rows.forEach((row, index) => {
+            const rowNumber = dataStartRow + index;
+            if (row._section) {
+              sheet.mergeCells(`A${rowNumber}:C${rowNumber}`);
+              const cell = sheet.getCell(`A${rowNumber}`);
+              cell.value = row._section;
+              cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF173A5E' } };
+              cell.alignment = { horizontal: 'center', vertical: 'middle' };
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFEAF3FF' }
+              };
+              cell.border = {
+                top: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+                left: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+                bottom: { style: 'thin', color: { argb: 'FFD0E0F0' } },
+                right: { style: 'thin', color: { argb: 'FFD0E0F0' } }
+              };
+              sheet.getRow(rowNumber).height = 24;
+              return;
+            }
+
+            const currentRow = sheet.getRow(rowNumber);
+            const isLongResponseField = row.field === 'Short motivation for the new name';
+            currentRow.height = isLongResponseField ? 44 : 34;
+
+            const fieldCell = sheet.getCell(`A${rowNumber}`);
+            const responseCell = sheet.getCell(`B${rowNumber}`);
+            const notesCell = sheet.getCell(`C${rowNumber}`);
+
+            fieldCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF173A5E' } };
+            fieldCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+            responseCell.font = { name: 'Calibri', size: 12, color: { argb: 'FF173A5E' } };
+            responseCell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+
+            notesCell.font = { name: 'Calibri', size: 12, italic: true, color: { argb: 'FF6B7280' } };
+            notesCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          });
+
+          rows.forEach((row, index) => {
+            if (row.field !== 'New inspirational house name (required)') return;
+            const rowNumber = dataStartRow + index;
+            const responseCell = sheet.getCell(`B${rowNumber}`);
+            if (String(responseCell.value || '').trim()) return;
+            responseCell.value = 'e.g. Determined / House Excel';
+            responseCell.font = { name: 'Calibri', size: 12, italic: true, color: { argb: 'FF7A8694' } };
+            responseCell.alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+          });
+        }
+      });
+
+      showStatus(`${activeHouse.name} executive election form exported (.xlsx).`);
+    } catch (error) {
+      showStatus(error instanceof Error ? error.message : 'Failed to export executive election form.');
+    }
+  });
+
+  const openHouseModal = async (houseId: string) => {
+    await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
     activeHouseId = houseId;
     memberSearchValue = '';
+    memberSortValue = 'surname_asc';
     memberGenderFilterValue = 'all';
     memberSportFilterValue = 'all';
     selectedMemberKeys = new Set();
     collapseAllHouseSections();
+    expandHouseSection('current_members');
     renderHouseMembersModal();
     houseModal.classList.remove('is-hidden');
     document.body.classList.add('inline-house-members-open');
@@ -4536,12 +6612,19 @@ const wireSportsHouseManagerInline = () => {
       button.appendChild(colorDot);
       button.appendChild(label);
       button.addEventListener('click', () => {
-        openHouseModal(house.id);
+        void openHouseModal(house.id);
       });
       houseButtonList.appendChild(button);
     });
 
     controls.appendChild(houseButtonList);
+
+    if (matchLogSection) {
+      const disciplineSummary = document.createElement('p');
+      disciplineSummary.className = 'inline-house-policy-summary';
+      disciplineSummary.textContent = `Card policy: straight red ${readState.disciplinePolicy.straightRedSuspensionMatches} match, second yellow ${readState.disciplinePolicy.secondYellowSuspensionMatches} match, yellow threshold ${readState.disciplinePolicy.yellowAccumulationThreshold}, accumulation suspension ${readState.disciplinePolicy.yellowAccumulationSuspensionMatches} match.`;
+      controls.appendChild(disciplineSummary);
+    }
   };
 
   const exitEdit = () => {
@@ -4549,11 +6632,17 @@ const wireSportsHouseManagerInline = () => {
       editorWrap.remove();
       editorWrap = null;
     }
+    overallStatsNode = null;
+    closeUnallocatedOverlay();
     editors = [];
+    disciplinePolicyEditor = null;
   };
 
   const renderEditControls = () => {
     controls.innerHTML = '';
+
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'inline-house-edit-actions';
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
@@ -4574,12 +6663,24 @@ const wireSportsHouseManagerInline = () => {
         }
 
         if (matchLogSection) {
+          const disciplinePolicy = disciplinePolicyEditor
+            ? {
+                straightRedSuspensionMatches: Math.max(1, Math.floor(Number(disciplinePolicyEditor.straightRedInput.value) || 1)),
+                secondYellowSuspensionMatches: Math.max(1, Math.floor(Number(disciplinePolicyEditor.secondYellowInput.value) || 1)),
+                yellowAccumulationThreshold: Math.max(1, Math.floor(Number(disciplinePolicyEditor.yellowThresholdInput.value) || 2)),
+                yellowAccumulationSuspensionMatches: Math.max(1, Math.floor(Number(disciplinePolicyEditor.yellowSuspensionInput.value) || 1))
+              }
+            : { ...readState.disciplinePolicy };
+
           await saveSectionOverride(matchLogSection, {
             type: 'match-log',
             houseOptions,
             leftTeamId: readState.leftTeamId,
-            rightTeamId: readState.rightTeamId
+            rightTeamId: readState.rightTeamId,
+            disciplinePolicy
           });
+
+          readState.disciplinePolicy = disciplinePolicy;
         }
 
         if (fixtureSection) {
@@ -4591,6 +6692,8 @@ const wireSportsHouseManagerInline = () => {
 
         localStorage.setItem('bhanoyi.sportsHouseOptions', JSON.stringify(houseOptions));
         readState.options = [...houseOptions];
+        renderHouseEditorSummaries();
+        renderOverallAllocationStats();
         showStatus('House names saved. Refreshing...');
         window.location.reload();
       } catch (error) {
@@ -4606,8 +6709,14 @@ const wireSportsHouseManagerInline = () => {
       renderReadControls();
     });
 
-    controls.appendChild(saveBtn);
-    controls.appendChild(cancelBtn);
+    actionsWrap.appendChild(saveBtn);
+    actionsWrap.appendChild(cancelBtn);
+    controls.appendChild(actionsWrap);
+
+    overallStatsNode = document.createElement('div');
+    overallStatsNode.className = 'inline-house-overall-stats';
+    controls.appendChild(overallStatsNode);
+    renderOverallAllocationStats();
   };
 
   const enterEdit = () => {
@@ -4620,7 +6729,7 @@ const wireSportsHouseManagerInline = () => {
     editors = [];
 
     readState.options.forEach((house, index) => {
-      const { wrapper, input } = createTextEditor(`House ${index + 1} Name`, house.name);
+      const { wrapper, input } = createTextEditor('House Name', house.name);
       wrapper.classList.add('inline-match-house-editor');
 
       const openMembersButton = document.createElement('button');
@@ -4653,12 +6762,65 @@ const wireSportsHouseManagerInline = () => {
       colorField.appendChild(colorInput);
       wrapper.appendChild(colorField);
 
-      editors.push({ id: house.id, nameInput: input, colorInput });
+      const summaryNode = document.createElement('div');
+      summaryNode.className = 'inline-house-summary';
+      wrapper.appendChild(summaryNode);
+
+      input.addEventListener('input', () => {
+        renderHouseEditorSummaries();
+        renderOverallAllocationStats();
+      });
+      colorInput.addEventListener('change', () => {
+        renderHouseEditorSummaries();
+      });
+
+      editors.push({ id: house.id, nameInput: input, colorInput, summaryNode });
       editorWrap?.appendChild(wrapper);
     });
 
+    if (matchLogSection) {
+      const policyWrap = document.createElement('div');
+      policyWrap.className = 'inline-house-policy-editor';
+      policyWrap.innerHTML = `
+        <h3>Card Suspension Policy</h3>
+        <p class="inline-house-policy-copy">Use FIFA-style defaults for school matches, then adjust for your competition rules when needed.</p>
+      `;
+
+      const policyGrid = document.createElement('div');
+      policyGrid.className = 'inline-house-policy-grid';
+
+      const createPolicyInput = (labelText: string, value: number) => {
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '1';
+        input.step = '1';
+        input.value = String(value);
+        label.appendChild(input);
+        policyGrid.appendChild(label);
+        return input;
+      };
+
+      const straightRedInput = createPolicyInput('Straight red suspension matches', readState.disciplinePolicy.straightRedSuspensionMatches);
+      const secondYellowInput = createPolicyInput('Second-yellow suspension matches', readState.disciplinePolicy.secondYellowSuspensionMatches);
+      const yellowThresholdInput = createPolicyInput('Yellow-card accumulation threshold', readState.disciplinePolicy.yellowAccumulationThreshold);
+      const yellowSuspensionInput = createPolicyInput('Accumulation suspension matches', readState.disciplinePolicy.yellowAccumulationSuspensionMatches);
+
+      disciplinePolicyEditor = {
+        straightRedInput,
+        secondYellowInput,
+        yellowThresholdInput,
+        yellowSuspensionInput
+      };
+
+      policyWrap.appendChild(policyGrid);
+      editorWrap?.appendChild(policyWrap);
+    }
+
     controls.after(editorWrap);
     renderEditControls();
+    renderHouseEditorSummaries();
   };
 
   renderReadControls();
@@ -4712,7 +6874,7 @@ const wireFixtureCreatorInline = (section: Element) => {
   }
 
   let editorWrap: HTMLElement | null = null;
-  let sportInput: HTMLInputElement | null = null;
+  let editors: Array<{ id: string; input: HTMLInputElement }> = [];
   let competitionInput: HTMLInputElement | null = null;
   let venueInput: HTMLInputElement | null = null;
   let houseEditors: Array<{ id: string; input: HTMLInputElement }> = [];
@@ -4789,7 +6951,7 @@ const wireFixtureCreatorInline = (section: Element) => {
     editorWrap = document.createElement('div');
     editorWrap.className = 'inline-admin-controls';
 
-    const sportEditor = createTextEditor('Sport label', readState.sport || 'Football / Netball');
+    const sportEditor = createTextEditor('Sport label', readState.sport || 'Netball/Football');
     sportInput = sportEditor.input;
     sportEditor.wrapper.classList.add('inline-match-house-editor');
     editorWrap.appendChild(sportEditor.wrapper);
@@ -5621,15 +7783,27 @@ export const initInlinePublicAdmin = async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') !== '1') return;
 
+  const clearAdminModeUrl = () => {
+    try {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete('admin');
+      window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+    } catch {
+      // ignore
+    }
+  };
+
   const session = await getSession();
   const email = session?.user?.email ?? null;
   if (!isAllowed(email)) {
     await signOut();
+    clearAdminModeUrl();
     showStatus('Admin mode denied for this account.');
     return;
   }
 
   document.body.classList.add('inline-admin-active');
+  initAdminSessionSideMenu(session);
   bindInlineActions();
   showStatus('Admin mode active. Use inline Edit/Save controls in each section.');
 };

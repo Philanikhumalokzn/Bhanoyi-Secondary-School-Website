@@ -24,6 +24,10 @@ This project is ready to deploy as a static frontend with Supabase as backend.
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_ADMIN_EMAILS`
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `ADMIN_EXTRA_PIN`
    - `RESEND_API_KEY`
    - `RESEND_FROM` (verified sender, e.g. `Bhanoyi School <noreply@your-domain>`)
    - `RESEND_DEFAULT_TO` (fallback office mailbox)
@@ -56,6 +60,10 @@ This project is ready to deploy as a static frontend with Supabase as backend.
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_ADMIN_EMAILS`
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `ADMIN_EXTRA_PIN`
 6. Deploy site.
 7. Test `/admin.html` and create a test announcement.
 
@@ -82,6 +90,16 @@ Note: Contact and Admissions email endpoints are currently implemented under `/a
 2. Confirm user exists in `admin_users` and `is_active = true`.
 3. Ensure email in `admin_users` matches admin login email (case-insensitive is supported).
 4. Confirm the same email is listed in `VITE_ADMIN_EMAILS`.
+
+## If staff profiles exist but staff login fails
+
+1. Confirm the deployment has `SUPABASE_SERVICE_ROLE_KEY` configured.
+2. Confirm the deployment also has `SUPABASE_URL` and `SUPABASE_ANON_KEY` on the server side.
+3. Sign in through `/admin.html` once after deploy so staff auth sync can provision/update staff users.
+4. Then retry the staff login using the exact `loginEmail` and `loginPassword` shown in Enrollment.
+
+Important:
+Entering a staff email/password in Enrollment only stores the intended credentials in the enrollment profile. Those become real login credentials only after `/api/staff-auth-sync` successfully creates or updates the matching Supabase Auth user.
 
 ---
 

@@ -1,6 +1,10 @@
+import { getSession, signIn, signOut } from './api';
+import { syncEnrollmentStoreFromRemote } from '../content/enrollment.persistence.js';
+
 const enrollmentSectionKey = 'enrollment_manager';
 const enrollmentStorageKey = `bhanoyi.enrollmentClasses.${enrollmentSectionKey}`;
 const staffSessionKey = `bhanoyi.staffSession.${enrollmentSectionKey}`;
+const staffSessionPasswordKey = `bhanoyi.staffSessionPassword.${enrollmentSectionKey}`;
 
 const normalizeText = (value: unknown, maxLength = 160) =>
   String(value ?? '')
@@ -19,10 +23,11 @@ const buildDefaultCredentials = (entry: Record<string, unknown>) => {
   const firstToken = normalizeLoginToken(entry.firstName);
   const initialsToken = normalizeLoginToken(entry.initials);
   const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
-  const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+  const baseHandle = `${surnameToken}${firstInitial}`.slice(0, 24) || 'staffx';
+  const passwordSeed = `${baseHandle}2026`;
   return {
-    email: `${handle}@bhanoyi.education`,
-    password: handle
+    email: `${baseHandle}@bhanoyi.education`,
+    password: passwordSeed.slice(0, 24)
   };
 };
 
@@ -53,6 +58,11 @@ const readStaffCredentials = (): StaffAuthRow[] => {
   }
 };
 
+const loadStaffCredentials = async (): Promise<StaffAuthRow[]> => {
+  await syncEnrollmentStoreFromRemote(enrollmentSectionKey, enrollmentStorageKey);
+  return readStaffCredentials();
+};
+
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const refs = {
@@ -66,19 +76,26 @@ const setStatus = (message: string) => {
   refs.status.textContent = message;
 };
 
+const isInvalidCredentialsError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /invalid login credentials/i.test(message);
+};
+
 const redirectToMyClass = () => {
   window.location.href = 'enrollment.html?staff=1';
 };
 
-const isStoredSessionValid = () => {
-  const email = normalizeText(sessionStorage.getItem(staffSessionKey), 120).toLowerCase();
-  if (!email) return false;
-  const rows = readStaffCredentials();
-  return rows.some((row) => row.loginEmail === email);
+const resolveSignedInStaff = async () => {
+  const session = await getSession().catch(() => null);
+  const email = normalizeText(session?.user?.email, 120).toLowerCase();
+  if (!email) return null;
+
+  const rows = await loadStaffCredentials();
+  return rows.find((row) => row.loginEmail === email) || null;
 };
 
 const bindForm = () => {
-  refs.loginForm.addEventListener('submit', (event) => {
+  refs.loginForm.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     const loginEmail = normalizeText(refs.emailInput.value, 120).toLowerCase();
@@ -88,35 +105,58 @@ const bindForm = () => {
       return;
     }
 
-    const rows = readStaffCredentials();
+    const rows = await loadStaffCredentials();
     if (!rows.length) {
       setStatus('No staff profiles are available yet. Ask admin to add staff first.');
       return;
     }
 
-    const matched = rows.find((row) => row.loginEmail === loginEmail && row.loginPassword === loginPassword);
-    if (!matched) {
-      setStatus('Invalid staff credentials.');
+    const knownStaff = rows.find((row) => row.loginEmail === loginEmail);
+    if (!knownStaff) {
+      setStatus('This email is not assigned to a staff profile yet.');
       return;
     }
 
-    sessionStorage.setItem(staffSessionKey, matched.loginEmail);
-    setStatus('Login successful. Redirecting...');
-    redirectToMyClass();
+    try {
+      await signIn(loginEmail, loginPassword);
+      const matched = await resolveSignedInStaff();
+      if (!matched) {
+        await signOut().catch(() => null);
+        setStatus('This account is not linked to an active staff profile.');
+        return;
+      }
+
+      sessionStorage.setItem(staffSessionKey, matched.loginEmail);
+      sessionStorage.setItem(staffSessionPasswordKey, loginPassword);
+      setStatus('Login successful. Redirecting...');
+      redirectToMyClass();
+    } catch (error) {
+      if (knownStaff && isInvalidCredentialsError(error)) {
+        setStatus('Your staff profile exists, but the auth account is not synced yet. Ask admin to sign in and open Enrollment once, then try again.');
+        return;
+      }
+
+      setStatus(error instanceof Error ? error.message : 'Invalid login credentials.');
+    }
   });
 };
 
-const init = () => {
+const init = async () => {
   bindForm();
 
-  if (isStoredSessionValid()) {
+  const matched = await resolveSignedInStaff();
+  if (matched) {
+    sessionStorage.setItem(staffSessionKey, matched.loginEmail);
     redirectToMyClass();
     return;
   }
 
-  if (readStaffCredentials().length === 0) {
+  sessionStorage.removeItem(staffSessionKey);
+  sessionStorage.removeItem(staffSessionPasswordKey);
+
+  if ((await loadStaffCredentials()).length === 0) {
     setStatus('No staff profiles found yet.');
   }
 };
 
-init();
+void init();

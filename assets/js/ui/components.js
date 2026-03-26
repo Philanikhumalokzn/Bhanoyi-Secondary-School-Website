@@ -1,6 +1,16 @@
 import { Calendar } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
+import {
+  persistEnrollmentStore,
+  readEnrollmentStoreLocal,
+  stampEnrollmentStorePayload,
+  syncStaffAuthUsersRemoteDetailed,
+  syncStaffAuthUsersRemote,
+  syncEnrollmentStoreFromRemote
+} from '../content/enrollment.persistence.js';
+import { persistLocalStore, syncLocalStoreFromRemote } from '../content/localstore.remote.js';
+import { exportProfessionalWorkbook } from '../content/professional-export.js';
 
 const escapeHtmlAttribute = (value = '') =>
   String(value)
@@ -101,6 +111,8 @@ const renderCard = (item, clickable = false, context = {}) => {
   const imageUrls = parseCardImageUrls(item.imageUrl || '');
   const primaryImageUrl = imageUrls[0] || '';
   const imageData = serializeCardImageUrls(imageUrls);
+  const title = String(item.title || '').trim();
+  const displayTitle = context.sectionKey === 'sporting_codes' ? formatSportCodeWithEmoji(title) : title;
   const attrs = [
     'data-editable-card="true"',
     context.sectionKey ? `data-section-key="${context.sectionKey}"` : '',
@@ -114,11 +126,12 @@ const renderCard = (item, clickable = false, context = {}) => {
 
   const hasImage = Boolean(primaryImageUrl);
   const cardClass = hasImage ? 'card card-has-media' : 'card';
+  const bodyText = context.concise ? toConcisePublicText(item.body, 90) : item.body;
   const content = `
-    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${item.title}" loading="lazy" />
+    <img class="card-image ${hasImage ? '' : 'is-hidden'}" src="${hasImage ? primaryImageUrl : ''}" alt="${title}" loading="lazy" />
     <div class="card-content">
-      <h3>${item.title}</h3>
-      <p>${item.body}</p>
+      <h3>${displayTitle}</h3>
+      <p>${bodyText}</p>
     </div>
   `;
   if (clickable) {
@@ -128,13 +141,65 @@ const renderCard = (item, clickable = false, context = {}) => {
 };
 
 const isAdminModeEnabled = () => {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('admin') === '1';
+  if (typeof document === 'undefined') return false;
+  return String(document.body?.dataset?.audience || '').trim() === 'admin';
 };
 
 const isStaffModeEnabled = () => {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('staff') === '1';
+  if (typeof document === 'undefined') return false;
+  return String(document.body?.dataset?.audience || '').trim() === 'staff';
+};
+
+const resolveActiveStaffSessionEmail = () => {
+  if (typeof sessionStorage === 'undefined') return '';
+
+  const directKeys = ['bhanoyi.staffSession.enrollment_manager'];
+  for (const key of directKeys) {
+    const value = String(sessionStorage.getItem(key) || '').trim().toLowerCase();
+    if (value) return value;
+  }
+
+  for (let index = 0; index < sessionStorage.length; index += 1) {
+    const key = String(sessionStorage.key(index) || '').trim();
+    if (!key.startsWith('bhanoyi.staffSession.')) continue;
+    const value = String(sessionStorage.getItem(key) || '').trim().toLowerCase();
+    if (value) return value;
+  }
+
+  return '';
+};
+
+const resolveActiveStaffProfile = () => {
+  const sessionEmail = resolveActiveStaffSessionEmail();
+  if (!sessionEmail) return null;
+
+  const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
+  for (const key of enrollmentKeys) {
+    const parsed = readEnrollmentStoreLocal(key);
+    const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
+    const matched = staffMembers.find(
+      (entry) => String(entry?.loginEmail || entry?.email || '').trim().toLowerCase() === sessionEmail
+    );
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return null;
+};
+
+const isPublicAudienceEnabled = () => !isAdminModeEnabled() && !isStaffModeEnabled();
+
+const toConcisePublicText = (value, maxChars = 110) => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  const sentenceMatch = text.match(/^(.{1,200}?[.!?])(?:\s|$)/);
+  const sentence = sentenceMatch ? sentenceMatch[1].trim() : text;
+  if (sentence.length <= maxChars) return sentence;
+
+  const clipped = sentence.slice(0, maxChars).trim().replace(/[\s,;:.!?-]+$/g, '');
+  return `${clipped}...`;
 };
 
 const withAudienceQuery = (href) => {
@@ -359,11 +424,630 @@ const renderLatestNewsSection = (section, sectionIndex) => {
   `;
 };
 
+const parseStandingMetric = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeStandingsTeamOptions = (section, context = {}) => {
+  const normalizeOption = (entry, index) => {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const id = String(source.id || source.key || source.teamId || `team_${index + 1}`)
+      .trim()
+      .toLowerCase();
+    const name = String(source.name || source.label || source.team || `Team ${index + 1}`).trim() || `Team ${index + 1}`;
+    if (!id) return null;
+    return { id, name };
+  };
+
+  const pageSections = Array.isArray(context?.page?.sections) ? context.page.sections : [];
+  const fixtureSectionKey = String(section.fixtureSectionKey || '').trim();
+  const linkedFixtureSection = pageSections.find((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    if (entry.type !== 'fixture-creator') return false;
+    if (!fixtureSectionKey) return true;
+    return String(entry.sectionKey || '').trim() === fixtureSectionKey;
+  });
+  const linkedMatchSection = pageSections.find((entry) => entry && typeof entry === 'object' && entry.type === 'match-log');
+
+  const persistedHouseOptions = (() => {
+    try {
+      const raw = localStorage.getItem('bhanoyi.sportsHouseOptions');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+
+  const candidates = [
+    Array.isArray(section.houseOptions) ? section.houseOptions : [],
+    Array.isArray(linkedFixtureSection?.houseOptions) ? linkedFixtureSection.houseOptions : [],
+    Array.isArray(linkedMatchSection?.houseOptions) ? linkedMatchSection.houseOptions : [],
+    persistedHouseOptions
+  ];
+
+  const picked = candidates.find((entry) => Array.isArray(entry) && entry.length > 0) || [];
+  const uniqueById = new Map();
+  picked
+    .map(normalizeOption)
+    .filter(Boolean)
+    .forEach((entry) => {
+      if (!uniqueById.has(entry.id)) {
+        uniqueById.set(entry.id, entry);
+      }
+    });
+
+  return Array.from(uniqueById.values());
+};
+
+const getSortedStandingsRows = (rows) =>
+  rows
+    .map((entry) => ({
+      ...entry,
+      mp: parseStandingMetric(entry.mp),
+      w: parseStandingMetric(entry.w),
+      d: parseStandingMetric(entry.d),
+      l: parseStandingMetric(entry.l),
+      gf: parseStandingMetric(entry.gf),
+      ga: parseStandingMetric(entry.ga),
+      gd: parseStandingMetric(entry.gd),
+      pts: parseStandingMetric(entry.pts)
+    }))
+    .sort((left, right) => {
+      if (right.pts !== left.pts) return right.pts - left.pts;
+      if (right.gd !== left.gd) return right.gd - left.gd;
+      if (right.gf !== left.gf) return right.gf - left.gf;
+      return String(left.team || '').localeCompare(String(right.team || ''));
+    })
+    .map((entry, index) => ({ ...entry, position: index + 1 }));
+
+const normalizeStandingsSportCode = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('football') || raw.includes('soccer')) return 'football';
+  if (raw.includes('netball')) return 'netball';
+  return '';
+};
+
+const ENTITY_EMOJI_REGISTRY = Object.freeze({
+  eventTypes: Object.freeze({
+    sports: '🏆',
+    religious: '🕊️',
+    cultural: '🎭',
+    entertainment: '🎉',
+    academic: '📘',
+    meeting: '🗓️',
+    assembly: '📣',
+    exam: '📝',
+    holiday: '🌴',
+    community: '🤝'
+  }),
+  sportCodes: Object.freeze({
+    soccer: Object.freeze({
+      key: 'soccer',
+      label: 'Football',
+      emoji: '⚽',
+      aliases: Object.freeze(['soccer', 'football'])
+    }),
+    netball: Object.freeze({
+      key: 'netball',
+      label: 'Netball',
+      emoji: '🏐',
+      aliases: Object.freeze(['netball'])
+    }),
+    athletics: Object.freeze({
+      key: 'athletics',
+      label: 'Athletics',
+      emoji: '🏃',
+      aliases: Object.freeze(['athletics', 'track', 'track and field'])
+    })
+  })
+});
+
+const resolveSportCodeDefinition = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  return Object.values(ENTITY_EMOJI_REGISTRY.sportCodes).find((entry) =>
+    entry.aliases.some((alias) => raw === alias || raw.includes(alias))
+  ) || null;
+};
+
+const formatSportCodeWithEmoji = (value) => {
+  const definition = resolveSportCodeDefinition(value);
+  if (!definition) {
+    const label = String(value || '').trim();
+    return label ? `🏅 ${label}` : '🏅 Sport';
+  }
+  return `${definition.emoji} ${definition.label}`;
+};
+
+const formatFixtureCalendarTitle = ({ homeName = '', awayName = '', sportKey = '', sportLabel = '', fallbackTitle = '' } = {}) => {
+  const home = String(homeName || '').trim();
+  const away = String(awayName || '').trim();
+  const matchup = home && away ? `${home} vs ${away}` : String(fallbackTitle || '').trim();
+  const definition = resolveSportCodeDefinition(sportKey || sportLabel);
+  if (!definition) return matchup || 'Fixture';
+  return matchup ? `${definition.emoji} ${definition.label}: ${matchup}` : `${definition.emoji} ${definition.label}`;
+};
+
+const stripFixtureSportPrefix = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const matchedDefinition = Object.values(ENTITY_EMOJI_REGISTRY.sportCodes).find((entry) =>
+    raw.startsWith(`${entry.emoji} ${entry.label}: `) || raw.startsWith(`${entry.label}: `)
+  );
+
+  if (!matchedDefinition) return raw;
+
+  return raw
+    .replace(`${matchedDefinition.emoji} ${matchedDefinition.label}: `, '')
+    .replace(`${matchedDefinition.label}: `, '')
+    .trim();
+};
+
+const computeStandingsViewModel = (section, context = {}) => {
+  const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const selectedSport = normalizeStandingsSportCode(context.selectedSport || section.defaultSport || 'football') || 'football';
+  const houseOptions = normalizeStandingsTeamOptions(section, context);
+  const teamStats = new Map(
+    houseOptions.map((team) => [
+      team.id,
+      {
+        teamId: team.id,
+        team: team.name,
+        mp: 0,
+        w: 0,
+        d: 0,
+        l: 0,
+        gf: 0,
+        ga: 0,
+        gd: 0,
+        pts: 0
+      }
+    ])
+  );
+
+  const fixtureCatalog = readLocalStorageObject(getFixtureCatalogStorageKey(fixtureSectionKey));
+  const fixtureDateMap = readLocalStorageObject(getFixtureDateStorageKey(fixtureSectionKey));
+  const logsByFixture = readLocalStorageObject(getMatchLogByFixtureStorageKey(fixtureSectionKey));
+
+  let latestUpdatedAt = 0;
+
+  Object.entries(fixtureCatalog).forEach(([fixtureId, fixtureData]) => {
+    const fixture = fixtureData && typeof fixtureData === 'object' ? fixtureData : {};
+    const fixtureSport = normalizeStandingsSportCode(fixture.sport || '');
+    if (selectedSport && fixtureSport && fixtureSport !== selectedSport) return;
+    const stamp = splitFixtureStampGlobal(fixtureDateMap[fixtureId]);
+    if (!stamp.date) return;
+
+    const homeId = String(fixture.homeId || '').trim().toLowerCase();
+    const awayId = String(fixture.awayId || '').trim().toLowerCase();
+    if (!homeId || !awayId || homeId === awayId) return;
+
+    const entry = logsByFixture[fixtureId];
+    if (!entry || typeof entry !== 'object') return;
+
+    const homeScore = Number(entry.homeScore);
+    const awayScore = Number(entry.awayScore);
+    if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return;
+
+    const eventCount = Array.isArray(entry.events) ? entry.events.length : 0;
+    const hasResult =
+      eventCount > 0 ||
+      entry.hasResult === true ||
+      entry.isFinal === true ||
+      entry.markedPlayed === true;
+    if (!hasResult) return;
+
+    if (!teamStats.has(homeId)) {
+      teamStats.set(homeId, {
+        teamId: homeId,
+        team: String(fixture.homeName || homeId).trim() || homeId,
+        mp: 0,
+        w: 0,
+        d: 0,
+        l: 0,
+        gf: 0,
+        ga: 0,
+        gd: 0,
+        pts: 0
+      });
+    }
+    if (!teamStats.has(awayId)) {
+      teamStats.set(awayId, {
+        teamId: awayId,
+        team: String(fixture.awayName || awayId).trim() || awayId,
+        mp: 0,
+        w: 0,
+        d: 0,
+        l: 0,
+        gf: 0,
+        ga: 0,
+        gd: 0,
+        pts: 0
+      });
+    }
+
+    const home = teamStats.get(homeId);
+    const away = teamStats.get(awayId);
+
+    home.mp += 1;
+    away.mp += 1;
+    home.gf += homeScore;
+    home.ga += awayScore;
+    away.gf += awayScore;
+    away.ga += homeScore;
+
+    if (homeScore > awayScore) {
+      home.w += 1;
+      home.pts += 3;
+      away.l += 1;
+    } else if (awayScore > homeScore) {
+      away.w += 1;
+      away.pts += 3;
+      home.l += 1;
+    } else {
+      home.d += 1;
+      away.d += 1;
+      home.pts += 1;
+      away.pts += 1;
+    }
+
+    const updatedAt = Number(entry.updatedAt);
+    if (Number.isFinite(updatedAt) && updatedAt > latestUpdatedAt) {
+      latestUpdatedAt = updatedAt;
+    }
+  });
+
+  let rows = Array.from(teamStats.values()).map((entry) => ({
+    ...entry,
+    gd: entry.gf - entry.ga
+  }));
+
+  if (!rows.length && Array.isArray(section.items) && section.items.length) {
+    rows = section.items.map((item, index) => {
+      const gf = parseStandingMetric(item.gf);
+      const ga = parseStandingMetric(item.ga);
+      return {
+        position: parseStandingMetric(item.position) || index + 1,
+        team: (item.team || '').trim() || `Team ${index + 1}`,
+        mp: parseStandingMetric(item.mp),
+        w: parseStandingMetric(item.w),
+        d: parseStandingMetric(item.d),
+        l: parseStandingMetric(item.l),
+        gf,
+        ga,
+        gd: gf - ga,
+        pts: parseStandingMetric(item.pts)
+      };
+    });
+  }
+
+  const sortedRows = getSortedStandingsRows(rows);
+  const sectionLastUpdated = String(section.lastUpdated || '').trim();
+  const computedLastUpdated = latestUpdatedAt
+    ? new Date(latestUpdatedAt).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      })
+    : '';
+
+  return {
+    fixtureSectionKey,
+    selectedSport,
+    rows: sortedRows,
+    lastUpdated: computedLastUpdated || sectionLastUpdated || 'N/A',
+    sortNote: (section.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+    houseOptions
+  };
+};
+
+const renderStandingsRowsMarkup = (rows) =>
+  rows
+    .map(
+      (item, index) => `
+        <tr class="${index === 0 ? 'standings-row-leading' : ''}">
+          <td>${item.position}</td>
+          <th scope="row">${escapeHtmlText(item.team)}</th>
+          <td>${item.mp}</td>
+          <td>${item.w}</td>
+          <td>${item.d}</td>
+          <td>${item.l}</td>
+          <td>${item.gf}</td>
+          <td>${item.ga}</td>
+          <td>${item.gd}</td>
+          <td><strong>${item.pts}</strong></td>
+        </tr>
+      `
+    )
+    .join('');
+
+const renderLeagueStandingsSection = (section, sectionIndex, context = {}) => {
+  const viewModel = computeStandingsViewModel(section, context);
+  const footballLabel = formatSportCodeWithEmoji('football');
+  const netballLabel = formatSportCodeWithEmoji('netball');
+  const standingsConfig = {
+    fixtureSectionKey: viewModel.fixtureSectionKey,
+    selectedSport: viewModel.selectedSport,
+    houseOptions: viewModel.houseOptions,
+    items: Array.isArray(section.items) ? section.items : [],
+    lastUpdated: String(section.lastUpdated || '').trim(),
+    sortNote: String(section.sortNote || '').trim()
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="league-standings" data-league-standings="true" data-standings-config="${escapeHtmlAttribute(JSON.stringify(standingsConfig))}">
+      <div class="container">
+        <h2>${section.title}</h2>
+        ${section.subtitle ? `<p class="standings-subtitle">${section.subtitle}</p>` : ''}
+        <article class="panel standings-panel">
+          <div class="standings-sport-switch" role="tablist" aria-label="Select sport">
+            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'football' ? 'is-active' : ''}" data-standings-sport-tab="football" aria-selected="${viewModel.selectedSport === 'football' ? 'true' : 'false'}">${footballLabel}</button>
+            <span class="standings-sport-separator" aria-hidden="true">/</span>
+            <button type="button" class="standings-sport-tab ${viewModel.selectedSport === 'netball' ? 'is-active' : ''}" data-standings-sport-tab="netball" aria-selected="${viewModel.selectedSport === 'netball' ? 'true' : 'false'}">${netballLabel}</button>
+            ${isAdminModeEnabled() ? '<button type="button" class="btn btn-secondary standings-export-btn" data-standings-export>Export standings</button><button type="button" class="btn btn-secondary standings-export-btn" data-standings-export-combined>Export both standings</button>' : ''}
+          </div>
+          <div class="standings-table-wrap" role="region" aria-label="League standings" tabindex="0">
+            <table class="standings-table">
+              <thead>
+                <tr>
+                  <th scope="col">Pos</th>
+                  <th scope="col">Team</th>
+                  <th scope="col">MP</th>
+                  <th scope="col">W</th>
+                  <th scope="col">D</th>
+                  <th scope="col">L</th>
+                  <th scope="col">GF</th>
+                  <th scope="col">GA</th>
+                  <th scope="col">GD</th>
+                  <th scope="col">Pts</th>
+                </tr>
+              </thead>
+              <tbody data-standings-body>
+                ${renderStandingsRowsMarkup(viewModel.rows)}
+              </tbody>
+            </table>
+          </div>
+          <p class="standings-meta">
+            <span data-standings-last-updated>Last Updated: ${escapeHtmlText(viewModel.lastUpdated)}</span>
+            <span data-standings-sort-note>${escapeHtmlText(viewModel.sortNote)}</span>
+          </p>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const hydrateLeagueStandings = (standingsNode) => {
+  const rawConfig = String(standingsNode?.dataset?.standingsConfig || '').trim();
+  if (!rawConfig) return;
+
+  let section;
+  try {
+    section = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  if (!section || typeof section !== 'object') return;
+
+  const bodyNode = standingsNode.querySelector('[data-standings-body]');
+  const lastUpdatedNode = standingsNode.querySelector('[data-standings-last-updated]');
+  const sortNoteNode = standingsNode.querySelector('[data-standings-sort-note]');
+  const sportTabs = Array.from(standingsNode.querySelectorAll('[data-standings-sport-tab]'));
+  const exportButton = standingsNode.querySelector('[data-standings-export]');
+  const exportCombinedButton = standingsNode.querySelector('[data-standings-export-combined]');
+  if (!(bodyNode instanceof HTMLElement)) return;
+
+  const fixtureSectionKey = String(section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
+  const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
+  const matchLogStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+  let selectedSport = normalizeStandingsSportCode(section.selectedSport || 'football') || 'football';
+
+  const currentViewModel = () => computeStandingsViewModel(section, { selectedSport });
+
+  const buildStandingsColumns = () => ([
+    { header: 'Pos', key: 'pos', width: 7, align: 'center' },
+    { header: 'Team', key: 'team', width: 22, align: 'left' },
+    { header: 'MP', key: 'mp', width: 7, align: 'center' },
+    { header: 'W', key: 'w', width: 7, align: 'center' },
+    { header: 'D', key: 'd', width: 7, align: 'center' },
+    { header: 'L', key: 'l', width: 7, align: 'center' },
+    { header: 'GF', key: 'gf', width: 7, align: 'center' },
+    { header: 'GA', key: 'ga', width: 7, align: 'center' },
+    { header: 'GD', key: 'gd', width: 7, align: 'center' },
+    { header: 'Pts', key: 'pts', width: 7, align: 'center' }
+  ]);
+
+  const toStandingsExportRows = (rows) =>
+    (Array.isArray(rows) ? rows : []).map((row) => ({
+      pos: Number(row.position || 0),
+      team: String(row.team || '').trim(),
+      mp: Number(row.mp || 0),
+      w: Number(row.w || 0),
+      d: Number(row.d || 0),
+      l: Number(row.l || 0),
+      gf: Number(row.gf || 0),
+      ga: Number(row.ga || 0),
+      gd: Number(row.gd || 0),
+      pts: Number(row.pts || 0)
+    }));
+
+  const emphasizeLeadingRow = ({ sheet, dataStartRow, rowCount }) => {
+    if (!rowCount) return;
+    ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((columnLabel) => {
+      const cell = sheet.getCell(`${columnLabel}${dataStartRow}`);
+      cell.font = {
+        ...(cell.font || {}),
+        bold: true
+      };
+    });
+  };
+
+  const buildStandingsExportBaseName = (sportLabel) => {
+    const safeSport = String(sportLabel || 'football')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+    return `inter-house-${safeSport || 'football'}-standings-${stamp}`;
+  };
+
+  const refresh = () => {
+    const viewModel = currentViewModel();
+    bodyNode.innerHTML = renderStandingsRowsMarkup(viewModel.rows);
+    selectedSport = viewModel.selectedSport;
+    sportTabs.forEach((tab) => {
+      if (!(tab instanceof HTMLButtonElement)) return;
+      const tabSport = normalizeStandingsSportCode(tab.dataset.standingsSportTab || '');
+      const active = tabSport === selectedSport;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (lastUpdatedNode instanceof HTMLElement) {
+      lastUpdatedNode.textContent = `Last Updated: ${viewModel.lastUpdated}`;
+    }
+    if (sortNoteNode instanceof HTMLElement) {
+      sortNoteNode.textContent = viewModel.sortNote;
+    }
+  };
+
+  sportTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      if (!(tab instanceof HTMLButtonElement)) return;
+      const nextSport = normalizeStandingsSportCode(tab.dataset.standingsSportTab || '');
+      if (!nextSport || nextSport === selectedSport) return;
+      selectedSport = nextSport;
+      refresh();
+    });
+  });
+
+  exportButton?.addEventListener('click', async () => {
+    if (!isAdminModeEnabled()) return;
+
+    const viewModel = currentViewModel();
+    if (!Array.isArray(viewModel.rows) || !viewModel.rows.length) {
+      showSmartToast('No standings data to export yet.', { tone: 'info' });
+      return;
+    }
+
+    const sportLabel = selectedSport === 'netball' ? 'Netball' : 'Football';
+    const sportLabelWithEmoji = formatSportCodeWithEmoji(sportLabel);
+    const subtitle = String(section.subtitle || '').trim();
+
+    const rows = toStandingsExportRows(viewModel.rows);
+
+    try {
+      await exportProfessionalWorkbook({
+        fileName: `${buildStandingsExportBaseName(sportLabel)}.xlsx`,
+        sheetName: `${sportLabel} Standings`,
+        title: `Official ${sportLabelWithEmoji} Standings`,
+        contextLine: subtitle ? `${subtitle} • ${sportLabelWithEmoji}` : `Inter-House League • ${sportLabelWithEmoji}`,
+        metaLine: `Last Updated: ${viewModel.lastUpdated}`,
+        columns: buildStandingsColumns(),
+        rows,
+        note: String(viewModel.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+        afterRows: emphasizeLeadingRow
+      });
+      showSmartToast('Standings exported (.xlsx).', { tone: 'success' });
+    } catch {
+      showSmartToast('Could not export standings right now.', { tone: 'error' });
+    }
+  });
+
+  exportCombinedButton?.addEventListener('click', async () => {
+    if (!isAdminModeEnabled()) return;
+
+    const subtitle = String(section.subtitle || '').trim();
+    const netballViewModel = computeStandingsViewModel(section, { selectedSport: 'netball' });
+    const footballViewModel = computeStandingsViewModel(section, { selectedSport: 'football' });
+    const netballLabel = formatSportCodeWithEmoji('netball');
+    const footballLabel = formatSportCodeWithEmoji('football');
+    const netballRows = toStandingsExportRows(netballViewModel.rows);
+    const footballRows = toStandingsExportRows(footballViewModel.rows);
+
+    if (!netballRows.length && !footballRows.length) {
+      showSmartToast('No football or netball standings data to export yet.', { tone: 'info' });
+      return;
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    try {
+      await exportProfessionalWorkbook({
+        fileName: `inter-house-netball-football-standings-${stamp}.xlsx`,
+        sheetName: 'Combined Standings',
+        title: 'Official League Standings',
+        contextLine: subtitle ? `${subtitle} • ${netballLabel}/${footballLabel}` : `Inter-House League • ${netballLabel}/${footballLabel}`,
+        metaLine: `${netballLabel} Updated: ${netballViewModel.lastUpdated} • ${footballLabel} Updated: ${footballViewModel.lastUpdated}`,
+        tableSections: [
+          {
+            title: `${netballLabel} Standings`,
+            metaLine: `Last Updated: ${netballViewModel.lastUpdated}`,
+            columns: buildStandingsColumns(),
+            rows: netballRows,
+            note: String(netballViewModel.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+            afterRows: emphasizeLeadingRow
+          },
+          {
+            title: `${footballLabel} Standings`,
+            metaLine: `Last Updated: ${footballViewModel.lastUpdated}`,
+            columns: buildStandingsColumns(),
+            rows: footballRows,
+            note: String(footballViewModel.sortNote || '').trim() || 'Tie-break order: Pts > GD > GF',
+            afterRows: emphasizeLeadingRow
+          }
+        ]
+      });
+      showSmartToast('Combined Netball/Football standings exported (.xlsx).', { tone: 'success' });
+    } catch {
+      showSmartToast('Could not export combined standings right now.', { tone: 'error' });
+    }
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (!event.key) return;
+    if (
+      event.key !== fixtureCatalogStorageKey &&
+      event.key !== fixtureDateStorageKey &&
+      event.key !== matchLogStorageKey
+    ) {
+      return;
+    }
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:fixtures-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.sectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:match-log-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  refresh();
+};
+
 export const renderHeader = (siteContent, pageKey) => {
   const adminMode = isAdminModeEnabled();
   const staffMode = !adminMode && isStaffModeEnabled();
+  const publicNavKeys = new Set(['home', 'about', 'academics', 'sports', 'calendar', 'admissions', 'policies', 'contact']);
 
   const links = siteContent.navigation
+    .filter((item) => {
+      if (adminMode || staffMode) return true;
+      const key = String(item?.key || '').trim().toLowerCase();
+      return publicNavKeys.has(key);
+    })
     .flatMap((item) => {
       if (!item) return [];
 
@@ -450,6 +1134,7 @@ export const renderHero = (hero, pageKey, options = {}) => {
   }
 
   const notice = includeNotice ? renderHeroNoticeAside(hero.notice, pageKey) : '';
+  const leadText = isPublicAudienceEnabled() ? toConcisePublicText(hero.lead, 120) : hero.lead;
 
   return `
     <section class="hero">
@@ -457,7 +1142,7 @@ export const renderHero = (hero, pageKey, options = {}) => {
         <div>
           <p class="eyebrow">${hero.eyebrow || ''}</p>
           <h1>${hero.title}</h1>
-          <p class="lead">${hero.lead}</p>
+          <p class="lead">${leadText}</p>
         </div>
         ${notice}
       </div>
@@ -580,7 +1265,7 @@ const resolveAudienceSectionCopy = (section, context = {}) => {
 
 const isAdminOnlySectionForPublic = (section) => {
   const type = String(section?.type || '').trim().toLowerCase();
-  return type === 'match-log' || type === 'fixture-creator';
+  return type === 'match-log';
 };
 
 const getOrderedSectionEntries = (sections, context = {}) => {
@@ -602,14 +1287,104 @@ const getOrderedSectionEntries = (sections, context = {}) => {
   });
 };
 
+const inferMatchEventPlayerSearchScope = (key, label = '') => {
+  const normalized = `${String(key || '').trim()} ${String(label || '').trim()}`.toLowerCase();
+
+  if (key === 'goal' || key === 'penalty_goal' || key === 'own_goal') {
+    return 'active_match';
+  }
+
+  if (key === 'substitution') {
+    return 'active_match';
+  }
+
+  if (
+    normalized.includes('yellow') ||
+    normalized.includes('red') ||
+    normalized.includes('card') ||
+    normalized.includes('offence') ||
+    normalized.includes('offense') ||
+    normalized.includes('misconduct') ||
+    normalized.includes('foul')
+  ) {
+    return 'house_participants';
+  }
+
+  if (key === 'injury') {
+    return 'active_match';
+  }
+
+  return 'team_players';
+};
+
 const DEFAULT_MATCH_EVENT_TYPES = [
-  { key: 'goal', label: 'Goal', icon: '⚽', scoreFor: 'self', allowAssist: true, playerLabel: 'Scorer' },
-  { key: 'penalty_goal', label: 'Penalty Goal', icon: '⚽', scoreFor: 'self', allowAssist: false, playerLabel: 'Scorer' },
-  { key: 'own_goal', label: 'Own Goal', icon: '⚽', scoreFor: 'opponent', allowAssist: false, playerLabel: 'Player' },
-  { key: 'yellow_card', label: 'Yellow Card', icon: '🟨', scoreFor: 'none', allowAssist: false, playerLabel: 'Booked Player' },
-  { key: 'red_card', label: 'Red Card', icon: '🟥', scoreFor: 'none', allowAssist: false, playerLabel: 'Sent-off Player' },
-  { key: 'injury', label: 'Injury', icon: '🩹', scoreFor: 'none', allowAssist: false, playerLabel: 'Injured Player' },
-  { key: 'substitution', label: 'Substitution', icon: '🔁', scoreFor: 'none', allowAssist: false, playerLabel: 'Player' }
+  {
+    key: 'goal',
+    label: 'Goal',
+    icon: '⚽',
+    scoreFor: 'self',
+    allowAssist: true,
+    playerLabel: 'Scorer',
+    playerSearchScope: 'active_match',
+    assistSearchScope: 'active_match'
+  },
+  {
+    key: 'penalty_goal',
+    label: 'Penalty Goal',
+    icon: '⚽',
+    scoreFor: 'self',
+    allowAssist: false,
+    playerLabel: 'Scorer',
+    playerSearchScope: 'active_match'
+  },
+  {
+    key: 'own_goal',
+    label: 'Own Goal',
+    icon: '⚽',
+    scoreFor: 'opponent',
+    allowAssist: false,
+    playerLabel: 'Player',
+    playerSearchScope: 'active_match'
+  },
+  {
+    key: 'yellow_card',
+    label: 'Yellow Card',
+    icon: '🟨',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Booked Person',
+    playerSearchScope: 'house_participants'
+  },
+  {
+    key: 'red_card',
+    label: 'Red Card',
+    icon: '🟥',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Sent-off Person',
+    playerSearchScope: 'house_participants'
+  },
+  {
+    key: 'injury',
+    label: 'Injury',
+    icon: '🩹',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Injured Player',
+    playerSearchScope: 'active_match'
+  },
+  {
+    key: 'substitution',
+    label: 'Substitution',
+    icon: '🔁',
+    scoreFor: 'none',
+    allowAssist: false,
+    playerLabel: 'Player going off',
+    playerSearchScope: 'active_match',
+    showReplacement: true,
+    replacementLabel: 'Player coming on',
+    replacementSearchScope: 'bench_match'
+  }
 ];
 
 const DEFAULT_HOUSE_COLORS = ['#d62828', '#1d4ed8', '#15803d', '#f59e0b', '#7c3aed'];
@@ -663,7 +1438,18 @@ const normalizeMatchEventTypes = (sectionEventTypes = []) => {
         icon: (source.icon || fallback.icon || '•').trim(),
         scoreFor: source.scoreFor || fallback.scoreFor || 'none',
         allowAssist: source.allowAssist !== undefined ? Boolean(source.allowAssist) : Boolean(fallback.allowAssist),
-        playerLabel: (source.playerLabel || fallback.playerLabel || 'Player').trim()
+        playerLabel: (source.playerLabel || fallback.playerLabel || 'Player').trim(),
+        playerSearchScope:
+          String(source.playerSearchScope || fallback.playerSearchScope || '').trim() ||
+          inferMatchEventPlayerSearchScope(key, source.label || fallback.label || key),
+        assistSearchScope:
+          String(source.assistSearchScope || fallback.assistSearchScope || '').trim() ||
+          (source.allowAssist !== undefined ? Boolean(source.allowAssist) : Boolean(fallback.allowAssist)
+            ? 'active_match'
+            : ''),
+        showReplacement: source.showReplacement !== undefined ? Boolean(source.showReplacement) : Boolean(fallback.showReplacement),
+        replacementLabel: (source.replacementLabel || fallback.replacementLabel || 'Replacement').trim(),
+        replacementSearchScope: String(source.replacementSearchScope || fallback.replacementSearchScope || '').trim() || 'bench_match'
       };
     })
     .filter(Boolean);
@@ -751,6 +1537,10 @@ const initSportsWorkflowSteps = (rootNode) => {
 
 const renderMatchLogSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const inputSuffix = String(fallbackSectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const playerOptionsId = `match-player-options-${inputSuffix}`;
+  const assistOptionsId = `match-assist-options-${inputSuffix}`;
+  const replacementOptionsId = `match-replacement-options-${inputSuffix}`;
   const fixtureSectionKey = (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const houseOptions = normalizeMatchTeams(
     Array.isArray(section.houseOptions) && section.houseOptions.length
@@ -759,6 +1549,9 @@ const renderMatchLogSection = (section, sectionIndex) => {
   );
   const teamPair = getDefaultMatchPair(houseOptions, section.leftTeamId || '', section.rightTeamId || '');
   const eventTypes = normalizeMatchEventTypes(section.eventTypes);
+  const pauseReasons = (Array.isArray(section.pauseReasons) ? section.pauseReasons : [])
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
   const initialScores = houseOptions.reduce((acc, team) => {
     const raw = Number(section.initialScores?.[team.id]);
     acc[team.id] = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
@@ -775,40 +1568,16 @@ const renderMatchLogSection = (section, sectionIndex) => {
     leftTeamId: teamPair.leftTeamId,
     rightTeamId: teamPair.rightTeamId,
     eventTypes,
-    initialScores
+    pauseReasons,
+    initialScores,
+    disciplinePolicy: normalizeMatchDisciplinePolicy(section.disciplinePolicy)
   };
 
   const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
   const rightTeam = houseOptions.find((team) => team.id === teamPair.rightTeamId) || houseOptions[1] || leftTeam;
-  return `
-    <section class="section ${section.alt ? 'section-alt' : ''} match-log-modal-host" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
-      <div class="match-log-workspace-modal is-hidden" data-match-workspace-modal>
-        <div class="match-log-workspace-backdrop" data-match-workspace-close></div>
-        <article class="panel match-log-workspace-panel" role="dialog" aria-modal="true" aria-label="Log Live Match Events">
-          <header class="match-log-workspace-head">
-            <div>
-              <h2>${section.title || 'Log Live Match Events'}</h2>
-              ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-            </div>
-            <button type="button" class="btn btn-secondary" data-match-workspace-close>Close</button>
-          </header>
-          <article class="match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
-          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-log">
-            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
-              <span>Set Up Match Logging</span>
-            </button>
-            <div class="sports-workflow-body" data-sports-workflow-body>
-              <header class="match-log-header">
-                <div>
-                  <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
-                  <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
-                </div>
-                <div class="match-log-header-actions">
-                  <button type="button" class="btn btn-secondary" data-match-export>Export match log</button>
-                  <button type="button" class="btn btn-secondary" data-match-export-template>Export team sheet template</button>
-                  <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
-                </div>
-              </header>
+  const canReviewMatchEvents = isAdminModeEnabled();
+  const policySportOptions = buildManagedSportOptions(config.sport);
+  const teamListPickerMarkup = `
               <div class="match-log-team-pickers">
                 <label>
                   Match day
@@ -823,9 +1592,146 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   </select>
                 </label>
               </div>
-              <p class="match-log-status" data-match-selected-fixture aria-live="polite">Choose a fixture date, then pick a match to log.</p>
+              <p class="match-log-status" data-match-selected-fixture aria-live="polite">Choose a fixture date, then pick a match to manage.</p>
+  `;
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''} match-log-modal-host" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
+      <div class="match-log-workspace-modal is-hidden" data-match-workspace-modal>
+        <div class="match-log-workspace-backdrop" data-match-workspace-close></div>
+        <article class="panel match-log-workspace-panel" role="dialog" aria-modal="true" aria-label="Log Live Match Events">
+          <header class="match-log-workspace-head">
+            <div>
+              <h2>${section.title || 'Log Live Match Events'}</h2>
+              ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+            </div>
+            <button type="button" class="btn btn-secondary" data-match-workspace-close>Close</button>
+          </header>
+          <article class="match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          ${canReviewMatchEvents
+            ? `
+          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-log">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
+              <span>Set Up Match Logging</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <header class="match-log-header">
+                <div>
+                  <p class="match-log-meta"><strong>${config.sport}</strong> · ${config.competition}${config.venue ? ` · ${config.venue}` : ''}</p>
+                  <p class="match-log-status" data-match-status aria-live="polite">No events logged yet.</p>
+                </div>
+                <div class="match-log-header-actions">
+                  <button type="button" class="btn btn-secondary" data-match-export>Export workbook</button>
+                    <button type="button" class="btn btn-secondary" data-match-export-template>Export team sheet template</button>
+                  <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
+                </div>
+              </header>
+              ${teamListPickerMarkup}
+              <div class="match-log-clock-panel">
+                <div class="match-log-clock-grid">
+                  <p class="match-log-clock-item">
+                    <span>Match clock</span>
+                    <strong data-match-clock>00:00</strong>
+                  </p>
+                  <p class="match-log-clock-item">
+                    <span>Interruptions</span>
+                    <strong data-match-interruption-clock>00:00</strong>
+                  </p>
+                </div>
+                <div class="match-log-clock-actions">
+                  <button type="button" class="btn btn-secondary" data-match-clock-start>Start match clock</button>
+                  <label>
+                    Pause reason
+                    <select data-match-pause-reason>
+                      <option value="">Select reason</option>
+                      ${(config.pauseReasons.length ? config.pauseReasons : ['Injury', 'Weather delay', 'Equipment issue', 'Crowd disturbance', 'Official timeout'])
+                        .map((reason) => `<option value="${escapeHtmlAttribute(reason)}">${escapeHtmlText(reason)}</option>`)
+                        .join('')}
+                    </select>
+                  </label>
+                  <button type="button" class="btn btn-secondary" data-match-pause>Pause match</button>
+                  <button type="button" class="btn btn-secondary" data-match-resume>Resume match</button>
+                </div>
+                <p class="match-log-status" data-match-clock-status aria-live="polite">Match clock not started.</p>
+              </div>
+              <div class="match-log-clock-panel">
+                <div class="match-log-clock-grid">
+                  <p class="match-log-clock-item">
+                    <span>Competition rules</span>
+                    <strong>Admin controls</strong>
+                  </p>
+                </div>
+                <div class="match-log-team-pickers">
+                  <label>
+                    Sporting code
+                    <select data-match-policy-sport>
+                      ${policySportOptions.map((option) => `<option value="${escapeHtmlAttribute(option.key)}">${escapeHtmlText(option.label)}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label>
+                    Squad limit
+                    <input type="number" min="1" max="200" data-match-policy-squad-size />
+                  </label>
+                  <label>
+                    Starting players
+                    <input type="number" min="1" max="30" data-match-policy-starters />
+                  </label>
+                  <label>
+                    Bench limit
+                    <input type="number" min="0" max="50" data-match-policy-bench-size />
+                  </label>
+                </div>
+                <div class="match-log-team-pickers">
+                  <label>
+                    Team-list source
+                    <select data-match-policy-team-list-source>
+                      <option value="squad_only">Only from submitted sporting squad</option>
+                      <option value="house_pool">Allow direct house-pool selection</option>
+                    </select>
+                  </label>
+                  <label>
+                    Admin canonical edits
+                    <select data-match-policy-admin-edit>
+                      <option value="false">Read only</option>
+                      <option value="true">Allow admin edits</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="match-log-header-actions">
+                  <button type="button" class="btn btn-secondary" data-match-policy-save>Save competition rules</button>
+                  <p class="match-log-status" data-match-policy-status aria-live="polite">Competition rules use the default settings until changed.</p>
+                </div>
+              </div>
             </div>
           </section>
+          `
+            : ''}
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="manage-squads">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Manage House Sporting Squad</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              <div class="match-log-manager-toolbar">
+                <label>
+                  Sporting code
+                  <select data-match-manager-sport></select>
+                </label>
+              </div>
+              <p class="match-log-status" data-match-manager-status aria-live="polite">Select a sporting code to manage the house squad.</p>
+              <div class="match-log-manager-squad" data-match-manager-squad></div>
+            </div>
+          </section>
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="manage-team-lists">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
+              <span>Set Team Lists</span>
+            </button>
+            <div class="sports-workflow-body" data-sports-workflow-body>
+              ${canReviewMatchEvents ? '' : teamListPickerMarkup}
+              <p class="match-log-status" data-match-squad-status aria-live="polite">Choose a fixture to set the starting XI and substitutes for both teams.</p>
+              <div class="match-log-squad-manager" data-match-squad-manager></div>
+            </div>
+          </section>
+          ${canReviewMatchEvents
+            ? `
           <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="log-events">
             <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Log and Review Match Events</span>
@@ -863,8 +1769,53 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   </tbody>
                 </table>
               </div>
+              <div class="match-log-player-stats">
+                <h4>Player stats</h4>
+                <p class="match-log-status" data-match-player-stats-status aria-live="polite">No player stats yet.</p>
+                <div class="match-log-player-highlights" data-match-player-highlights>
+                  <div class="match-log-player-highlight-card">
+                    <span class="match-log-player-highlight-label">Top scorer</span>
+                    <strong data-match-highlight-scorer>—</strong>
+                  </div>
+                  <div class="match-log-player-highlight-card">
+                    <span class="match-log-player-highlight-label">Top assister</span>
+                    <strong data-match-highlight-assister>—</strong>
+                  </div>
+                  <div class="match-log-player-highlight-card">
+                    <span class="match-log-player-highlight-label">Most booked</span>
+                    <strong data-match-highlight-booked>—</strong>
+                  </div>
+                </div>
+                <div class="match-log-table-wrap">
+                  <table class="match-log-table match-log-player-stats-table">
+                    <thead>
+                      <tr>
+                        <th>Team</th>
+                        <th>Player</th>
+                        <th>Admission</th>
+                        <th>Goals</th>
+                        <th>Assists</th>
+                        <th>Yellow</th>
+                        <th>Red</th>
+                        <th>Events</th>
+                      </tr>
+                    </thead>
+                    <tbody data-match-player-stats-body>
+                      <tr>
+                        <td class="match-log-empty-cell" colspan="8">No player stats yet.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="match-log-footer-actions">
+                <button type="button" class="btn btn-primary" data-match-save-log>Save match log</button>
+                <p class="match-log-status" data-match-save-status aria-live="polite">Auto-save is on for every logged event.</p>
+              </div>
             </div>
           </section>
+          `
+            : ''}
           <div class="match-log-modal is-hidden" data-match-modal>
             <div class="match-log-modal-backdrop" data-match-close-modal></div>
             <article class="panel match-log-modal-panel" role="dialog" aria-modal="true" aria-label="Add match event">
@@ -900,7 +1851,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   <div class="match-log-form-grid">
                     <label data-player-label>
                       Player name
-                      <input type="text" name="playerName" maxlength="120" placeholder="e.g. Sipho" />
+                      <input type="text" name="playerName" maxlength="120" placeholder="Start typing player name" list="${playerOptionsId}" autocomplete="off" />
+                      <datalist id="${playerOptionsId}" data-match-player-options></datalist>
                     </label>
                     <label>
                       Jersey number
@@ -909,8 +1861,15 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   </div>
                   <label class="match-log-assist-row is-hidden" data-assist-row>
                     Assist by (optional)
-                    <input type="text" name="assistName" maxlength="120" placeholder="e.g. Themba" />
+                    <input type="text" name="assistName" maxlength="120" placeholder="Start typing assister name" list="${assistOptionsId}" autocomplete="off" />
+                    <datalist id="${assistOptionsId}" data-match-assist-options></datalist>
                   </label>
+                  <label class="match-log-replacement-row is-hidden" data-replacement-row>
+                    Player coming on
+                    <input type="text" name="replacementName" maxlength="120" placeholder="Start typing replacement name" list="${replacementOptionsId}" autocomplete="off" />
+                    <datalist id="${replacementOptionsId}" data-match-replacement-options></datalist>
+                  </label>
+                  <p class="match-log-inline-notice is-hidden" data-match-inline-notice></p>
                   <label>
                     Notes (optional)
                     <textarea name="notes" rows="3" maxlength="300" placeholder="Additional event context"></textarea>
@@ -937,6 +1896,26 @@ const getMatchStorageKey = (sectionKey) => {
 
 const getMatchLogByFixtureStorageKey = (fixtureSectionKey) =>
   `bhanoyi.matchLogByFixture.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const getFixtureCatalogStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.fixtures.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const getFixtureDateStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.fixtureDates.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const readLocalStorageObject = (key) => {
+  try {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) return {};
+    const raw = localStorage.getItem(normalizedKey);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+};
 
 const normalizeFixtureDateOnlyGlobal = (value) => {
   const raw = String(value || '').trim();
@@ -997,6 +1976,7 @@ const saveMatchLogByFixtureStore = (fixtureSectionKey, store) => {
   const key = getMatchLogByFixtureStorageKey(fixtureSectionKey);
   const safeStore = store && typeof store === 'object' ? store : {};
   localStorage.setItem(key, JSON.stringify(safeStore));
+  void persistLocalStore(key, safeStore);
   return key;
 };
 
@@ -1026,6 +2006,721 @@ const summarizeMatchLogEntry = (entry) => {
   };
 };
 
+const normalizeMatchPlayerEntry = (entry, fallback = {}) => {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const name = String(entry.name || entry.playerName || '').trim();
+  if (!name) return null;
+
+  const admissionNo = String(entry.admissionNo || entry.admission || '').trim();
+  const houseId = String(entry.houseId || fallback.houseId || '').trim().toLowerCase();
+  const baseId = String(entry.id || '').trim();
+  const normalizedNameKey = name.toLowerCase().replace(/\s+/g, ' ').trim();
+  const id = baseId || admissionNo || `${houseId || 'team'}:${normalizedNameKey}`;
+
+  return {
+    id,
+    name,
+    admissionNo,
+    houseId,
+    participantType: 'player',
+    roleLabel: 'Learner',
+    gender: String(entry.gender || '').trim(),
+    jerseyNumber: String(entry.jerseyNumber || '').trim(),
+    sportingCodes: Array.isArray(entry.sportingCodes)
+      ? Array.from(
+          new Set(
+            entry.sportingCodes
+              .map((value) => String(value || '').trim())
+              .filter(Boolean)
+          )
+        )
+      : []
+  };
+};
+
+const normalizeMatchPlayersForTeam = (players, fallback = {}) => {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(players) ? players : []).forEach((entry) => {
+    const player = normalizeMatchPlayerEntry(entry, fallback);
+    if (!player) return;
+    const dedupeKey = `${player.id}::${player.name.toLowerCase()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push(player);
+  });
+
+  return normalized.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const normalizeMatchStaffEntry = (entry, fallback = {}) => {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const name = String(
+    entry.displayName ||
+      entry.name ||
+      [entry.title || '', entry.firstName || '', entry.surname || ''].filter(Boolean).join(' ')
+  ).trim();
+  if (!name) return null;
+
+  const houseId = String(entry.houseId || fallback.houseId || '').trim().toLowerCase();
+  const staffNumber = String(entry.staffNumber || '').trim();
+  const loginEmail = String(entry.loginEmail || entry.email || '').trim().toLowerCase();
+  const normalizedNameKey = name.toLowerCase().replace(/\s+/g, ' ').trim();
+  const roleParts = [String(entry.staffType || '').trim(), String(entry.rank || entry.postLevel || '').trim()].filter(Boolean);
+
+  return {
+    id: staffNumber || loginEmail || `${houseId || 'staff'}:staff:${normalizedNameKey}`,
+    name,
+    admissionNo: '',
+    houseId,
+    participantType: 'staff',
+    roleLabel: roleParts.join(' · ') || 'Staff',
+    gender: String(entry.gender || '').trim(),
+    jerseyNumber: '',
+    sportingCodes: []
+  };
+};
+
+const normalizeMatchParticipantsForTeam = (participants, fallback = {}) => {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(participants) ? participants : []).forEach((entry) => {
+    const participant =
+      entry?.participantType === 'staff'
+        ? normalizeMatchStaffEntry(entry, fallback)
+        : normalizeMatchPlayerEntry(entry, fallback);
+    if (!participant) return;
+    const dedupeKey = `${participant.participantType}:${participant.id}::${participant.name.toLowerCase()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push(participant);
+  });
+
+  return normalized.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const mergeUniqueMatchParticipants = (...groups) => {
+  const merged = [];
+  const seen = new Set();
+
+  groups.forEach((group) => {
+    normalizeMatchParticipantsForTeam(group).forEach((participant) => {
+      const dedupeKey = `${participant.participantType}:${participant.id}::${participant.name.toLowerCase()}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      merged.push(participant);
+    });
+  });
+
+  return merged.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const inferSportCodeMatches = (sportLabel, sportingCodes = []) => {
+  const normalizedSport = String(sportLabel || '').trim().toLowerCase();
+  if (!normalizedSport) return false;
+
+  const hasSoccerLike = normalizedSport.includes('soccer') || normalizedSport.includes('football');
+  const hasNetballLike = normalizedSport.includes('netball');
+
+  const normalizedCodes = (Array.isArray(sportingCodes) ? sportingCodes : [])
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!normalizedCodes.length) return false;
+
+  if (hasSoccerLike) {
+    return normalizedCodes.some((entry) => entry.includes('soccer') || entry.includes('football'));
+  }
+
+  if (hasNetballLike) {
+    return normalizedCodes.some((entry) => entry.includes('netball'));
+  }
+
+  return normalizedCodes.some((entry) => normalizedSport.includes(entry) || entry.includes(normalizedSport));
+};
+
+const MAX_HOUSE_SPORT_SQUAD_PLAYERS = 30;
+const MAX_MATCH_STARTERS = 11;
+const MAX_MATCH_SUBSTITUTES = 6;
+const DEFAULT_MATCH_COMPETITION_POLICY = {
+  squadSizeLimit: MAX_HOUSE_SPORT_SQUAD_PLAYERS,
+  startingPlayers: MAX_MATCH_STARTERS,
+  benchSizeLimit: MAX_MATCH_SUBSTITUTES,
+  teamListSource: 'squad_only',
+  adminCanEditCanonicalRecords: false
+};
+const HOUSE_SPORT_OFFICIAL_ROLES = ['House Manager', 'Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
+
+const normalizeManagedSportKey = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('soccer') || raw.includes('football')) return 'soccer';
+  if (raw.includes('netball')) return 'netball';
+  return raw
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+};
+
+const buildManagedSportOptions = (...labels) => {
+  const options = new Map();
+
+  (labels || []).forEach((label) => {
+    const normalized = String(label || '').trim().toLowerCase();
+    if (!normalized) return;
+    if (normalized.includes('soccer') || normalized.includes('football')) {
+      options.set('soccer', 'Football');
+    }
+    if (normalized.includes('netball')) {
+      options.set('netball', 'Netball');
+    }
+  });
+
+  if (!options.size) {
+    options.set('soccer', 'Football');
+    options.set('netball', 'Netball');
+  }
+
+  return Array.from(options.entries()).map(([key, label]) => ({ key, label }));
+};
+
+const getHouseSportSquadStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.houseSportSquads.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const getMatchCompetitionPolicyStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.matchCompetitionPolicy.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
+const createEmptyHouseSportSquad = () => ({
+  players: [],
+  officials: []
+});
+
+const normalizeMatchCompetitionPolicy = (value = {}, fallback = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const base = fallback && typeof fallback === 'object' && !Array.isArray(fallback) ? fallback : DEFAULT_MATCH_COMPETITION_POLICY;
+  const toPositiveInt = (candidate, defaultValue, minimum = 1, maximum = 99) => {
+    const parsed = Number(candidate);
+    if (!Number.isFinite(parsed)) return defaultValue;
+    return Math.min(maximum, Math.max(minimum, Math.floor(parsed)));
+  };
+  const normalizedTeamListSource = String(source.teamListSource || base.teamListSource || 'squad_only').trim().toLowerCase();
+
+  return {
+    squadSizeLimit: toPositiveInt(source.squadSizeLimit, base.squadSizeLimit || DEFAULT_MATCH_COMPETITION_POLICY.squadSizeLimit, 1, 200),
+    startingPlayers: toPositiveInt(source.startingPlayers, base.startingPlayers || DEFAULT_MATCH_COMPETITION_POLICY.startingPlayers, 1, 30),
+    benchSizeLimit: toPositiveInt(source.benchSizeLimit, base.benchSizeLimit || DEFAULT_MATCH_COMPETITION_POLICY.benchSizeLimit, 0, 50),
+    teamListSource: ['squad_only', 'house_pool'].includes(normalizedTeamListSource) ? normalizedTeamListSource : 'squad_only',
+    adminCanEditCanonicalRecords: Boolean(
+      source.adminCanEditCanonicalRecords ?? base.adminCanEditCanonicalRecords ?? DEFAULT_MATCH_COMPETITION_POLICY.adminCanEditCanonicalRecords
+    )
+  };
+};
+
+const normalizeManagedHouseSportOfficial = (entry, fallback = {}) => {
+  const normalized = normalizeMatchStaffEntry(entry, fallback);
+  if (!normalized) return null;
+
+  const requestedRole = String(entry?.assignmentRole || entry?.managedRole || entry?.officialRole || '').trim();
+  const assignmentRole = HOUSE_SPORT_OFFICIAL_ROLES.includes(requestedRole) ? requestedRole : 'Team Manager';
+  return {
+    ...normalized,
+    assignmentRole,
+    roleLabel: assignmentRole
+  };
+};
+
+const normalizeHouseSportSquadEntry = (entry, houseId) => {
+  const source = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
+  return {
+    players: normalizeMatchPlayersForTeam(source.players || [], { houseId }),
+    officials: (Array.isArray(source.officials) ? source.officials : [])
+      .map((official) => normalizeManagedHouseSportOfficial(official, { houseId }))
+      .filter(Boolean)
+  };
+};
+
+const loadHouseSportSquadStore = (fixtureSectionKey) => {
+  try {
+    const raw = localStorage.getItem(getHouseSportSquadStorageKey(fixtureSectionKey));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistHouseSportSquadStore = (fixtureSectionKey, store) => {
+  const storageKey = getHouseSportSquadStorageKey(fixtureSectionKey);
+  const safeStore = store && typeof store === 'object' && !Array.isArray(store) ? store : {};
+  localStorage.setItem(storageKey, JSON.stringify(safeStore));
+  void persistLocalStore(storageKey, safeStore);
+  return storageKey;
+};
+
+const loadMatchCompetitionPolicyStore = (fixtureSectionKey) => {
+  try {
+    const raw = localStorage.getItem(getMatchCompetitionPolicyStorageKey(fixtureSectionKey));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistMatchCompetitionPolicyStore = (fixtureSectionKey, store) => {
+  const storageKey = getMatchCompetitionPolicyStorageKey(fixtureSectionKey);
+  const safeStore = store && typeof store === 'object' && !Array.isArray(store) ? store : {};
+  localStorage.setItem(storageKey, JSON.stringify(safeStore));
+  void persistLocalStore(storageKey, safeStore);
+  return storageKey;
+};
+
+const readMatchCompetitionPolicy = (store, sportKey, fallback = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  if (!normalizedSportKey) return normalizeMatchCompetitionPolicy({}, fallback);
+
+  const source = store && typeof store === 'object' && !Array.isArray(store) ? store[normalizedSportKey] : null;
+  return normalizeMatchCompetitionPolicy(source, fallback);
+};
+
+const writeMatchCompetitionPolicy = (store, sportKey, value, fallback = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  if (!normalizedSportKey) return store;
+
+  const nextStore = store && typeof store === 'object' && !Array.isArray(store) ? { ...store } : {};
+  nextStore[normalizedSportKey] = normalizeMatchCompetitionPolicy(value, fallback);
+  return nextStore;
+};
+
+const readHouseSportSquad = (store, sportKey, houseId) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  const normalizedHouseId = String(houseId || '').trim().toLowerCase();
+  if (!normalizedSportKey || !normalizedHouseId) return createEmptyHouseSportSquad();
+
+  const sportBucket = store && typeof store === 'object' && !Array.isArray(store) ? store[normalizedSportKey] : null;
+  const nextEntry = sportBucket && typeof sportBucket === 'object' && !Array.isArray(sportBucket) ? sportBucket[normalizedHouseId] : null;
+  return normalizeHouseSportSquadEntry(nextEntry, normalizedHouseId);
+};
+
+const writeHouseSportSquad = (store, sportKey, houseId, entry) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  const normalizedHouseId = String(houseId || '').trim().toLowerCase();
+  if (!normalizedSportKey || !normalizedHouseId) return store;
+
+  const nextStore = store && typeof store === 'object' && !Array.isArray(store) ? { ...store } : {};
+  const nextSportBucket = nextStore[normalizedSportKey] && typeof nextStore[normalizedSportKey] === 'object' && !Array.isArray(nextStore[normalizedSportKey])
+    ? { ...nextStore[normalizedSportKey] }
+    : {};
+
+  nextSportBucket[normalizedHouseId] = normalizeHouseSportSquadEntry(entry, normalizedHouseId);
+  nextStore[normalizedSportKey] = nextSportBucket;
+  return nextStore;
+};
+
+const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel, { filterBySportingCode = true } = {}) => {
+  const targetHouseIds = new Set(
+    [String(homeId || '').trim().toLowerCase(), String(awayId || '').trim().toLowerCase()].filter(Boolean)
+  );
+  const byHouse = {
+    [String(homeId || '').trim().toLowerCase()]: [],
+    [String(awayId || '').trim().toLowerCase()]: []
+  };
+
+  if (!targetHouseIds.size) return byHouse;
+
+  const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
+  const houseBuckets = new Map();
+
+  enrollmentKeys.forEach((key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const profiles = parsed?.classProfilesByGrade;
+      if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles)) return;
+
+      Object.values(profiles).forEach((gradeProfiles) => {
+        if (!gradeProfiles || typeof gradeProfiles !== 'object' || Array.isArray(gradeProfiles)) return;
+        Object.values(gradeProfiles).forEach((profile) => {
+          const learners = Array.isArray(profile?.learners) ? profile.learners : [];
+          learners.forEach((learner) => {
+            if (!learner || typeof learner !== 'object') return;
+            const houseId = String(learner.houseId || '').trim().toLowerCase();
+            if (!targetHouseIds.has(houseId)) return;
+            const name = String(learner.name || '').trim();
+            if (!name) return;
+
+            const admissionNo = String(learner.admissionNo || '').trim();
+            const entry = {
+              id: admissionNo || `${houseId}:${name.toLowerCase().replace(/\s+/g, ' ').trim()}`,
+              name,
+              admissionNo,
+              houseId,
+              gender: String(learner.gender || '').trim(),
+              sportingCodes: Array.isArray(learner.sportingCodes)
+                ? learner.sportingCodes.map((value) => String(value || '').trim()).filter(Boolean)
+                : []
+            };
+
+            if (!houseBuckets.has(houseId)) {
+              houseBuckets.set(houseId, []);
+            }
+            houseBuckets.get(houseId).push(entry);
+          });
+        });
+      });
+    } catch {
+      return;
+    }
+  });
+
+  targetHouseIds.forEach((houseId) => {
+    const allPlayers = normalizeMatchPlayersForTeam(houseBuckets.get(houseId) || [], { houseId });
+    if (!filterBySportingCode) {
+      byHouse[houseId] = allPlayers;
+      return;
+    }
+    const sportFiltered = allPlayers.filter((player) => inferSportCodeMatches(sportLabel, player.sportingCodes));
+    byHouse[houseId] = sportFiltered.length ? sportFiltered : allPlayers;
+  });
+
+  return byHouse;
+};
+
+const loadEnrollmentStaffByHouse = (homeId, awayId) => {
+  const targetHouseIds = new Set(
+    [String(homeId || '').trim().toLowerCase(), String(awayId || '').trim().toLowerCase()].filter(Boolean)
+  );
+  const byHouse = {
+    [String(homeId || '').trim().toLowerCase()]: [],
+    [String(awayId || '').trim().toLowerCase()]: []
+  };
+
+  if (!targetHouseIds.size) return byHouse;
+
+  const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
+
+  enrollmentKeys.forEach((key) => {
+    try {
+      const parsed = readEnrollmentStoreLocal(key);
+      const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
+      staffMembers.forEach((staff) => {
+        const normalized = normalizeMatchStaffEntry(staff);
+        if (!normalized || !targetHouseIds.has(normalized.houseId)) return;
+        byHouse[normalized.houseId] = [...(byHouse[normalized.houseId] || []), normalized];
+      });
+    } catch {
+      return;
+    }
+  });
+
+  targetHouseIds.forEach((houseId) => {
+    byHouse[houseId] = normalizeMatchParticipantsForTeam(byHouse[houseId] || [], { houseId });
+  });
+
+  return byHouse;
+};
+
+const DEFAULT_MATCH_DISCIPLINE_POLICY = {
+  straightRedSuspensionMatches: 1,
+  secondYellowSuspensionMatches: 1,
+  yellowAccumulationThreshold: 2,
+  yellowAccumulationSuspensionMatches: 1
+};
+
+const normalizeMatchDisciplinePolicy = (value = {}) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const toPositiveInt = (candidate, fallback) => {
+    const parsed = Number(candidate);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1, Math.floor(parsed));
+  };
+
+  return {
+    straightRedSuspensionMatches: toPositiveInt(
+      source.straightRedSuspensionMatches,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.straightRedSuspensionMatches
+    ),
+    secondYellowSuspensionMatches: toPositiveInt(
+      source.secondYellowSuspensionMatches,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.secondYellowSuspensionMatches
+    ),
+    yellowAccumulationThreshold: toPositiveInt(
+      source.yellowAccumulationThreshold,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationThreshold
+    ),
+    yellowAccumulationSuspensionMatches: toPositiveInt(
+      source.yellowAccumulationSuspensionMatches,
+      DEFAULT_MATCH_DISCIPLINE_POLICY.yellowAccumulationSuspensionMatches
+    )
+  };
+};
+
+const createEmptyMatchTeamSheet = () => ({
+  starters: [],
+  substitutes: []
+});
+
+const buildEmptySquadDirtyState = (fixture) => {
+  if (!fixture) return {};
+  return {
+    [fixture.homeId]: false,
+    [fixture.awayId]: false
+  };
+};
+
+const validateMatchTeamSheet = (sheet, limits = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const policy = normalizeMatchCompetitionPolicy(limits, DEFAULT_MATCH_COMPETITION_POLICY);
+  const starters = normalizeMatchPlayersForTeam(sheet?.starters || []);
+  const substitutes = normalizeMatchPlayersForTeam(sheet?.substitutes || []);
+  const starterIds = new Set();
+  const duplicateStarterIds = new Set();
+
+  starters.forEach((player) => {
+    if (starterIds.has(player.id)) {
+      duplicateStarterIds.add(player.id);
+      return;
+    }
+    starterIds.add(player.id);
+  });
+
+  const overlapPlayers = substitutes.filter((player) => starterIds.has(player.id));
+  const errors = [];
+
+  if (starters.length !== policy.startingPlayers) {
+    errors.push(`Starting lineup must contain exactly ${policy.startingPlayers} players before saving.`);
+  }
+
+  if (substitutes.length > policy.benchSizeLimit) {
+    errors.push(`Substitutes may not exceed ${policy.benchSizeLimit} players.`);
+  }
+
+  if (duplicateStarterIds.size) {
+    errors.push('A player cannot be added twice to the starting lineup.');
+  }
+
+  if (overlapPlayers.length) {
+    errors.push('A player cannot appear in both the starting lineup and substitutes.');
+  }
+
+  return {
+    starters,
+    substitutes,
+    errors,
+    hasSelections: starters.length > 0 || substitutes.length > 0,
+    isReady: errors.length === 0
+  };
+};
+
+const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) => {
+  if (!fixture) return {};
+
+  const source = squadByTeam && typeof squadByTeam === 'object' ? squadByTeam : {};
+  const resolveTeamSource = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim().toLowerCase();
+    return source[teamId] || source[normalizedTeamId] || {};
+  };
+
+  const normalizeTeamGroup = (values, teamId, excludedIds = new Set()) => {
+    const teamPlayers = normalizeMatchPlayersForTeam(playersByTeam?.[teamId] || [], { houseId: teamId });
+    const playerById = new Map(teamPlayers.map((player) => [player.id, player]));
+    const playerByName = new Map(
+      teamPlayers.map((player) => [player.name.toLowerCase().replace(/\s+/g, ' ').trim(), player])
+    );
+    const resolved = [];
+    const seen = new Set([...excludedIds]);
+
+    (Array.isArray(values) ? values : []).forEach((entry) => {
+      const normalized = normalizeMatchPlayerEntry(entry, { houseId: teamId });
+      if (!normalized) return;
+      const matched =
+        playerById.get(normalized.id) ||
+        playerByName.get(normalized.name.toLowerCase().replace(/\s+/g, ' ').trim()) ||
+        normalized;
+      if (seen.has(matched.id)) return;
+      seen.add(matched.id);
+      resolved.push(matched);
+    });
+
+    return normalizeMatchPlayersForTeam(resolved, { houseId: teamId });
+  };
+
+  return {
+    [fixture.homeId]: (() => {
+      const teamSource = resolveTeamSource(fixture.homeId);
+      const starters = normalizeTeamGroup(
+        teamSource.starters || teamSource.starting || [],
+        fixture.homeId
+      );
+      const substitutes = normalizeTeamGroup(
+        teamSource.substitutes || teamSource.bench || [],
+        fixture.homeId,
+        new Set(starters.map((player) => player.id))
+      );
+      return { starters, substitutes };
+    })(),
+    [fixture.awayId]: (() => {
+      const teamSource = resolveTeamSource(fixture.awayId);
+      const starters = normalizeTeamGroup(
+        teamSource.starters || teamSource.starting || [],
+        fixture.awayId
+      );
+      const substitutes = normalizeTeamGroup(
+        teamSource.substitutes || teamSource.bench || [],
+        fixture.awayId,
+        new Set(starters.map((player) => player.id))
+      );
+      return { starters, substitutes };
+    })()
+  };
+};
+
+const buildMatchParticipantKeySet = (participant) => {
+  if (!participant || typeof participant !== 'object') return new Set();
+
+  const keys = [
+    String(participant.id || '').trim(),
+    String(participant.admissionNo || '').trim(),
+    String(participant.name || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  ].filter(Boolean);
+
+  return new Set(keys);
+};
+
+const normalizeFixturePlayersByTeam = (fixture, storedPlayersByTeam, fallbackPlayersByTeam = null) => {
+  if (!fixture) return {};
+  const homeId = String(fixture.homeId || '').trim();
+  const awayId = String(fixture.awayId || '').trim();
+  const normalizedHomeId = homeId.toLowerCase();
+  const normalizedAwayId = awayId.toLowerCase();
+
+  const stored = storedPlayersByTeam && typeof storedPlayersByTeam === 'object' ? storedPlayersByTeam : {};
+  const fallback = fallbackPlayersByTeam && typeof fallbackPlayersByTeam === 'object' ? fallbackPlayersByTeam : {};
+  const pickTeamPlayers = (source, teamId, normalizedTeamId, legacyKey) => {
+    if (!source || typeof source !== 'object') return [];
+    return source[teamId] || source[normalizedTeamId] || source[legacyKey] || [];
+  };
+
+  const homePlayers = normalizeMatchPlayersForTeam(
+    pickTeamPlayers(stored, homeId, normalizedHomeId, 'homePlayers') ||
+      pickTeamPlayers(fallback, homeId, normalizedHomeId, 'homePlayers') ||
+      [],
+    { houseId: normalizedHomeId || homeId }
+  );
+  const awayPlayers = normalizeMatchPlayersForTeam(
+    pickTeamPlayers(stored, awayId, normalizedAwayId, 'awayPlayers') ||
+      pickTeamPlayers(fallback, awayId, normalizedAwayId, 'awayPlayers') ||
+      [],
+    { houseId: normalizedAwayId || awayId }
+  );
+
+  const derived = loadEnrollmentPlayersByHouse(normalizedHomeId || homeId, normalizedAwayId || awayId, fixture.sport || '');
+  const resolvedHomePlayers = homePlayers.length
+    ? homePlayers
+    : normalizeMatchPlayersForTeam(derived[normalizedHomeId] || derived[homeId] || [], {
+        houseId: normalizedHomeId || homeId
+      });
+  const resolvedAwayPlayers = awayPlayers.length
+    ? awayPlayers
+    : normalizeMatchPlayersForTeam(derived[normalizedAwayId] || derived[awayId] || [], {
+        houseId: normalizedAwayId || awayId
+      });
+
+  return {
+    [homeId]: resolvedHomePlayers,
+    [awayId]: resolvedAwayPlayers
+  };
+};
+
+const buildPlayerEventIndex = (events, fixture, playersByTeam) => {
+  if (!fixture) return [];
+  const playerById = new Map();
+
+  [fixture.homeId, fixture.awayId].forEach((teamId) => {
+    const teamPlayers = normalizeMatchPlayersForTeam(playersByTeam?.[teamId] || [], { houseId: teamId });
+    teamPlayers.forEach((player) => {
+      playerById.set(player.id, player);
+    });
+  });
+
+  const index = new Map();
+
+  (Array.isArray(events) ? events : []).forEach((event) => {
+    const teamId = String(event?.teamId || '').trim();
+    if (!teamId) return;
+
+    const eventType = String(event?.type || '').trim();
+    const playerName = String(event?.playerName || '').trim();
+    const playerId = String(event?.playerId || '').trim();
+    if (!playerName && !playerId) return;
+
+    const resolved = playerById.get(playerId) || null;
+    const key = `${teamId}::${playerId || playerName.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+    const existing =
+      index.get(key) ||
+      {
+        key,
+        teamId,
+        playerId: playerId || (resolved?.id || ''),
+        name: playerName || (resolved?.name || ''),
+        admissionNo: String(event?.playerAdmissionNo || resolved?.admissionNo || '').trim(),
+        totalEvents: 0,
+        assistCount: 0,
+        eventTypes: {},
+        lastEventAt: 0
+      };
+
+    existing.totalEvents += 1;
+    if (eventType) {
+      existing.eventTypes[eventType] = (existing.eventTypes[eventType] || 0) + 1;
+    }
+    const createdAt = Number(event?.createdAt);
+    if (Number.isFinite(createdAt) && createdAt > existing.lastEventAt) {
+      existing.lastEventAt = createdAt;
+    }
+
+    index.set(key, existing);
+
+    const assistName = String(event?.assistName || '').trim();
+    const assistId = String(event?.assistId || '').trim();
+    if (!assistName && !assistId) return;
+
+    const resolvedAssist = playerById.get(assistId) || null;
+    const assistKey = `${teamId}::${assistId || assistName.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+    const assistExisting =
+      index.get(assistKey) ||
+      {
+        key: assistKey,
+        teamId,
+        playerId: assistId || (resolvedAssist?.id || ''),
+        name: assistName || (resolvedAssist?.name || ''),
+        admissionNo: String(event?.assistAdmissionNo || resolvedAssist?.admissionNo || '').trim(),
+        totalEvents: 0,
+        assistCount: 0,
+        eventTypes: {},
+        lastEventAt: 0
+      };
+
+    assistExisting.assistCount += 1;
+    if (Number.isFinite(createdAt) && createdAt > assistExisting.lastEventAt) {
+      assistExisting.lastEventAt = createdAt;
+    }
+
+    index.set(assistKey, assistExisting);
+  });
+
+  return Array.from(index.values()).sort((left, right) => {
+    if (left.teamId !== right.teamId) return left.teamId.localeCompare(right.teamId);
+    return left.name.localeCompare(right.name);
+  });
+};
+
 const getOtherTeamId = (teamId, teams) => {
   const other = teams.find((entry) => entry.id !== teamId);
   return other ? other.id : teamId;
@@ -1040,15 +2735,45 @@ const formatMatchMinuteLabel = (minute, stoppage) => {
   return `${base}'`;
 };
 
-const renderMatchEventItem = (event, definition) => {
+const MATCH_CONTROL_EVENT_DEFINITIONS = {
+  match_pause: {
+    key: 'match_pause',
+    label: 'Match paused',
+    icon: '⏸️',
+    scoreFor: 'none'
+  },
+  match_resume: {
+    key: 'match_resume',
+    label: 'Match resumed',
+    icon: '▶️',
+    scoreFor: 'none'
+  }
+};
+
+const formatClockDuration = (milliseconds) => {
+  const safeMs = Number.isFinite(Number(milliseconds)) ? Math.max(0, Math.floor(Number(milliseconds))) : 0;
+  const totalSeconds = Math.floor(safeMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+const renderMatchEventItem = (event, definition, options = {}) => {
+  const editable = options.editable === true;
   const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
   const playerParts = [event.playerName || '', event.jerseyNumber ? `#${event.jerseyNumber}` : ''].filter(Boolean);
   const playerLabel = playerParts.join(' ');
-  const detailParts = [
-    playerLabel,
-    event.assistName ? `Assist: ${event.assistName}` : '',
-    event.notes || ''
-  ].filter(Boolean);
+  const detailParts = definition?.key === 'substitution'
+    ? [
+        playerLabel ? `Off: ${playerLabel}` : '',
+        event.replacementName ? `On: ${event.replacementName}` : '',
+        event.notes || ''
+      ].filter(Boolean)
+    : [
+        playerLabel,
+        event.assistName ? `Assist: ${event.assistName}` : '',
+        event.notes || ''
+      ].filter(Boolean);
 
   return `
     <div class="match-log-event-item" data-event-type="${event.type}">
@@ -1058,11 +2783,19 @@ const renderMatchEventItem = (event, definition) => {
         ${minute ? `<span class="match-log-event-minute">${minute}</span>` : ''}
       </div>
       ${detailParts.length ? `<p class="match-log-event-detail">${escapeHtmlText(detailParts.join(' · '))}</p>` : ''}
+      ${editable
+        ? `
+          <div class="match-log-event-actions">
+            <button type="button" class="btn btn-secondary" data-match-edit-event="${escapeHtmlAttribute(event.id || '')}">Edit</button>
+            <button type="button" class="btn btn-secondary" data-match-delete-event="${escapeHtmlAttribute(event.id || '')}">Delete</button>
+          </div>
+        `
+        : ''}
     </div>
   `;
 };
 
-const hydrateMatchLog = (matchLogNode) => {
+function hydrateMatchLog(matchLogNode) {
   const rawConfig = (matchLogNode.dataset.matchLogConfig || '').trim();
   if (!rawConfig) return;
 
@@ -1078,8 +2811,13 @@ const hydrateMatchLog = (matchLogNode) => {
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const matchLogStoreStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+  const houseSportSquadStorageKey = getHouseSportSquadStorageKey(fixtureSectionKey);
 
   const eventTypes = normalizeMatchEventTypes(config.eventTypes);
+  const disciplinePolicy = normalizeMatchDisciplinePolicy(config.disciplinePolicy);
+  const pauseReasons = (Array.isArray(config.pauseReasons) ? config.pauseReasons : [])
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
   try {
     const persistedHouseOptions = (Array.isArray(config.houseOptions) ? config.houseOptions : [])
       .map((entry, index) => ({
@@ -1094,16 +2832,44 @@ const hydrateMatchLog = (matchLogNode) => {
   } catch {
     // ignore house option persistence errors
   }
-  const eventTypeByKey = new Map(eventTypes.map((entry) => [entry.key, entry]));
+  const eventTypeByKey = new Map([
+    ...eventTypes.map((entry) => [entry.key, entry]),
+    ...Object.values(MATCH_CONTROL_EVENT_DEFINITIONS).map((entry) => [entry.key, entry])
+  ]);
   const baseInitialScores = config.initialScores && typeof config.initialScores === 'object' ? config.initialScores : {};
 
   const statusNode = matchLogNode.querySelector('[data-match-status]');
   const selectedFixtureNode = matchLogNode.querySelector('[data-match-selected-fixture]');
+  const matchClockNode = matchLogNode.querySelector('[data-match-clock]');
+  const interruptionClockNode = matchLogNode.querySelector('[data-match-interruption-clock]');
+  const clockStatusNode = matchLogNode.querySelector('[data-match-clock-status]');
+  const startClockButton = matchLogNode.querySelector('[data-match-clock-start]');
+  const pauseButton = matchLogNode.querySelector('[data-match-pause]');
+  const resumeButton = matchLogNode.querySelector('[data-match-resume]');
+  const pauseReasonSelect = matchLogNode.querySelector('[data-match-pause-reason]');
   const leftNameNode = matchLogNode.querySelector('[data-left-team-name]');
   const rightNameNode = matchLogNode.querySelector('[data-right-team-name]');
   const leftScoreNode = matchLogNode.querySelector('[data-left-team-score]');
   const rightScoreNode = matchLogNode.querySelector('[data-right-team-score]');
   const tableBodyNode = matchLogNode.querySelector('[data-match-table-body]');
+  const playerStatsBodyNode = matchLogNode.querySelector('[data-match-player-stats-body]');
+  const playerStatsStatusNode = matchLogNode.querySelector('[data-match-player-stats-status]');
+  const topScorerNode = matchLogNode.querySelector('[data-match-highlight-scorer]');
+  const topAssisterNode = matchLogNode.querySelector('[data-match-highlight-assister]');
+  const mostBookedNode = matchLogNode.querySelector('[data-match-highlight-booked]');
+  const managerStatusNode = matchLogNode.querySelector('[data-match-manager-status]');
+  const managerSportSelect = matchLogNode.querySelector('[data-match-manager-sport]');
+  const managerSquadNode = matchLogNode.querySelector('[data-match-manager-squad]');
+  const policySportSelect = matchLogNode.querySelector('[data-match-policy-sport]');
+  const policySquadSizeInput = matchLogNode.querySelector('[data-match-policy-squad-size]');
+  const policyStartersInput = matchLogNode.querySelector('[data-match-policy-starters]');
+  const policyBenchInput = matchLogNode.querySelector('[data-match-policy-bench-size]');
+  const policyTeamListSourceSelect = matchLogNode.querySelector('[data-match-policy-team-list-source]');
+  const policyAdminEditSelect = matchLogNode.querySelector('[data-match-policy-admin-edit]');
+  const policySaveButton = matchLogNode.querySelector('[data-match-policy-save]');
+  const policyStatusNode = matchLogNode.querySelector('[data-match-policy-status]');
+  const squadStatusNode = matchLogNode.querySelector('[data-match-squad-status]');
+  const squadManagerNode = matchLogNode.querySelector('[data-match-squad-manager]');
   const matchDaySelect = matchLogNode.querySelector('[data-matchday-select]');
   const fixtureSelect = matchLogNode.querySelector('[data-match-fixture-select]');
   const modal = matchLogNode.querySelector('[data-match-modal]');
@@ -1111,6 +2877,8 @@ const hydrateMatchLog = (matchLogNode) => {
   const modalTeamSelect = matchLogNode.querySelector('[data-match-modal-team-select]');
   const exportButton = matchLogNode.querySelector('[data-match-export]');
   const exportTemplateButton = matchLogNode.querySelector('[data-match-export-template]');
+  const saveLogButton = matchLogNode.querySelector('[data-match-save-log]');
+  const saveStatusNode = matchLogNode.querySelector('[data-match-save-status]');
   const typeStep = matchLogNode.querySelector('[data-match-step="type"]');
   const detailsStep = matchLogNode.querySelector('[data-match-step="details"]');
   const typeListNode = matchLogNode.querySelector('[data-match-event-types]');
@@ -1125,12 +2893,18 @@ const hydrateMatchLog = (matchLogNode) => {
   const eventForm = matchLogNode.querySelector('[data-match-event-form]');
   const playerLabelNode = matchLogNode.querySelector('[data-player-label]');
   const assistRow = matchLogNode.querySelector('[data-assist-row]');
+  const replacementRow = matchLogNode.querySelector('[data-replacement-row]');
+  const inlineNoticeNode = matchLogNode.querySelector('[data-match-inline-notice]');
   const minuteInput = eventForm?.querySelector('input[name="minute"]');
   const stoppageInput = eventForm?.querySelector('input[name="stoppage"]');
   const playerInput = eventForm?.querySelector('input[name="playerName"]');
   const jerseyInput = eventForm?.querySelector('input[name="jerseyNumber"]');
   const assistInput = eventForm?.querySelector('input[name="assistName"]');
+  const replacementInput = eventForm?.querySelector('input[name="replacementName"]');
   const notesInput = eventForm?.querySelector('textarea[name="notes"]');
+  const playerOptionsNode = matchLogNode.querySelector('[data-match-player-options]');
+  const assistOptionsNode = matchLogNode.querySelector('[data-match-assist-options]');
+  const replacementOptionsNode = matchLogNode.querySelector('[data-match-replacement-options]');
 
   portalOverlayToBody(workspaceModal, `match-log-workspace:${sectionKey}`);
   portalOverlayToBody(modal, `match-log-modal:${sectionKey}`);
@@ -1152,6 +2926,17 @@ const hydrateMatchLog = (matchLogNode) => {
 
   const workflowSteps = initSportsWorkflowSteps(matchLogNode);
   const openButtons = Array.from(matchLogNode.querySelectorAll('[data-match-open-event-side]'));
+  const activeStaffProfile = isStaffModeEnabled() ? resolveActiveStaffProfile() : null;
+  const managedHouseId = String(activeStaffProfile?.houseId || '').trim().toLowerCase();
+  const isStaffManagerMode = isStaffModeEnabled() && Boolean(managedHouseId);
+  const canOperateMatchLog = isAdminModeEnabled() || isStaffManagerMode;
+  const managerSportOptions = buildManagedSportOptions(config.sport);
+
+  if (managerSportSelect instanceof HTMLSelectElement) {
+    managerSportSelect.innerHTML = managerSportOptions
+      .map((option) => `<option value="${escapeHtmlAttribute(option.key)}">${escapeHtmlText(option.label)}</option>`)
+      .join('');
+  }
 
   const parseDateTimeStamp = (stamp) => {
     const normalized = normalizeFixtureStampGlobal(stamp);
@@ -1175,6 +2960,34 @@ const hydrateMatchLog = (matchLogNode) => {
     });
   };
 
+  const renderCompetitionPolicyControls = (message = '') => {
+    if (policySportSelect instanceof HTMLSelectElement) {
+      policySportSelect.value = getSelectedPolicySportKey();
+    }
+
+    const policy = getSelectedPolicyCompetitionPolicy();
+
+    if (policySquadSizeInput instanceof HTMLInputElement) {
+      policySquadSizeInput.value = String(policy.squadSizeLimit);
+    }
+    if (policyStartersInput instanceof HTMLInputElement) {
+      policyStartersInput.value = String(policy.startingPlayers);
+    }
+    if (policyBenchInput instanceof HTMLInputElement) {
+      policyBenchInput.value = String(policy.benchSizeLimit);
+    }
+    if (policyTeamListSourceSelect instanceof HTMLSelectElement) {
+      policyTeamListSourceSelect.value = policy.teamListSource;
+    }
+    if (policyAdminEditSelect instanceof HTMLSelectElement) {
+      policyAdminEditSelect.value = policy.adminCanEditCanonicalRecords ? 'true' : 'false';
+    }
+    if (policyStatusNode instanceof HTMLElement) {
+      const sportLabel = managerSportOptions.find((entry) => entry.key === getSelectedPolicySportKey())?.label || 'Sport';
+      policyStatusNode.textContent = message || `${sportLabel}: squad ${policy.squadSizeLimit}, starters ${policy.startingPlayers}, bench ${policy.benchSizeLimit}, team lists from ${getTeamListSourceLabel(policy)}, admin canonical edits ${policy.adminCanEditCanonicalRecords ? 'enabled' : 'locked'}.`;
+    }
+  };
+
   let fixtureCatalog = {};
   let fixtureDateMap = {};
   let fixtureOptions = [];
@@ -1183,19 +2996,453 @@ const hydrateMatchLog = (matchLogNode) => {
   let selectedFixtureId = '';
   let activeTeamId = '';
   let selectedTypeKey = '';
+  let editingEventId = '';
   let currentEvents = [];
+  let currentPlayersByTeam = {};
+  let currentHousePlayersByTeam = {};
+  let currentStaffByTeam = {};
+  let savedSquadByTeam = {};
+  let currentSquadByTeam = {};
+  let squadDirtyByTeam = {};
+  let matchStartedAt = null;
+  let interruptionAccumulatedMs = 0;
+  let activePauseStartedAt = null;
+  let activePauseReason = '';
+  let pauseCompensationStartedAt = null;
+  let clockTickerId = null;
+  let houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
+  let matchCompetitionPolicyStore = loadMatchCompetitionPolicyStore(fixtureSectionKey);
+  let selectedManagerSportKey = managerSportOptions[0]?.key || 'soccer';
+  let selectedPolicySportKey = managerSportOptions[0]?.key || 'soccer';
+
+  if (managerSportSelect instanceof HTMLSelectElement) {
+    managerSportSelect.value = selectedManagerSportKey;
+    managerSportSelect.disabled = isAdminModeEnabled();
+  }
+  if (policySportSelect instanceof HTMLSelectElement) {
+    policySportSelect.innerHTML = managerSportOptions
+      .map((option) => `<option value="${escapeHtmlAttribute(option.key)}">${escapeHtmlText(option.label)}</option>`)
+      .join('');
+    policySportSelect.value = selectedPolicySportKey;
+  }
+
+  const canViewTeam = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim().toLowerCase();
+    if (!normalizedTeamId) return false;
+    if (isAdminModeEnabled()) return true;
+    return isStaffManagerMode && normalizedTeamId === managedHouseId;
+  };
+
+  const canEditCanonicalTeam = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim().toLowerCase();
+    if (!normalizedTeamId) return false;
+    if (isAdminModeEnabled()) return getFixtureCompetitionPolicy().adminCanEditCanonicalRecords;
+    return isStaffManagerMode && normalizedTeamId === managedHouseId;
+  };
+
+  const canEditTeamEvents = (teamId) => isAdminModeEnabled() && canViewTeam(teamId);
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
+
+  const getCurrentSportKey = () => {
+    const fixture = getCurrentFixture();
+    const fromFixture = normalizeManagedSportKey(fixture?.sport || '');
+    if (fromFixture) return fromFixture;
+    return normalizeManagedSportKey(selectedManagerSportKey || config.sport || '') || managerSportOptions[0]?.key || 'soccer';
+  };
+
+  const getCurrentSportLabel = () => {
+    const sportKey = getCurrentSportKey();
+    return managerSportOptions.find((entry) => entry.key === sportKey)?.label || 'Football';
+  };
+
+  const getSelectedManagerSportKey = () =>
+    normalizeManagedSportKey(selectedManagerSportKey || config.sport || '') || managerSportOptions[0]?.key || 'soccer';
+
+  const getSelectedManagerSportLabel = () => {
+    const sportKey = getSelectedManagerSportKey();
+    return managerSportOptions.find((entry) => entry.key === sportKey)?.label || 'Football';
+  };
+
+  const getSelectedPolicySportKey = () =>
+    normalizeManagedSportKey(selectedPolicySportKey || getCurrentSportKey() || config.sport || '') || managerSportOptions[0]?.key || 'soccer';
+
+  const getCompetitionPolicy = (sportKey = getCurrentSportKey()) =>
+    readMatchCompetitionPolicy(matchCompetitionPolicyStore, sportKey, DEFAULT_MATCH_COMPETITION_POLICY);
+
+  const getSelectedPolicyCompetitionPolicy = () => getCompetitionPolicy(getSelectedPolicySportKey());
+
+  const getFixtureCompetitionPolicy = (fixture = getCurrentFixture()) =>
+    getCompetitionPolicy(normalizeManagedSportKey(fixture?.sport || getCurrentSportKey() || config.sport || ''));
+
+  const getTeamListSourceLabel = (policy) =>
+    normalizeMatchCompetitionPolicy(policy, DEFAULT_MATCH_COMPETITION_POLICY).teamListSource === 'house_pool'
+      ? 'the full house pool'
+      : 'the submitted sporting squad';
+
+  const getAccessibleHouseIds = () => {
+    if (isAdminModeEnabled()) {
+      const fixture = getCurrentFixture();
+      if (!fixture) return [];
+      return Array.from(new Set([fixture.homeId, fixture.awayId].map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)));
+    }
+    return managedHouseId ? [managedHouseId] : [];
+  };
+
+  const getHouseLabel = (houseId) => {
+    const normalizedHouseId = String(houseId || '').trim().toLowerCase();
+    return (
+      (Array.isArray(config.houseOptions) ? config.houseOptions : []).find((entry) => String(entry.id || '').trim().toLowerCase() === normalizedHouseId)?.name ||
+      normalizedHouseId ||
+      'House'
+    );
+  };
+
+  const getManagedHouseSquad = (houseId, sportKey = getSelectedManagerSportKey()) =>
+    readHouseSportSquad(houseSportSquadStore, sportKey, houseId);
+
+  const saveManagedHouseSquad = (houseId, entry, sportKey = getSelectedManagerSportKey()) => {
+    houseSportSquadStore = writeHouseSportSquad(houseSportSquadStore, sportKey, houseId, entry);
+    persistHouseSportSquadStore(fixtureSectionKey, houseSportSquadStore);
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:house-sport-squad-updated', {
+        detail: {
+          fixtureSectionKey,
+          houseId,
+          sportKey: normalizeManagedSportKey(sportKey)
+        }
+      })
+    );
+  };
+
+  const getAvailableHousePlayersForSport = (houseId, sportLabel = getSelectedManagerSportLabel()) => {
+    const byHouse = loadEnrollmentPlayersByHouse(houseId, houseId, sportLabel, { filterBySportingCode: false });
+    return normalizeMatchPlayersForTeam(byHouse[String(houseId || '').trim().toLowerCase()] || [], { houseId });
+  };
+
+  const getAvailableHouseOfficials = (houseId) => {
+    const byHouse = loadEnrollmentStaffByHouse(houseId, houseId);
+    return normalizeMatchParticipantsForTeam(byHouse[String(houseId || '').trim().toLowerCase()] || [], { houseId }).filter(
+      (entry) => entry.participantType === 'staff'
+    );
+  };
+
+  const findManagedSquadPlayerByName = (houseId, typedName) => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+    return getAvailableHousePlayersForSport(houseId).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) || null;
+  };
+
+  const findManagedOfficialByName = (houseId, typedName) => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+    return getAvailableHouseOfficials(houseId).find((official) => normalizeMatchSearchValue(official.name) === normalizedName) || null;
+  };
+
+  const resolveManagedSquadPlayersByTeam = (fixture) => {
+    if (!fixture) return {};
+    const sportKey = normalizeManagedSportKey(fixture.sport || config.sport || getSelectedManagerSportKey());
+    return {
+      [fixture.homeId]: getManagedHouseSquad(fixture.homeId, sportKey).players,
+      [fixture.awayId]: getManagedHouseSquad(fixture.awayId, sportKey).players
+    };
+  };
+
+  const resolveTeamListPlayerPoolByTeam = (fixture) => {
+    if (!fixture) return {};
+    const policy = getCompetitionPolicy(normalizeManagedSportKey(fixture.sport || config.sport || getCurrentSportKey()));
+    if (policy.teamListSource === 'house_pool') {
+      return loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel(), {
+        filterBySportingCode: false
+      });
+    }
+    return resolveManagedSquadPlayersByTeam(fixture);
+  };
+
+  const getCanonicalTeamListForTeam = (teamId) => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    const savedSheet = getTeamSheet(normalizedTeamId, { saved: true });
+    return {
+      starters: normalizeMatchPlayersForTeam(savedSheet.starters || [], { houseId: normalizedTeamId }),
+      substitutes: normalizeMatchPlayersForTeam(savedSheet.substitutes || [], { houseId: normalizedTeamId })
+    };
+  };
+
+  const getTeamListSearchPlayers = (teamId, { readOnly = false } = {}) => {
+    if (readOnly) {
+      const normalizedTeamId = getNormalizedTeamId(teamId);
+      const canonical = getCanonicalTeamListForTeam(normalizedTeamId);
+      return normalizeMatchPlayersForTeam([...canonical.starters, ...canonical.substitutes], { houseId: normalizedTeamId });
+    }
+
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    const current = getTeamSheet(normalizedTeamId);
+    const selectedIds = new Set([...current.starters, ...current.substitutes].map((player) => player.id));
+    return getPlayersForTeam(normalizedTeamId).filter((player) => !selectedIds.has(player.id));
+  };
+
+  const resolveFixturePlayersByTeam = (fixture, entry) => {
+    const housePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel());
+    const nextSource = resolveTeamListPlayerPoolByTeam(fixture);
+    return {
+      playersByTeam: normalizeFixturePlayersByTeam(fixture, nextSource),
+      housePlayersByTeam
+    };
+  };
+
+  const renderManagedHouseSquadWorkspace = () => {
+    if (!(managerSquadNode instanceof HTMLElement)) return;
+
+    if (!canOperateMatchLog) {
+      managerSquadNode.innerHTML = '<div class="match-log-squad-empty">Sign in as an admin or a house-linked staff manager to manage sporting squads.</div>';
+      if (managerStatusNode instanceof HTMLElement) {
+        managerStatusNode.textContent = 'Squad management is unavailable for the public audience.';
+      }
+      return;
+    }
+
+    const accessibleHouseIds = getAccessibleHouseIds();
+    if (!accessibleHouseIds.length) {
+      managerSquadNode.innerHTML = isAdminModeEnabled()
+        ? '<div class="match-log-squad-empty">Choose a fixture to inspect the submitted squads for the two teams.</div>'
+        : '<div class="match-log-squad-empty">No house assignment was found for this staff account.</div>';
+      if (managerStatusNode instanceof HTMLElement) {
+        managerStatusNode.textContent = isAdminModeEnabled()
+          ? 'Choose a fixture to inspect canonical squad records for the two teams.'
+          : 'This staff account needs a house assignment before it can manage sports squads.';
+      }
+      return;
+    }
+
+    const sportLabel = getSelectedManagerSportLabel();
+    const sportKey = getSelectedManagerSportKey();
+    const sportPolicy = getCompetitionPolicy(sportKey);
+    const cards = accessibleHouseIds.map((houseId) => {
+      const squad = getManagedHouseSquad(houseId, sportKey);
+      const selectedPlayerIds = new Set(squad.players.map((player) => player.id));
+      const selectedOfficialIds = new Set(squad.officials.map((official) => official.id));
+      const availablePlayers = getAvailableHousePlayersForSport(houseId, sportLabel).filter((player) => !selectedPlayerIds.has(player.id));
+      const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !selectedOfficialIds.has(official.id));
+      const totalHouseLearners = availablePlayers.length + squad.players.length;
+      const totalHouseStaff = availableOfficials.length + squad.officials.length;
+      const remainingPlayerSlots = Math.max(0, sportPolicy.squadSizeLimit - squad.players.length);
+      const houseLabel = getHouseLabel(houseId);
+      const readOnly = !canEditCanonicalTeam(houseId);
+      const playerListId = `match-manager-player-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+      const officialListId = `match-manager-official-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+      const searchListId = `match-manager-search-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+      const searchRecords = [...squad.players, ...squad.officials];
+
+      return `
+        <article class="match-log-squad-card" data-match-manager-card="${escapeHtmlAttribute(houseId)}">
+          <header class="match-log-squad-card-head">
+            <div>
+              <h4>${escapeHtmlText(houseLabel)} ${escapeHtmlText(sportLabel)} Squad</h4>
+              <p class="match-log-squad-summary">Players ${squad.players.length}/${sportPolicy.squadSizeLimit} · Officials ${squad.officials.length}</p>
+              <p class="match-log-squad-helper">House totals: ${totalHouseLearners} learners · ${totalHouseStaff} staff. Squad spaces left: ${remainingPlayerSlots} learner slots.</p>
+            </div>
+          </header>
+          <p class="match-log-squad-helper">Only learners from this house can join the squad. Match-day team lists are chosen from these saved players.</p>
+          ${readOnly
+            ? `
+          <div class="match-log-squad-controls">
+            <label>
+              Search submitted squad
+              <input type="text" list="${searchListId}" placeholder="Type player or staff name" autocomplete="off" />
+              <datalist id="${searchListId}">
+                ${searchRecords
+                  .map((entry) => `<option value="${escapeHtmlAttribute(entry.name)}" label="${escapeHtmlAttribute(entry.assignmentRole || entry.roleLabel || entry.admissionNo || entry.name)}"></option>`)
+                  .join('')}
+              </datalist>
+            </label>
+          </div>
+          <p class="match-log-squad-helper">Read only. Team managers own the canonical squad records for this fixture.</p>
+          `
+            : `
+          <div class="match-log-squad-controls">
+            <label>
+              Add player
+              <input type="text" data-match-manager-player-input="${escapeHtmlAttribute(houseId)}" list="${playerListId}" placeholder="Type learner name" autocomplete="off" />
+              <datalist id="${playerListId}">
+                ${availablePlayers.map((player) => `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(player.admissionNo ? `Adm ${player.admissionNo}` : player.name)}"></option>`).join('')}
+              </datalist>
+            </label>
+            <div class="match-log-squad-control-actions">
+              <button type="button" class="btn btn-secondary" data-match-manager-add-player="${escapeHtmlAttribute(houseId)}">Add player</button>
+            </div>
+          </div>
+          <div class="match-log-squad-controls">
+            <label>
+              Add official
+              <input type="text" data-match-manager-official-input="${escapeHtmlAttribute(houseId)}" list="${officialListId}" placeholder="Type staff name" autocomplete="off" />
+              <datalist id="${officialListId}">
+                ${availableOfficials.map((official) => `<option value="${escapeHtmlAttribute(official.name)}" label="${escapeHtmlAttribute(official.roleLabel || official.name)}"></option>`).join('')}
+              </datalist>
+            </label>
+            <label>
+              Role
+              <select data-match-manager-official-role="${escapeHtmlAttribute(houseId)}">
+                ${HOUSE_SPORT_OFFICIAL_ROLES.map((role) => `<option value="${escapeHtmlAttribute(role)}">${escapeHtmlText(role)}</option>`).join('')}
+              </select>
+            </label>
+            <div class="match-log-squad-control-actions">
+              <button type="button" class="btn btn-secondary" data-match-manager-add-official="${escapeHtmlAttribute(houseId)}">Add official</button>
+            </div>
+          </div>
+          `}
+          <div class="match-log-squad-columns">
+            <section class="match-log-squad-group">
+              <header class="match-log-squad-group-head">
+                <h5>Registered players</h5>
+                <span>${squad.players.length}/${sportPolicy.squadSizeLimit}</span>
+              </header>
+              ${squad.players.length
+                ? `<ul class="match-log-squad-list">${squad.players
+                    .map(
+                      (player) => `
+                        <li class="match-log-squad-item">
+                          <div class="match-log-squad-item-main">
+                            <div class="match-log-squad-item-head">
+                              <strong>${escapeHtmlText(player.name)}</strong>
+                            </div>
+                            <span class="match-log-squad-item-meta">${escapeHtmlText(player.admissionNo ? `Adm ${player.admissionNo}` : 'Learner')}</span>
+                          </div>
+                          ${readOnly
+                            ? ''
+                            : `<div class="match-log-squad-item-actions">
+                            <button type="button" class="btn btn-secondary" data-match-manager-remove-player="${escapeHtmlAttribute(houseId)}" data-player-id="${escapeHtmlAttribute(player.id)}">Remove</button>
+                          </div>`}
+                        </li>
+                      `
+                    )
+                    .join('')}</ul>`
+                : '<p class="match-log-squad-empty">No registered players yet.</p>'}
+            </section>
+            <section class="match-log-squad-group">
+              <header class="match-log-squad-group-head">
+                <h5>Managerial roles</h5>
+                <span>${squad.officials.length}</span>
+              </header>
+              ${squad.officials.length
+                ? `<ul class="match-log-squad-list">${squad.officials
+                    .map(
+                      (official) => `
+                        <li class="match-log-squad-item">
+                          <div class="match-log-squad-item-main">
+                            <div class="match-log-squad-item-head">
+                              <strong>${escapeHtmlText(official.name)}</strong>
+                              <span class="match-log-squad-candidate-badge" data-tone="eligible">${escapeHtmlText(official.assignmentRole || official.roleLabel || 'Official')}</span>
+                            </div>
+                            <span class="match-log-squad-item-meta">${escapeHtmlText(official.assignmentRole || official.roleLabel || 'Official')}</span>
+                          </div>
+                          ${readOnly
+                            ? ''
+                            : `<div class="match-log-squad-item-actions">
+                            <button type="button" class="btn btn-secondary" data-match-manager-remove-official="${escapeHtmlAttribute(houseId)}" data-official-id="${escapeHtmlAttribute(official.id)}">Remove</button>
+                          </div>`}
+                        </li>
+                      `
+                    )
+                    .join('')}</ul>`
+                : '<p class="match-log-squad-empty">No managerial roles assigned yet.</p>'}
+            </section>
+          </div>
+        </article>
+      `;
+    });
+
+    managerSquadNode.innerHTML = `<div class="match-log-squad-grid">${cards.join('')}</div>`;
+    if (managerStatusNode instanceof HTMLElement) {
+      const summary = accessibleHouseIds
+        .map((houseId) => {
+          const squad = getManagedHouseSquad(houseId, sportKey);
+          const availablePlayers = getAvailableHousePlayersForSport(houseId, sportLabel).filter((player) => !squad.players.some((selected) => selected.id === player.id));
+          const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !squad.officials.some((selected) => selected.id === official.id));
+          const totalHouseLearners = availablePlayers.length + squad.players.length;
+          const totalHouseStaff = availableOfficials.length + squad.officials.length;
+          return `${getHouseLabel(houseId)}: ${totalHouseLearners} learners, ${totalHouseStaff} staff, squad ${squad.players.length}/${sportPolicy.squadSizeLimit} players, ${squad.officials.length} staff roles`;
+        })
+        .join(' · ');
+      managerStatusNode.textContent = `Managing ${sportLabel} squads. ${summary}.`;
+      if (isAdminModeEnabled()) {
+        managerStatusNode.textContent = `Inspecting submitted ${sportLabel} squads for this fixture. ${summary}. Team managers own these records.`;
+      }
+    }
+  };
 
   const getInitialScoreForTeam = (teamId) => {
     const raw = Number(baseInitialScores?.[teamId]);
     return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
   };
 
+  const getMatchElapsedMs = (referenceTime = Date.now()) => {
+    if (!Number.isFinite(Number(matchStartedAt))) return 0;
+    return Math.max(0, Number(referenceTime) - Number(matchStartedAt));
+  };
+
+  const getInterruptionElapsedMs = (referenceTime = Date.now()) => {
+    const base = Number.isFinite(Number(interruptionAccumulatedMs)) ? Math.max(0, Number(interruptionAccumulatedMs)) : 0;
+    if (!Number.isFinite(Number(activePauseStartedAt))) return base;
+    return base + Math.max(0, Number(referenceTime) - Number(activePauseStartedAt));
+  };
+
+  const getMatchMinuteFromClock = (referenceTime = Date.now()) => Math.floor(getMatchElapsedMs(referenceTime) / 60000);
+
+  const renderClockStatus = () => {
+    const fixture = getCurrentFixture();
+    const hasFixture = Boolean(fixture);
+    const started = Number.isFinite(Number(matchStartedAt));
+    const paused = Number.isFinite(Number(activePauseStartedAt));
+
+    if (matchClockNode) {
+      matchClockNode.textContent = formatClockDuration(started ? getMatchElapsedMs() : 0);
+    }
+    if (interruptionClockNode) {
+      interruptionClockNode.textContent = formatClockDuration(started ? getInterruptionElapsedMs() : 0);
+    }
+
+    if (startClockButton instanceof HTMLButtonElement) {
+      startClockButton.disabled = !hasFixture || started;
+    }
+    if (pauseButton instanceof HTMLButtonElement) {
+      const hasReason = pauseReasonSelect instanceof HTMLSelectElement ? Boolean(String(pauseReasonSelect.value || '').trim()) : true;
+      pauseButton.disabled = !hasFixture || !started || paused || !hasReason;
+    }
+    if (resumeButton instanceof HTMLButtonElement) {
+      resumeButton.disabled = !hasFixture || !started || !paused;
+    }
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      if (!pauseReasons.length && pauseReasonSelect.options.length <= 1) {
+        pauseReasonSelect.innerHTML = '<option value="">Select reason</option>';
+      }
+      pauseReasonSelect.disabled = !hasFixture || !started || paused;
+    }
+
+    if (clockStatusNode) {
+      if (!hasFixture) {
+        clockStatusNode.textContent = 'Select a fixture to start timing.';
+      } else if (!started) {
+        clockStatusNode.textContent = 'Match clock not started.';
+      } else if (paused) {
+        clockStatusNode.textContent = `Match paused${activePauseReason ? `: ${activePauseReason}` : ''}.`;
+      } else {
+        clockStatusNode.textContent = 'Match clock running.';
+      }
+    }
+  };
+
+  const ensureClockTicker = () => {
+    if (clockTickerId) return;
+    clockTickerId = window.setInterval(() => {
+      renderClockStatus();
+    }, 1000);
+  };
+
   const getFixtureEntry = (fixture) => {
     if (!fixture) return null;
     const stored = logsByFixture[fixture.fixtureId];
     const safeStored = stored && typeof stored === 'object' ? stored : {};
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(fixture, resolveManagedSquadPlayersByTeam(fixture));
     const initialScores = {
       [fixture.homeId]: getInitialScoreForTeam(fixture.homeId),
       [fixture.awayId]: getInitialScoreForTeam(fixture.awayId),
@@ -1217,7 +3464,15 @@ const hydrateMatchLog = (matchLogNode) => {
       initialScores,
       homeScore: Number.isFinite(Number(safeStored.homeScore)) ? Number(safeStored.homeScore) : initialScores[fixture.homeId] || 0,
       awayScore: Number.isFinite(Number(safeStored.awayScore)) ? Number(safeStored.awayScore) : initialScores[fixture.awayId] || 0,
-      events: Array.isArray(safeStored.events) ? safeStored.events : []
+      matchStartedAt: Number.isFinite(Number(safeStored.matchStartedAt)) ? Number(safeStored.matchStartedAt) : null,
+      interruptionAccumulatedMs: Number.isFinite(Number(safeStored.interruptionAccumulatedMs))
+        ? Math.max(0, Number(safeStored.interruptionAccumulatedMs))
+        : 0,
+      activePauseStartedAt: Number.isFinite(Number(safeStored.activePauseStartedAt)) ? Number(safeStored.activePauseStartedAt) : null,
+      activePauseReason: String(safeStored.activePauseReason || '').trim(),
+      events: Array.isArray(safeStored.events) ? safeStored.events : [],
+      playersByTeam: normalizedPlayersByTeam,
+      squadByTeam: normalizeFixtureSquadByTeam(fixture, safeStored.squadByTeam, normalizedPlayersByTeam)
     };
   };
 
@@ -1225,18 +3480,726 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) return [];
     return (Array.isArray(events) ? events : [])
       .filter((entry) => entry && typeof entry === 'object' && eventTypeByKey.has(entry.type))
-      .map((entry) => ({
-        id: entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        teamId: entry.teamId === fixture.awayId ? fixture.awayId : fixture.homeId,
-        type: entry.type,
-        minute: Number.isFinite(Number(entry.minute)) ? Number(entry.minute) : null,
-        stoppage: Number.isFinite(Number(entry.stoppage)) ? Number(entry.stoppage) : null,
-        playerName: String(entry.playerName || '').trim(),
-        jerseyNumber: String(entry.jerseyNumber || '').trim(),
-        assistName: String(entry.assistName || '').trim(),
-        notes: String(entry.notes || '').trim(),
-        createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
-      }));
+      .map((entry) => {
+        const type = String(entry.type || '').trim();
+        const isMatchScoped = String(entry.scope || '').trim() === 'match' || type.startsWith('match_');
+        return {
+          id: entry.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          scope: isMatchScoped ? 'match' : 'team',
+          teamId: isMatchScoped ? '' : entry.teamId === fixture.awayId ? fixture.awayId : fixture.homeId,
+          type,
+          minute: Number.isFinite(Number(entry.minute)) ? Number(entry.minute) : null,
+          stoppage: Number.isFinite(Number(entry.stoppage)) ? Number(entry.stoppage) : null,
+          playerName: String(entry.playerName || '').trim(),
+          jerseyNumber: String(entry.jerseyNumber || '').trim(),
+          assistName: String(entry.assistName || '').trim(),
+          playerId: String(entry.playerId || '').trim(),
+          playerAdmissionNo: String(entry.playerAdmissionNo || '').trim(),
+          playerHouseId: String(entry.playerHouseId || '').trim(),
+          playerGender: String(entry.playerGender || '').trim(),
+          playerType: String(entry.playerType || '').trim(),
+          playerRole: String(entry.playerRole || '').trim(),
+          assistId: String(entry.assistId || '').trim(),
+          assistAdmissionNo: String(entry.assistAdmissionNo || '').trim(),
+          assistType: String(entry.assistType || '').trim(),
+          assistRole: String(entry.assistRole || '').trim(),
+          replacementName: String(entry.replacementName || '').trim(),
+          replacementId: String(entry.replacementId || '').trim(),
+          replacementAdmissionNo: String(entry.replacementAdmissionNo || '').trim(),
+          replacementHouseId: String(entry.replacementHouseId || '').trim(),
+          replacementGender: String(entry.replacementGender || '').trim(),
+          replacementType: String(entry.replacementType || '').trim(),
+          replacementRole: String(entry.replacementRole || '').trim(),
+          reason: String(entry.reason || '').trim(),
+          notes: String(entry.notes || '').trim(),
+          createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now()
+        };
+      });
+  };
+
+  const normalizeMatchSearchValue = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+  const getNormalizedTeamId = (teamId, fixture = getCurrentFixture()) => {
+    if (!fixture) return String(teamId || '').trim();
+    return teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+  };
+
+  const getPlayersForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return [];
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    return normalizeMatchPlayersForTeam(currentPlayersByTeam?.[normalizedTeamId] || [], { houseId: normalizedTeamId });
+  };
+
+  const getHousePlayersForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return [];
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const houseKey = normalizedTeamId.toLowerCase();
+    return normalizeMatchPlayersForTeam(currentHousePlayersByTeam?.[houseKey] || currentPlayersByTeam?.[normalizedTeamId] || [], {
+      houseId: houseKey
+    });
+  };
+
+  const getStaffForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return [];
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const houseKey = normalizedTeamId.toLowerCase();
+    return normalizeMatchParticipantsForTeam(currentStaffByTeam?.[houseKey] || [], { houseId: houseKey });
+  };
+
+  const hasUnsavedSquadChanges = () => Object.values(squadDirtyByTeam).some(Boolean);
+
+  const getTeamSheet = (teamId, { saved = false } = {}) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return createEmptyMatchTeamSheet();
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const source = saved ? savedSquadByTeam : currentSquadByTeam;
+    const sheet = source?.[normalizedTeamId];
+    if (!sheet || typeof sheet !== 'object') return createEmptyMatchTeamSheet();
+    return {
+      starters: normalizeMatchPlayersForTeam(sheet.starters || [], { houseId: normalizedTeamId }),
+      substitutes: normalizeMatchPlayersForTeam(sheet.substitutes || [], { houseId: normalizedTeamId })
+    };
+  };
+
+  const getChronologicalTeamEvents = (teamId, { excludeEventId = '' } = {}) => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    return [...currentEvents]
+      .filter((event) => {
+        if (!event || event.scope !== 'team') return false;
+        if (String(event.teamId || '').trim() !== normalizedTeamId) return false;
+        if (excludeEventId && String(event.id || '').trim() === String(excludeEventId || '').trim()) return false;
+        return true;
+      })
+      .sort((left, right) => {
+        const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+        const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+        if (leftMinute === rightMinute) {
+          return (left.createdAt || 0) - (right.createdAt || 0);
+        }
+        return leftMinute - rightMinute;
+      });
+  };
+
+  const getMatchAvailabilityForTeam = (teamId, { excludeEventId = '', saved = true } = {}) => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    const teamPlayers = getPlayersForTeam(normalizedTeamId);
+    const sheet = getTeamSheet(normalizedTeamId, { saved });
+    const validation = validateMatchTeamSheet(sheet);
+    const hasSquad = validation.hasSelections;
+
+    if (!hasSquad) {
+      return {
+        hasSquad: false,
+        isReady: false,
+        starters: [],
+        substitutes: [],
+        active: teamPlayers,
+        bench: [],
+        squadPlayers: teamPlayers
+      };
+    }
+
+    if (!validation.isReady) {
+      return {
+        hasSquad: true,
+        isReady: false,
+        starters: validation.starters,
+        substitutes: validation.substitutes,
+        active: [],
+        bench: [],
+        squadPlayers: normalizeMatchPlayersForTeam([...validation.starters, ...validation.substitutes], { houseId: normalizedTeamId })
+      };
+    }
+
+    const squadPlayers = normalizeMatchPlayersForTeam([...validation.starters, ...validation.substitutes], { houseId: normalizedTeamId });
+    const squadById = new Map(squadPlayers.map((player) => [player.id, player]));
+    const squadByName = new Map(squadPlayers.map((player) => [normalizeMatchSearchValue(player.name), player]));
+    const activeMap = new Map(validation.starters.map((player) => [player.id, player]));
+    const benchMap = new Map(validation.substitutes.map((player) => [player.id, player]));
+
+    getChronologicalTeamEvents(normalizedTeamId, { excludeEventId }).forEach((event) => {
+      if (String(event.type || '').trim() !== 'substitution') return;
+      const outgoing =
+        squadById.get(String(event.playerId || '').trim()) ||
+        squadByName.get(normalizeMatchSearchValue(event.playerName));
+      const incoming =
+        squadById.get(String(event.replacementId || '').trim()) ||
+        squadByName.get(normalizeMatchSearchValue(event.replacementName));
+
+      if (outgoing?.id) {
+        activeMap.delete(outgoing.id);
+      }
+
+      if (incoming?.id) {
+        benchMap.delete(incoming.id);
+        activeMap.set(incoming.id, incoming);
+      }
+    });
+
+    return {
+      hasSquad: true,
+      isReady: true,
+      starters: validation.starters,
+      substitutes: validation.substitutes,
+      active: normalizeMatchPlayersForTeam(Array.from(activeMap.values()), { houseId: normalizedTeamId }),
+      bench: normalizeMatchPlayersForTeam(Array.from(benchMap.values()), { houseId: normalizedTeamId }),
+      squadPlayers
+    };
+  };
+
+  const getParticipantSearchScope = (definition, field = 'player') => {
+    if (field === 'assist') {
+      return String(definition?.assistSearchScope || definition?.playerSearchScope || 'team_players').trim();
+    }
+    if (field === 'replacement') {
+      return String(definition?.replacementSearchScope || 'bench_match').trim();
+    }
+    return String(definition?.playerSearchScope || 'team_players').trim();
+  };
+
+  const isSquadBoundSearchScope = (scope) => ['active_match', 'bench_match', 'match_squad'].includes(String(scope || '').trim());
+
+  const getParticipantScopeErrorMessage = (scope) => {
+    switch (String(scope || '').trim()) {
+      case 'active_match':
+        return 'Use a player from the current on-pitch squad for this event.';
+      case 'bench_match':
+        return 'Use a player from the substitutes list for this event.';
+      case 'match_squad':
+        return 'Use a player from the current match team list for this event.';
+      default:
+        return 'Use one of the suggested names for this event.';
+    }
+  };
+
+  const updateEventInlineNotice = () => {
+    if (!(inlineNoticeNode instanceof HTMLElement)) return;
+
+    const fixture = getCurrentFixture();
+    const definition = eventTypeByKey.get(selectedTypeKey) || null;
+    const teamId = activeTeamId || fixture?.homeId || '';
+    const playerScope = getParticipantSearchScope(definition, 'player');
+    const assistScope = definition?.allowAssist ? getParticipantSearchScope(definition, 'assist') : '';
+    const replacementScope = definition?.showReplacement ? getParticipantSearchScope(definition, 'replacement') : '';
+    const requiresSavedTeamList = [playerScope, assistScope, replacementScope].some((scope) => isSquadBoundSearchScope(scope));
+
+    if (!fixture || !definition || !requiresSavedTeamList || !teamId) {
+      inlineNoticeNode.textContent = '';
+      inlineNoticeNode.classList.add('is-hidden');
+      return;
+    }
+
+    const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+    const savedAvailability = getMatchAvailabilityForTeam(teamId, { excludeEventId: editingEventId, saved: true });
+    if (savedAvailability.isReady) {
+      inlineNoticeNode.textContent = '';
+      inlineNoticeNode.classList.add('is-hidden');
+      return;
+    }
+
+    const teamName = teamId === fixture.awayId ? fixture.awayName : fixture.homeName;
+    inlineNoticeNode.textContent = `${teamName}: save a valid team list with exactly ${fixturePolicy.startingPlayers} starters before player suggestions will appear for this event. Substitutes can be up to ${fixturePolicy.benchSizeLimit}.`;
+    inlineNoticeNode.classList.remove('is-hidden');
+  };
+
+  const getEventParticipants = (teamId, definition, field = 'player') => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    if (!normalizedTeamId) return [];
+
+    const availability = getMatchAvailabilityForTeam(normalizedTeamId, { excludeEventId: editingEventId, saved: true });
+    const scope = getParticipantSearchScope(definition, field);
+
+    if (isSquadBoundSearchScope(scope) && !availability.isReady) {
+      return [];
+    }
+
+    switch (scope) {
+      case 'active_match':
+        return availability.active;
+      case 'bench_match':
+        return availability.bench;
+      case 'match_squad':
+        return availability.squadPlayers;
+      case 'house_participants':
+        return mergeUniqueMatchParticipants(getHousePlayersForTeam(normalizedTeamId), getStaffForTeam(normalizedTeamId));
+      case 'team_players':
+      default:
+        return getPlayersForTeam(normalizedTeamId);
+    }
+  };
+
+  const findParticipantByTypedName = (teamId, typedName, definition, field = 'player') => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+
+    return (
+      getEventParticipants(teamId, definition, field).find(
+        (participant) => normalizeMatchSearchValue(participant.name) === normalizedName
+      ) ||
+      null
+    );
+  };
+
+  const formatParticipantSearchMeta = (participant) => {
+    if (!participant || typeof participant !== 'object') return '';
+    if (participant.participantType === 'staff') {
+      return String(participant.roleLabel || 'Staff').trim();
+    }
+
+    return [
+      participant.admissionNo ? `Adm ${participant.admissionNo}` : '',
+      participant.jerseyNumber ? `#${participant.jerseyNumber}` : '',
+      participant.roleLabel && participant.roleLabel !== 'Learner' ? participant.roleLabel : ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  };
+
+  const buildParticipantOptionsMarkup = (participants) =>
+    normalizeMatchParticipantsForTeam(participants)
+      .map((participant) => {
+        const meta = formatParticipantSearchMeta(participant);
+        return `<option value="${escapeHtmlAttribute(participant.name)}" label="${escapeHtmlAttribute(meta || participant.name)}"></option>`;
+      })
+      .join('');
+
+  const renderAutocompleteOptions = () => {
+    const fixture = getCurrentFixture();
+    const definition = eventTypeByKey.get(selectedTypeKey) || null;
+    if (
+      !(playerOptionsNode instanceof HTMLDataListElement) ||
+      !(assistOptionsNode instanceof HTMLDataListElement) ||
+      !(replacementOptionsNode instanceof HTMLDataListElement)
+    ) {
+      return;
+    }
+    if (!fixture) {
+      playerOptionsNode.innerHTML = '';
+      assistOptionsNode.innerHTML = '';
+      replacementOptionsNode.innerHTML = '';
+      updateEventInlineNotice();
+      return;
+    }
+
+    const teamId = activeTeamId || fixture.homeId;
+    playerOptionsNode.innerHTML = buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'player'));
+    assistOptionsNode.innerHTML = definition?.allowAssist
+      ? buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'assist'))
+      : '';
+    replacementOptionsNode.innerHTML = definition?.showReplacement
+      ? buildParticipantOptionsMarkup(getEventParticipants(teamId, definition, 'replacement'))
+      : '';
+    updateEventInlineNotice();
+  };
+
+  const renderSquadManager = () => {
+    if (!(squadManagerNode instanceof HTMLElement)) return;
+
+    const fixture = getCurrentFixture();
+    if (!fixture) {
+      squadManagerNode.innerHTML = '<div class="match-log-squad-empty">Choose a fixture to manage the team lists.</div>';
+      if (squadStatusNode) {
+        squadStatusNode.textContent = 'Choose a fixture to set the starting XI and substitutes for both teams.';
+      }
+      return;
+    }
+
+    const renderSquadList = (teamId, groupKey, title, entries, { editable = true } = {}) => {
+      const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+      const moveTarget = groupKey === 'starters' ? 'substitutes' : 'starters';
+      const moveLabel = groupKey === 'starters' ? 'To bench' : 'To XI';
+      return `
+        <section class="match-log-squad-group">
+          <header class="match-log-squad-group-head">
+            <h5>${title}</h5>
+            <span>${entries.length}/${groupKey === 'starters' ? fixturePolicy.startingPlayers : fixturePolicy.benchSizeLimit}</span>
+          </header>
+          ${entries.length
+            ? `<ul class="match-log-squad-list">${entries
+                .map((player) => {
+                  const discipline = getPlayerDisciplinaryStatus(teamId, player);
+                  const descriptor = getDisciplinaryStatusDescriptor(discipline);
+                  const meta = [player.admissionNo ? `Adm ${player.admissionNo}` : '', player.jerseyNumber ? `#${player.jerseyNumber}` : '']
+                    .filter(Boolean)
+                    .join(' · ');
+                  const reasons = Array.isArray(discipline.reasons) ? discipline.reasons.filter(Boolean).join('; ') : '';
+                  return `
+                    <li class="match-log-squad-item">
+                      <div class="match-log-squad-item-main">
+                        <div class="match-log-squad-item-head">
+                          <strong>${escapeHtmlText(player.name)}</strong>
+                          <span class="match-log-squad-candidate-badge" data-tone="${escapeHtmlAttribute(descriptor.tone)}">${escapeHtmlText(descriptor.label)}</span>
+                        </div>
+                        <span class="match-log-squad-item-meta">${escapeHtmlText(meta || 'Learner')}</span>
+                        ${reasons ? `<span class="match-log-squad-item-reasons">${escapeHtmlText(reasons)}</span>` : ''}
+                      </div>
+                      ${editable
+                        ? `<div class="match-log-squad-item-actions">
+                        <button type="button" class="btn btn-secondary" data-match-squad-move="${moveTarget}" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">${moveLabel}</button>
+                        <button type="button" class="btn btn-secondary" data-match-squad-remove="true" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">Remove</button>
+                      </div>`
+                        : ''}
+                    </li>
+                  `;
+                })
+                .join('')}</ul>`
+            : `<p class="match-log-squad-empty">${editable ? 'No players added yet.' : 'No submitted players in this group yet.'}</p>`}
+        </section>
+      `;
+    };
+
+    const cards = [
+      { teamId: fixture.homeId, teamName: fixture.homeName },
+      { teamId: fixture.awayId, teamName: fixture.awayName }
+    ]
+      .filter(({ teamId }) => canViewTeam(teamId))
+      .map(({ teamId, teamName }) => {
+      const teamPlayers = getPlayersForTeam(teamId);
+      const teamSheet = getTeamSheet(teamId);
+      const savedTeamSheet = getTeamSheet(teamId, { saved: true });
+      const readOnly = !canEditCanonicalTeam(teamId);
+      const displayedTeamSheet = readOnly ? getCanonicalTeamListForTeam(teamId) : teamSheet;
+      const availability = getMatchAvailabilityForTeam(teamId, { saved: readOnly });
+      const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+      const validation = validateMatchTeamSheet(displayedTeamSheet, fixturePolicy);
+      const savedValidation = validateMatchTeamSheet(savedTeamSheet, fixturePolicy);
+      const isDirty = Boolean(squadDirtyByTeam?.[teamId]);
+      const searchPlayers = getTeamListSearchPlayers(teamId, { readOnly });
+      const selectedCount = displayedTeamSheet.starters.length + displayedTeamSheet.substitutes.length;
+      const totalSquadPlayers = teamPlayers.length;
+      const remainingSquadChoices = searchPlayers.length;
+      const remainingStarters = Math.max(0, fixturePolicy.startingPlayers - displayedTeamSheet.starters.length);
+      const remainingBench = Math.max(0, fixturePolicy.benchSizeLimit - displayedTeamSheet.substitutes.length);
+      const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const activeNames = availability.isReady
+        ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
+        : validation.hasSelections
+          ? `Starting lineup must be exactly ${fixturePolicy.startingPlayers} players before this team list can go live.`
+          : 'No team list set yet. Set the starting XI and substitutes before logging on-pitch events.';
+      const validationMessage = validation.isReady
+        ? `Starting lineup fixed at ${fixturePolicy.startingPlayers}. Substitutes ${displayedTeamSheet.substitutes.length}/${fixturePolicy.benchSizeLimit}.`
+        : validation.errors[0];
+      const saveStateMessage = readOnly
+        ? savedValidation.isReady
+          ? 'Submitted team list is locked for match logging.'
+          : 'No submitted team list yet.'
+        : isDirty
+        ? 'Unsaved team list changes.'
+        : savedValidation.isReady
+          ? 'Saved team list is live for event logging.'
+          : 'No saved team list yet.';
+
+      return `
+        <article class="match-log-squad-card" data-match-squad-card="${escapeHtmlAttribute(teamId)}">
+          <header class="match-log-squad-card-head">
+            <div>
+              <h4>${escapeHtmlText(teamName)}</h4>
+              <p class="match-log-squad-summary">Starting lineup ${displayedTeamSheet.starters.length}/${fixturePolicy.startingPlayers} · Substitutes ${displayedTeamSheet.substitutes.length}/${fixturePolicy.benchSizeLimit}</p>
+              <p class="match-log-squad-helper">Team list selected ${selectedCount}/${totalSquadPlayers} squad players. Remaining: ${remainingStarters} starters, ${remainingBench} substitutes, ${remainingSquadChoices} still available to add.</p>
+            </div>
+            ${readOnly ? '' : `<button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>`}
+          </header>
+          <p class="match-log-squad-helper">Goals, own goals, penalty goals, injuries, assists, and substitutions only use the current team list and on-pitch squad.</p>
+          <div class="match-log-squad-controls">
+            <label>
+              ${readOnly ? 'Search submitted team list' : 'Find player'}
+              <input type="text" data-match-squad-search-input="${escapeHtmlAttribute(teamId)}" list="${datalistId}" placeholder="Type learner name" autocomplete="off" />
+              <input type="hidden" data-match-squad-search-mode="${readOnly ? 'readonly' : 'editable'}" />
+              <datalist id="${datalistId}">
+                ${searchPlayers
+                  .map((player) => {
+                    const discipline = getPlayerDisciplinaryStatus(teamId, player);
+                    const descriptor = getDisciplinaryStatusDescriptor(discipline);
+                    const meta = [
+                      player.admissionNo ? `Adm ${player.admissionNo}` : '',
+                      player.jerseyNumber ? `#${player.jerseyNumber}` : '',
+                      descriptor.shortLabel
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return `<option value="${escapeHtmlAttribute(player.name)}" label="${escapeHtmlAttribute(meta || player.name)}"></option>`;
+                  })
+                  .join('')}
+              </datalist>
+            </label>
+            ${readOnly
+              ? ''
+              : `<div class="match-log-squad-control-actions">
+              <button type="button" class="btn btn-secondary" data-match-squad-add="starters" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Starting XI</button>
+              <button type="button" class="btn btn-secondary" data-match-squad-add="substitutes" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Bench</button>
+              <button type="button" class="btn btn-primary" data-match-squad-save="true" data-team-id="${escapeHtmlAttribute(teamId)}"${isDirty ? '' : ' disabled'}>Save team list</button>
+            </div>`}
+          </div>
+          <p class="match-log-squad-helper">Only learners already registered in this sporting squad can be added to the match team list.</p>
+          <p class="match-log-squad-helper">${escapeHtmlText(validationMessage)}</p>
+          <p class="match-log-squad-helper">${escapeHtmlText(saveStateMessage)}</p>
+          <div class="match-log-squad-candidate-preview" data-match-squad-preview="${escapeHtmlAttribute(teamId)}">
+            <span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>
+          </div>
+          <div class="match-log-squad-columns">
+            ${renderSquadList(teamId, 'starters', 'Starting XI', displayedTeamSheet.starters, { editable: !readOnly })}
+            ${renderSquadList(teamId, 'substitutes', 'Substitutes', displayedTeamSheet.substitutes, { editable: !readOnly })}
+          </div>
+          <p class="match-log-squad-active"><strong>Current on pitch:</strong> ${escapeHtmlText(activeNames)}</p>
+        </article>
+      `;
+    });
+
+    squadManagerNode.innerHTML = cards.length
+      ? `<div class="match-log-squad-grid">${cards.join('')}</div>`
+      : '<div class="match-log-squad-empty">No team-list permissions are available for this fixture.</div>';
+    [fixture.homeId, fixture.awayId].filter((teamId) => canViewTeam(teamId)).forEach((teamId) => renderSquadCandidatePreview(teamId));
+
+    if (squadStatusNode) {
+      const homeSheet = getTeamSheet(fixture.homeId);
+      const awaySheet = getTeamSheet(fixture.awayId);
+      if (canEditCanonicalTeam(fixture.homeId) && canEditCanonicalTeam(fixture.awayId)) {
+        const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+        squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${fixturePolicy.startingPlayers} starters, ${homeSheet.substitutes.length}/${fixturePolicy.benchSizeLimit} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${fixturePolicy.startingPlayers} starters, ${awaySheet.substitutes.length}/${fixturePolicy.benchSizeLimit} substitutes.`;
+      } else {
+        const ownTeamId = canViewTeam(fixture.homeId) ? fixture.homeId : fixture.awayId;
+        const ownTeamName = ownTeamId === fixture.homeId ? fixture.homeName : fixture.awayName;
+        const ownSheet = canEditCanonicalTeam(ownTeamId)
+          ? ownTeamId === fixture.homeId ? homeSheet : awaySheet
+          : getCanonicalTeamListForTeam(ownTeamId);
+        const ownTeamPlayers = getPlayersForTeam(ownTeamId);
+        const selectedCount = ownSheet.starters.length + ownSheet.substitutes.length;
+        const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+        const remainingStarters = Math.max(0, fixturePolicy.startingPlayers - ownSheet.starters.length);
+        const remainingBench = Math.max(0, fixturePolicy.benchSizeLimit - ownSheet.substitutes.length);
+        squadStatusNode.textContent = `${ownTeamName}: squad ${ownTeamPlayers.length} players, selected ${selectedCount}, remaining ${remainingStarters} starters and ${remainingBench} substitutes.`;
+      }
+    }
+  };
+
+  const setTeamSheetForTeam = (teamId, nextSheet) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    currentSquadByTeam = normalizeFixtureSquadByTeam(
+      fixture,
+      {
+        ...currentSquadByTeam,
+        [normalizedTeamId]: nextSheet
+      },
+      currentPlayersByTeam
+    );
+    squadDirtyByTeam = {
+      ...squadDirtyByTeam,
+      [normalizedTeamId]: true
+    };
+  };
+
+  const saveTeamSheetForTeam = (teamId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return false;
+
+    const normalizedTeamId = getNormalizedTeamId(teamId, fixture);
+    const teamSheet = getTeamSheet(normalizedTeamId);
+    const validation = validateMatchTeamSheet(teamSheet);
+
+    if (validation.errors.length) {
+      showSmartToast(validation.errors[0], { tone: 'error' });
+      return false;
+    }
+
+    savedSquadByTeam = normalizeFixtureSquadByTeam(
+      fixture,
+      {
+        ...savedSquadByTeam,
+        [normalizedTeamId]: teamSheet
+      },
+      currentPlayersByTeam
+    );
+    currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, currentSquadByTeam, currentPlayersByTeam);
+    squadDirtyByTeam = {
+      ...squadDirtyByTeam,
+      [normalizedTeamId]: false
+    };
+    persistCurrentFixtureLog();
+    showSmartToast('Team list saved and now live for match logging.', { tone: 'success' });
+    render();
+    return true;
+  };
+
+  const getSquadCandidateByTypedName = (teamId, typedName) => {
+    const normalizedName = normalizeMatchSearchValue(typedName);
+    if (!normalizedName) return null;
+
+    const card = squadManagerNode instanceof HTMLElement
+      ? squadManagerNode.querySelector(`[data-match-squad-card="${CSS.escape(String(teamId || '').trim())}"]`)
+      : null;
+    const searchMode = card instanceof HTMLElement
+      ? String(card.querySelector('[data-match-squad-search-mode]')?.getAttribute('data-match-squad-search-mode') || '').trim()
+      : '';
+
+    return (
+      getTeamListSearchPlayers(teamId, { readOnly: searchMode === 'readonly' }).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) ||
+      null
+    );
+  };
+
+  const renderSquadCandidatePreview = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim();
+    if (!normalizedTeamId || !(squadManagerNode instanceof HTMLElement)) return;
+
+    const card = squadManagerNode.querySelector(`[data-match-squad-card="${CSS.escape(normalizedTeamId)}"]`);
+    if (!(card instanceof HTMLElement)) return;
+
+    const input = card.querySelector(`[data-match-squad-search-input="${CSS.escape(normalizedTeamId)}"]`);
+    const preview = card.querySelector(`[data-match-squad-preview="${CSS.escape(normalizedTeamId)}"]`);
+    if (!(input instanceof HTMLInputElement) || !(preview instanceof HTMLElement)) return;
+
+    const typedName = String(input.value || '').trim();
+    const searchMode = String(card.querySelector('[data-match-squad-search-mode]')?.getAttribute('data-match-squad-search-mode') || '').trim();
+    if (!typedName) {
+      preview.innerHTML = '<span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>';
+      return;
+    }
+
+    const candidate = getSquadCandidateByTypedName(normalizedTeamId, typedName);
+    if (!candidate) {
+      preview.innerHTML = `<span class="match-log-squad-candidate-empty">${searchMode === 'readonly' ? 'Player not found in the submitted team list.' : 'Player not found in the sporting squad.'}</span>`;
+      return;
+    }
+
+    const discipline = getPlayerDisciplinaryStatus(normalizedTeamId, candidate);
+    const descriptor = getDisciplinaryStatusDescriptor(discipline);
+    const meta = [candidate.admissionNo ? `Adm ${candidate.admissionNo}` : '', candidate.jerseyNumber ? `#${candidate.jerseyNumber}` : '']
+      .filter(Boolean)
+      .join(' · ');
+    const reasons = Array.isArray(discipline.reasons) ? discipline.reasons.filter(Boolean).join('; ') : '';
+
+    preview.innerHTML = `
+      <div class="match-log-squad-candidate-card">
+        <div class="match-log-squad-candidate-head">
+          <strong class="match-log-squad-candidate-name">${escapeHtmlText(candidate.name)}</strong>
+          <span class="match-log-squad-candidate-badge" data-tone="${escapeHtmlAttribute(descriptor.tone)}">${escapeHtmlText(descriptor.label)}</span>
+        </div>
+        <p class="match-log-squad-candidate-meta">${escapeHtmlText(meta || 'Learner')}</p>
+        ${reasons ? `<p class="match-log-squad-candidate-reasons">${escapeHtmlText(reasons)}</p>` : ''}
+      </div>
+    `;
+  };
+
+  const eventMatchesParticipant = (event, participantKeySet, teamId) => {
+    if (!event || typeof event !== 'object') return false;
+    if (String(event.scope || '').trim() === 'match') return false;
+    if (String(event.teamId || '').trim() !== String(teamId || '').trim()) return false;
+    if (String(event.playerType || '').trim() === 'staff') return false;
+
+    const eventKeys = [
+      String(event.playerId || '').trim(),
+      String(event.playerAdmissionNo || '').trim(),
+      normalizeMatchSearchValue(event.playerName)
+    ].filter(Boolean);
+
+    return eventKeys.some((key) => participantKeySet.has(key));
+  };
+
+  const getPlayerDisciplinaryStatus = (teamId, player) => {
+    const fixture = getCurrentFixture();
+    if (!fixture || !player || player.participantType === 'staff') {
+      return {
+        activeSuspension: false,
+        suspensionMatchesRemaining: 0,
+        cautionCarry: 0,
+        reasons: []
+      };
+    }
+
+    const participantKeys = buildMatchParticipantKeySet(player);
+    if (!participantKeys.size) {
+      return {
+        activeSuspension: false,
+        suspensionMatchesRemaining: 0,
+        cautionCarry: 0,
+        reasons: []
+      };
+    }
+
+    const relevantFixtures = fixtureOptions.filter((entry) => {
+      if (!entry || entry.fixtureId === fixture.fixtureId) return false;
+      if (parseDateTimeStamp(entry.stamp) >= parseDateTimeStamp(fixture.stamp)) return false;
+      return entry.homeId === teamId || entry.awayId === teamId;
+    });
+
+    let suspensionMatchesRemaining = 0;
+    let cautionCarry = 0;
+    const reasons = [];
+
+    relevantFixtures.forEach((entry) => {
+      if (suspensionMatchesRemaining > 0) {
+        suspensionMatchesRemaining = Math.max(0, suspensionMatchesRemaining - 1);
+      }
+
+      const stored = logsByFixture[entry.fixtureId];
+      const events = Array.isArray(stored?.events) ? stored.events : [];
+      const yellowCards = events.filter(
+        (event) => String(event.type || '').trim() === 'yellow_card' && eventMatchesParticipant(event, participantKeys, teamId)
+      ).length;
+      const redCards = events.filter(
+        (event) => String(event.type || '').trim() === 'red_card' && eventMatchesParticipant(event, participantKeys, teamId)
+      ).length;
+
+      if (redCards > 0) {
+        suspensionMatchesRemaining += disciplinePolicy.straightRedSuspensionMatches;
+        reasons.push(`Red card in ${entry.homeName} vs ${entry.awayName}`);
+        return;
+      }
+
+      if (yellowCards >= 2) {
+        suspensionMatchesRemaining += disciplinePolicy.secondYellowSuspensionMatches;
+        cautionCarry = 0;
+        reasons.push(`Second caution suspension from ${entry.homeName} vs ${entry.awayName}`);
+        return;
+      }
+
+      if (yellowCards > 0) {
+        cautionCarry += 1;
+        if (cautionCarry >= disciplinePolicy.yellowAccumulationThreshold) {
+          suspensionMatchesRemaining += disciplinePolicy.yellowAccumulationSuspensionMatches;
+          cautionCarry = 0;
+          reasons.push(`Yellow-card accumulation suspension triggered after ${entry.homeName} vs ${entry.awayName}`);
+        }
+      }
+    });
+
+    return {
+      activeSuspension: suspensionMatchesRemaining > 0,
+      suspensionMatchesRemaining,
+      cautionCarry,
+      reasons
+    };
+  };
+
+  const getDisciplinaryStatusDescriptor = (discipline) => {
+    if (discipline?.activeSuspension) {
+      const count = Number(discipline.suspensionMatchesRemaining || 0);
+      return {
+        tone: 'suspended',
+        shortLabel: `Susp ${count}m`,
+        label: `Suspended for ${count} match${count === 1 ? '' : 'es'}`
+      };
+    }
+
+    if (Number(discipline?.cautionCarry || 0) > 0) {
+      const carry = Number(discipline.cautionCarry || 0);
+      return {
+        tone: 'warning',
+        shortLabel: `${carry} YC`,
+        label: `${carry} yellow card${carry === 1 ? '' : 's'} carried`
+      };
+    }
+
+    return {
+      tone: 'eligible',
+      shortLabel: '',
+      label: 'No active card warning'
+    };
   };
 
   const computeScores = (fixture) => {
@@ -1270,14 +4233,30 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!fixture) return;
     const scores = computeScores(fixture);
     const baseEntry = getFixtureEntry(fixture);
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(fixture, resolveManagedSquadPlayersByTeam(fixture));
+    const normalizedSquadByTeam = normalizeFixtureSquadByTeam(fixture, savedSquadByTeam, normalizedPlayersByTeam);
+    const playerEventIndex = buildPlayerEventIndex(currentEvents, fixture, normalizedPlayersByTeam);
+
     logsByFixture[fixture.fixtureId] = {
       ...baseEntry,
       events: [...currentEvents],
+      matchStartedAt: Number.isFinite(Number(matchStartedAt)) ? Number(matchStartedAt) : null,
+      interruptionAccumulatedMs: Number.isFinite(Number(interruptionAccumulatedMs)) ? Math.max(0, Number(interruptionAccumulatedMs)) : 0,
+      activePauseStartedAt: Number.isFinite(Number(activePauseStartedAt)) ? Number(activePauseStartedAt) : null,
+      activePauseReason: String(activePauseReason || '').trim(),
+      playersByTeam: normalizedPlayersByTeam,
+      squadByTeam: normalizedSquadByTeam,
+      homePlayers: normalizedPlayersByTeam[fixture.homeId] || [],
+      awayPlayers: normalizedPlayersByTeam[fixture.awayId] || [],
+      playerEventIndex,
       homeScore: Number(scores[fixture.homeId] || 0),
       awayScore: Number(scores[fixture.awayId] || 0),
       updatedAt: Date.now()
     };
     saveMatchLogByFixtureStore(fixtureSectionKey, logsByFixture);
+    if (saveStatusNode) {
+      saveStatusNode.textContent = 'Auto-saved to DB.';
+    }
     window.dispatchEvent(
       new CustomEvent('bhanoyi:match-log-updated', {
         detail: {
@@ -1292,10 +4271,35 @@ const hydrateMatchLog = (matchLogNode) => {
     const fixture = getCurrentFixture();
     if (!fixture) {
       currentEvents = [];
+      currentPlayersByTeam = {};
+      currentHousePlayersByTeam = {};
+      currentStaffByTeam = {};
+      savedSquadByTeam = {};
+      currentSquadByTeam = {};
+      squadDirtyByTeam = {};
+      matchStartedAt = null;
+      interruptionAccumulatedMs = 0;
+      activePauseStartedAt = null;
+      activePauseReason = '';
+      pauseCompensationStartedAt = null;
       return;
     }
     const entry = getFixtureEntry(fixture);
     currentEvents = sanitizeEventsForFixture(fixture, entry?.events || []);
+    matchStartedAt = Number.isFinite(Number(entry?.matchStartedAt)) ? Number(entry.matchStartedAt) : null;
+    interruptionAccumulatedMs = Number.isFinite(Number(entry?.interruptionAccumulatedMs))
+      ? Math.max(0, Number(entry.interruptionAccumulatedMs))
+      : 0;
+    activePauseStartedAt = Number.isFinite(Number(entry?.activePauseStartedAt)) ? Number(entry.activePauseStartedAt) : null;
+    activePauseReason = String(entry?.activePauseReason || '').trim();
+    pauseCompensationStartedAt = null;
+    const resolvedPlayerPools = resolveFixturePlayersByTeam(fixture, entry);
+    currentPlayersByTeam = resolvedPlayerPools.playersByTeam;
+    currentHousePlayersByTeam = resolvedPlayerPools.housePlayersByTeam;
+    currentStaffByTeam = loadEnrollmentStaffByHouse(fixture.homeId, fixture.awayId);
+    savedSquadByTeam = normalizeFixtureSquadByTeam(fixture, entry?.squadByTeam, currentPlayersByTeam);
+    currentSquadByTeam = normalizeFixtureSquadByTeam(fixture, savedSquadByTeam, currentPlayersByTeam);
+    squadDirtyByTeam = buildEmptySquadDirtyState(fixture);
   };
 
   const populateFixtureData = () => {
@@ -1332,6 +4336,12 @@ const hydrateMatchLog = (matchLogNode) => {
           sport: String(fixture.sport || config.sport || '').trim(),
           competition: String(fixture.competition || config.competition || '').trim(),
           venue: String(fixture.venue || config.venue || '').trim(),
+          playersByTeam:
+            fixture.playersByTeam && typeof fixture.playersByTeam === 'object' && !Array.isArray(fixture.playersByTeam)
+              ? fixture.playersByTeam
+              : {},
+          homePlayers: Array.isArray(fixture.homePlayers) ? fixture.homePlayers : [],
+          awayPlayers: Array.isArray(fixture.awayPlayers) ? fixture.awayPlayers : [],
           round: Number(fixture.round || 0),
           match: Number(fixture.match || 0),
           stamp: normalizeFixtureStampGlobal(fixtureDateMap[fixtureId])
@@ -1339,6 +4349,10 @@ const hydrateMatchLog = (matchLogNode) => {
       })
       .filter(Boolean)
       .filter((entry) => entry.homeId && entry.awayId && entry.homeId !== entry.awayId)
+      .filter((entry) => {
+        if (!isStaffManagerMode) return true;
+        return entry.homeId === managedHouseId || entry.awayId === managedHouseId;
+      })
       .sort((left, right) => {
         const leftStamp = parseDateTimeStamp(left.stamp);
         const rightStamp = parseDateTimeStamp(right.stamp);
@@ -1387,7 +4401,8 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!nextFixture) return true;
 
     const nextLabel = `${nextFixture.homeName} vs ${nextFixture.awayName}`;
-    const message = `Switch to ${nextLabel}? This will log events for a different fixture.`;
+    const unsavedNotice = hasUnsavedSquadChanges() ? ' Unsaved team list changes will be lost.' : '';
+    const message = `Switch to ${nextLabel}? This will log events for a different fixture.${unsavedNotice}`;
     return window.confirm(message);
   };
 
@@ -1454,7 +4469,11 @@ const hydrateMatchLog = (matchLogNode) => {
 
     events.forEach((event) => {
       const definition = eventTypeByKey.get(event.type);
-      const teamName = event.teamId === fixture.homeId ? fixture.homeName : fixture.awayName;
+      const teamName = event.scope === 'match'
+        ? 'Match'
+        : event.teamId === fixture.homeId
+          ? fixture.homeName
+          : fixture.awayName;
       const minute = formatMatchMinuteLabel(event.minute, event.stoppage);
       lines.push(
         [
@@ -1474,29 +4493,154 @@ const hydrateMatchLog = (matchLogNode) => {
     return lines.join('\n');
   };
 
-  const buildMatchTeamSheetTemplateSections = (fixture) => {
+  const buildMatchWorkbookSections = (fixture) => {
     if (!fixture) return [];
 
-    const maxMatchStarters = 11;
-    const maxMatchSubstitutes = 6;
+    const squadColumns = [
+      { key: 'slot', header: '#', width: 6, align: 'center' },
+      { key: 'name', header: 'Name', width: 88 },
+      { key: 'jerseyNumber', header: 'Jersey', width: 12, align: 'center' },
+      { key: 'role', header: 'Position', width: 24 }
+    ];
+    const eventColumns = [
+      { key: 'team', header: 'Team', width: 20 },
+      { key: 'minute', header: 'Minute', width: 10, align: 'center' },
+      { key: 'event', header: 'Event', width: 18 },
+      { key: 'player', header: 'Player / Person', width: 28 },
+      { key: 'secondary', header: 'Assist / Replacement', width: 28 },
+      { key: 'notes', header: 'Notes', width: 36, wrapText: true }
+    ];
+
+    const buildSquadRows = (entries) =>
+      entries.map((player, index) => ({
+        slot: index + 1,
+        name: player.name || '',
+        admissionNo: player.admissionNo || '—',
+        jerseyNumber: player.jerseyNumber || '—',
+        role: player.roleLabel || 'Learner'
+      }));
+
+    const homeSheet = getTeamSheet(fixture.homeId);
+    const awaySheet = getTeamSheet(fixture.awayId);
+    const homeAvailability = getMatchAvailabilityForTeam(fixture.homeId);
+    const awayAvailability = getMatchAvailabilityForTeam(fixture.awayId);
+    const sortedEvents = [...currentEvents].sort((left, right) => {
+      const leftMinute = Number.isFinite(left.minute) ? left.minute : Number.MAX_SAFE_INTEGER;
+      const rightMinute = Number.isFinite(right.minute) ? right.minute : Number.MAX_SAFE_INTEGER;
+      if (leftMinute === rightMinute) {
+        return (left.createdAt || 0) - (right.createdAt || 0);
+      }
+      return leftMinute - rightMinute;
+    });
+
+    return [
+      {
+        title: `${fixture.homeName} Starting XI`,
+        metaLine: `${homeSheet.starters.length}/${fixturePolicy.startingPlayers} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(homeSheet.starters)
+      },
+      {
+        title: `${fixture.homeName} Substitutes`,
+        metaLine: `${homeSheet.substitutes.length}/${fixturePolicy.benchSizeLimit} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(homeSheet.substitutes)
+      },
+      {
+        title: `${fixture.homeName} Current On-Pitch Squad`,
+        metaLine: homeAvailability.isReady ? `${homeAvailability.active.length} active players` : 'No saved valid team list yet',
+        columns: squadColumns,
+        rows: buildSquadRows(homeAvailability.active)
+      },
+      {
+        title: `${fixture.awayName} Starting XI`,
+        metaLine: `${awaySheet.starters.length}/${fixturePolicy.startingPlayers} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(awaySheet.starters)
+      },
+      {
+        title: `${fixture.awayName} Substitutes`,
+        metaLine: `${awaySheet.substitutes.length}/${fixturePolicy.benchSizeLimit} selected`,
+        columns: squadColumns,
+        rows: buildSquadRows(awaySheet.substitutes)
+      },
+      {
+        title: `${fixture.awayName} Current On-Pitch Squad`,
+        metaLine: awayAvailability.isReady ? `${awayAvailability.active.length} active players` : 'No saved valid team list yet',
+        columns: squadColumns,
+        rows: buildSquadRows(awayAvailability.active)
+      },
+      {
+        title: 'Event Log',
+        metaLine: `${sortedEvents.length} event${sortedEvents.length === 1 ? '' : 's'} logged`,
+        columns: eventColumns,
+        rows: sortedEvents.map((event) => {
+          const definition = eventTypeByKey.get(event.type);
+          const teamName = event.scope === 'match'
+            ? 'Match'
+            : event.teamId === fixture.homeId
+              ? fixture.homeName
+              : fixture.awayName;
+          return {
+            team: teamName,
+            minute: formatMatchMinuteLabel(event.minute, event.stoppage) || '—',
+            event: definition?.label || event.type,
+            player: event.playerName || '—',
+            secondary: event.type === 'substitution'
+              ? event.replacementName || '—'
+              : event.assistName || '—',
+            notes: event.notes || ''
+          };
+        })
+      }
+    ];
+  };
+
+  const exportMatchWorkbook = async () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+
+    const scores = computeScores(fixture);
+    const safeFixture = `${fixture.homeName}-vs-${fixture.awayName}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    await exportProfessionalWorkbook({
+      fileName: `${safeFixture || 'match'}-match-log-${stamp}.xlsx`,
+      sheetName: 'Match Log',
+      title: 'Live Match Log Workbook',
+      subtitle: `${fixture.homeName} vs ${fixture.awayName}`,
+      contextLine: `${fixture.sport || config.sport || 'Match'} • ${fixture.competition || config.competition || ''}`,
+      metaLine: `Venue: ${fixture.venue || config.venue || 'TBC'} | Date: ${fixture.date || 'TBC'}${fixture.time ? ` ${fixture.time}` : ''} | Score: ${fixture.homeName} ${scores[fixture.homeId] || 0} - ${scores[fixture.awayId] || 0} ${fixture.awayName}`,
+      tableSections: buildMatchWorkbookSections(fixture),
+      note: 'Team sheets include the starting XI, substitutes, and the current on-pitch squad after logged substitutions.'
+    });
+  };
+
+  function buildMatchTeamSheetTemplateSections(fixture) {
+    if (!fixture) return [];
+    const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+
     const squadTemplateColumns = [
-      { key: 'slot', header: '#', width: 22, align: 'center' },
+      { key: 'slot', header: '#', width: 6, align: 'center' },
       { key: 'name', header: 'Name', width: 88 },
       { key: 'jerseyNumber', header: 'Jersey', width: 12, align: 'center' },
       { key: 'role', header: 'Position', width: 24 }
     ];
     const staffColumns = [
-      { key: 'role', header: 'Role', width: 22 },
+      { key: 'role', header: 'Role', width: 44 },
       { key: 'name', header: 'Name', width: 88 },
-      { key: 'notes', header: 'Notes', width: 36, wrapText: true },
-      { key: 'spacer', header: '', width: 24 }
+      { key: 'notes', header: 'Notes', width: 36, wrapText: true }
     ];
     const staffRoles = ['Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
 
-    const buildBlankSquadRows = (count) =>
+    const buildBlankSquadRows = (count, roleLabel) =>
       Array.from({ length: count }, (_, index) => ({
         slot: index + 1,
         name: '',
+        admissionNo: '',
         jerseyNumber: '',
         role: '',
         notes: ''
@@ -1506,22 +4650,21 @@ const hydrateMatchLog = (matchLogNode) => {
       staffRoles.map((role) => ({
         role,
         name: '',
-        notes: '',
-        spacer: ''
+        notes: ''
       }));
 
     const buildSectionsForTeam = (teamName) => [
       {
         title: `${teamName} Starting XI Template`,
-        metaLine: `${maxMatchStarters} slots`,
+        metaLine: `${fixturePolicy.startingPlayers} slots`,
         columns: squadTemplateColumns,
-        rows: buildBlankSquadRows(maxMatchStarters)
+        rows: buildBlankSquadRows(fixturePolicy.startingPlayers, 'Starter')
       },
       {
         title: `${teamName} Substitutes Template`,
-        metaLine: `${maxMatchSubstitutes} slots`,
+        metaLine: `${fixturePolicy.benchSizeLimit} slots`,
         columns: squadTemplateColumns,
-        rows: buildBlankSquadRows(maxMatchSubstitutes)
+        rows: buildBlankSquadRows(fixturePolicy.benchSizeLimit, 'Substitute')
       },
       {
         title: `${teamName} Team Officials`,
@@ -1532,15 +4675,16 @@ const hydrateMatchLog = (matchLogNode) => {
     ];
 
     return [...buildSectionsForTeam(fixture.homeName), ...buildSectionsForTeam(fixture.awayName)];
-  };
+  }
 
-  const exportMatchTeamSheetTemplate = async () => {
+  async function exportMatchTeamSheetTemplate() {
     const fixture = getCurrentFixture();
     if (!fixture) return;
 
     const sections = buildMatchTeamSheetTemplateSections(fixture);
-    if (!sections.length) return;
+    if (!Array.isArray(sections) || !sections.length) return;
 
+    // split sections into two teams (assumes sections are produced home then away)
     const perTeam = Math.ceil(sections.length / 2);
     const homeSections = sections.slice(0, perTeam);
     const awaySections = sections.slice(perTeam);
@@ -1550,7 +4694,7 @@ const hydrateMatchLog = (matchLogNode) => {
     workbook.creator = 'Bhanoyi Secondary School Website';
     workbook.created = new Date();
 
-    const toColumnLabel = (index) => {
+    const makeColLabel = (index) => {
       let value = Math.max(1, Number(index) || 1);
       let label = '';
       while (value > 0) {
@@ -1574,16 +4718,8 @@ const hydrateMatchLog = (matchLogNode) => {
     const applyDataRowCellStyle = (cell, style, rowIndex) => {
       const align = style?.align || 'left';
       cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${theme.deepBlue}` } };
-      cell.alignment = {
-        vertical: 'middle',
-        horizontal: align,
-        wrapText: Boolean(style?.wrapText)
-      };
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: `FF${rowIndex % 2 === 0 ? theme.white : theme.lightBlue}` }
-      };
+      cell.alignment = { vertical: 'middle', horizontal: align, wrapText: Boolean(style?.wrapText) };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${rowIndex % 2 === 0 ? theme.white : theme.lightBlue}` } };
       cell.border = {
         top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
         left: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
@@ -1594,14 +4730,10 @@ const hydrateMatchLog = (matchLogNode) => {
 
     const styleHeaderRow = (row, columnsForRow) => {
       row.values = columnsForRow.map((entry) => entry.header || '');
-      row.height = 40;
+      row.height = 20;
       row.eachCell((cell) => {
         cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: `FF${theme.white}` } };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: `FF${theme.headerBlue}` }
-        };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${theme.headerBlue}` } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.border = {
           top: { style: 'thin', color: { argb: `FF${theme.borderColor}` } },
@@ -1613,13 +4745,7 @@ const hydrateMatchLog = (matchLogNode) => {
     };
 
     const renderTeamSheet = async (teamName, teamSections) => {
-      const effectiveCols = teamSections.reduce(
-        (widest, entry) => (entry.columns.length > (widest?.length || 0) ? entry.columns : widest),
-        teamSections[0]?.columns || []
-      );
-      const endLabel = toColumnLabel(effectiveCols.length);
-      const sheetName = `${teamName} Team Sheet`.slice(0, 31);
-      const sheet = workbook.addWorksheet(sheetName, {
+      const sheet = workbook.addWorksheet(`${teamName} Team Sheet`, {
         pageSetup: {
           paperSize: 9,
           orientation: 'portrait',
@@ -1627,18 +4753,15 @@ const hydrateMatchLog = (matchLogNode) => {
           fitToWidth: 1,
           fitToHeight: 0,
           horizontalCentered: true,
-          margins: {
-            left: 0.35,
-            right: 0.35,
-            top: 0.55,
-            bottom: 0.5,
-            header: 0.2,
-            footer: 0.2
-          }
+          margins: { left: 0.35, right: 0.35, top: 0.55, bottom: 0.5, header: 0.2, footer: 0.2 }
         }
       });
-      sheet.properties.defaultRowHeight = 36;
 
+      // compute effective columns (widest column set among sections)
+      const effectiveCols = teamSections.reduce((widest, entry) => (entry.columns.length > (widest?.length || 0) ? entry.columns : widest), teamSections[0].columns || []);
+      const endLabel = makeColLabel(effectiveCols.length);
+
+      // header area (match professional-export styling)
       sheet.mergeCells(`A1:${endLabel}1`);
       sheet.mergeCells(`A2:${endLabel}2`);
       sheet.mergeCells(`A3:${endLabel}3`);
@@ -1647,76 +4770,74 @@ const hydrateMatchLog = (matchLogNode) => {
       sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
       sheet.getCell('A2').value = `${teamName} Team Sheet Template`;
       sheet.getCell('A3').value = `${fixture.homeName} vs ${fixture.awayName}`;
-      sheet.getCell('A4').value = config.venue ? `Venue: ${config.venue}` : '';
+      sheet.getCell('A4').value = '';
       sheet.getCell('A5').value = `Generated on: ${new Date().toLocaleString('en-GB')}`;
 
       ['A1', 'A2', 'A3', 'A4', 'A5'].forEach((ref, index) => {
         const cell = sheet.getCell(ref);
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
-        cell.font = {
-          name: 'Calibri',
-          size: index === 0 ? 17 : index === 1 ? 13 : 10.5,
-          bold: index <= 2,
-          color: { argb: index <= 2 ? `FF${theme.white}` : `FF${theme.deepBlue}` }
-        };
+        cell.font = { name: 'Calibri', size: index === 0 ? 17 : index === 1 ? 13 : 10.5, bold: index <= 2, color: { argb: index <= 2 ? `FF${theme.white}` : `FF${theme.deepBlue}` } };
         if (index <= 2) {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: `FF${index === 0 ? theme.deepBlue : theme.primaryBlue}` }
-          };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${index === 0 ? theme.deepBlue : theme.primaryBlue}` } };
         } else {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: `FF${theme.metaBlue}` }
-          };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${theme.metaBlue}` } };
         }
       });
 
-      sheet.getRow(1).height = 56;
-      sheet.getRow(2).height = 44;
-      sheet.getRow(3).height = 40;
-      sheet.getRow(4).height = 36;
-      sheet.getRow(5).height = 36;
+      sheet.getRow(1).height = 28;
+      sheet.getRow(2).height = 22;
+      sheet.getRow(3).height = 20;
+      sheet.getRow(4).height = 18;
+      sheet.getRow(5).height = 18;
 
+      // try to add logo similar to professional-export
       try {
-        const logoResponse = await fetch('/branding/bhanoyi-logo.png');
+        const logoUrl = '/branding/bhanoyi-logo.png';
+        const logoResponse = await fetch(logoUrl);
         if (logoResponse.ok) {
           const logoBlob = await logoResponse.blob();
           const logoBuffer = await logoBlob.arrayBuffer();
           const imageId = workbook.addImage({ buffer: logoBuffer, extension: 'png' });
-          sheet.addImage(imageId, {
-            tl: { col: 0.1, row: 0.15 },
-            ext: { width: 86, height: 86 }
-          });
+
+          let logoWidth = 86;
+          let logoHeight = 86;
+          try {
+            const bitmap = await createImageBitmap(logoBlob);
+            const intrinsicWidth = Number(bitmap.width) || 1;
+            const intrinsicHeight = Number(bitmap.height) || 1;
+            const aspectRatio = intrinsicWidth / intrinsicHeight;
+            const targetHeight = 86;
+            logoHeight = targetHeight;
+            logoWidth = Math.max(42, Math.min(120, Math.round(targetHeight * aspectRatio)));
+            bitmap.close();
+          } catch {
+            // ignore
+          }
+
+          sheet.addImage(imageId, { tl: { col: 0.1, row: 0.15 }, ext: { width: logoWidth, height: logoHeight } });
         }
       } catch {
-        // Branding image is optional.
+        // ignore branding errors
       }
 
-      sheet.columns = effectiveCols.map((column) => ({
-        header: column.header || '',
-        key: column.key || '',
-        width: Math.max(8, Number(column.width) || 16)
-      }));
+      // set columns on sheet to effectiveCols
+      sheet.columns = effectiveCols.map((c) => ({ header: c.header || '', key: c.key || '', width: Math.max(8, Number(c.width) || 16) }));
 
       let currentRow = 7;
+
       teamSections.forEach((section) => {
+        // title
         if (section.title) {
           sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
           const titleCell = sheet.getCell(`A${currentRow}`);
           titleCell.value = section.title;
           titleCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: `FF${theme.deepBlue}` } };
           titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
-          titleCell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: `FF${theme.metaBlue}` }
-          };
+          titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${theme.metaBlue}` } };
           currentRow += 1;
         }
 
+        // meta line
         if (section.metaLine) {
           sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
           const metaCell = sheet.getCell(`A${currentRow}`);
@@ -1726,57 +4847,77 @@ const hydrateMatchLog = (matchLogNode) => {
           currentRow += 1;
         }
 
+        // header row
         const headerRow = sheet.getRow(currentRow);
         styleHeaderRow(headerRow, section.columns);
         currentRow += 1;
 
+        // data rows
         section.rows.forEach((rowValue, rowIndex) => {
           const row = sheet.getRow(currentRow + rowIndex);
-          row.height = 36;
-          section.columns.forEach((column, columnIndex) => {
-            const key = String(column.key || `col_${columnIndex + 1}`);
-            const cell = row.getCell(columnIndex + 1);
+          row.height = 18;
+          section.columns.forEach((col, colIndex) => {
+            const key = String(col.key || `col_${colIndex + 1}`);
+            const cell = row.getCell(colIndex + 1);
             cell.value = rowValue && typeof rowValue === 'object' ? rowValue[key] ?? '' : '';
-            applyDataRowCellStyle(cell, column, rowIndex);
+            applyDataRowCellStyle(cell, col, rowIndex);
           });
         });
-        currentRow += section.rows.length + 1;
+        currentRow += section.rows.length;
+
+        // section note
+        if (section.note) {
+          sheet.mergeCells(`A${currentRow}:${endLabel}${currentRow}`);
+          const noteCell = sheet.getCell(`A${currentRow}`);
+          noteCell.value = section.note;
+          noteCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${theme.deepBlue}` } };
+          noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          currentRow += 1;
+        }
+
+        currentRow += 1; // gap between sections
       });
 
-      sheet.pageSetup.printArea = `A1:${endLabel}${Math.max(1, currentRow - 1)}`;
+      // set print area
+      const lastRow = currentRow - 1;
+      sheet.pageSetup.printArea = `A1:${endLabel}${lastRow}`;
     };
 
     await renderTeamSheet(fixture.homeName, homeSections);
     await renderTeamSheet(fixture.awayName, awaySections);
 
+    // prepare download
+    const fileName = `${(fixture.homeName || 'home')}-vs-${(fixture.awayName || 'away')}-team-sheet-template-${new Date().toISOString().slice(0,10)}.xlsx`;
     const workbookBuffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([workbookBuffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
+    const blob = new Blob([workbookBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    const fileName = `${(fixture.homeName || 'home')}-vs-${(fixture.awayName || 'away')}-team-sheet-template-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    showSmartToast('Team sheet template exported (.xlsx).', { tone: 'success' });
-  };
+    showSmartToast('Team sheet template exported (.xlsx) with separate sheets.', { tone: 'success' });
+  }
 
-  const render = () => {
+  function render() {
     const fixture = getCurrentFixture();
 
     if (!fixture) {
-      if (leftNameNode) leftNameNode.textContent = 'Home';
-      if (rightNameNode) rightNameNode.textContent = 'Away';
-      if (leftScoreNode) leftScoreNode.textContent = '0';
-      if (rightScoreNode) rightScoreNode.textContent = '0';
       if (tableBodyNode) {
         tableBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="3">Choose a fixture date and match to start logging.</td></tr>';
       }
+      if (playerStatsBodyNode) {
+        playerStatsBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="8">Choose a fixture to view player stats.</td></tr>';
+      }
+      if (playerStatsStatusNode) {
+        playerStatsStatusNode.textContent = 'Choose a fixture to view player stats.';
+      }
+      if (topScorerNode) topScorerNode.textContent = '—';
+      if (topAssisterNode) topAssisterNode.textContent = '—';
+      if (mostBookedNode) mostBookedNode.textContent = '—';
       if (statusNode) {
         statusNode.textContent = fixtureOptions.length
           ? 'No match selected yet.'
@@ -1787,12 +4928,23 @@ const hydrateMatchLog = (matchLogNode) => {
           ? 'Select a match to continue.'
           : 'No fixture dates available yet.';
       }
+      if (saveLogButton instanceof HTMLButtonElement) {
+        saveLogButton.disabled = true;
+      }
+      if (saveStatusNode) {
+        saveStatusNode.textContent = 'Auto-save is on for every logged event.';
+      }
       openButtons.forEach((button) => {
         if (button instanceof HTMLButtonElement) {
           button.disabled = true;
         }
       });
+      renderManagedHouseSquadWorkspace();
+      renderSquadManager();
+      renderCompetitionPolicyControls();
+      renderClockStatus();
       syncModalTeamState();
+      renderAutocompleteOptions();
       return;
     }
 
@@ -1806,8 +4958,9 @@ const hydrateMatchLog = (matchLogNode) => {
       return leftMinute - rightMinute;
     });
 
-    const homeEvents = sortedEvents.filter((event) => event.teamId === fixture.homeId);
-    const awayEvents = sortedEvents.filter((event) => event.teamId === fixture.awayId);
+    const homeEvents = sortedEvents.filter((event) => event.scope !== 'match' && event.teamId === fixture.homeId);
+    const awayEvents = sortedEvents.filter((event) => event.scope !== 'match' && event.teamId === fixture.awayId);
+    const neutralEvents = sortedEvents.filter((event) => event.scope === 'match' || !event.teamId);
 
     if (leftNameNode) leftNameNode.textContent = fixture.homeName;
     if (rightNameNode) rightNameNode.textContent = fixture.awayName;
@@ -1815,7 +4968,7 @@ const hydrateMatchLog = (matchLogNode) => {
     if (rightScoreNode) rightScoreNode.textContent = String(scores[fixture.awayId] || 0);
 
     if (tableBodyNode) {
-      const rowCount = Math.max(homeEvents.length, awayEvents.length);
+      const rowCount = Math.max(homeEvents.length, awayEvents.length, neutralEvents.length);
       if (!rowCount) {
         tableBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="3">No events logged for this fixture yet.</td></tr>';
       } else {
@@ -1823,13 +4976,16 @@ const hydrateMatchLog = (matchLogNode) => {
         for (let index = 0; index < rowCount; index += 1) {
           const homeEvent = homeEvents[index] || null;
           const awayEvent = awayEvents[index] || null;
-          const reference = homeEvent || awayEvent;
+          const neutralEvent = neutralEvents[index] || null;
+          const reference = homeEvent || awayEvent || neutralEvent;
           const minuteLabel = reference ? formatMatchMinuteLabel(reference.minute, reference.stoppage) : '';
           rows.push(`
             <tr>
-              <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type)) : ''}</td>
-              <td class="match-log-minute-cell">${escapeHtmlText(minuteLabel || '—')}</td>
-              <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type)) : ''}</td>
+              <td>${homeEvent ? renderMatchEventItem(homeEvent, eventTypeByKey.get(homeEvent.type), { editable: canEditTeamEvents(homeEvent.teamId) }) : ''}</td>
+              <td class="match-log-minute-cell">${neutralEvent
+                ? renderMatchEventItem(neutralEvent, eventTypeByKey.get(neutralEvent.type), { editable: false })
+                : escapeHtmlText(minuteLabel || '—')}</td>
+              <td>${awayEvent ? renderMatchEventItem(awayEvent, eventTypeByKey.get(awayEvent.type), { editable: canEditTeamEvents(awayEvent.teamId) }) : ''}</td>
             </tr>
           `);
         }
@@ -1840,28 +4996,144 @@ const hydrateMatchLog = (matchLogNode) => {
     if (selectedFixtureNode) {
       selectedFixtureNode.textContent = `${formatDateLabel(fixture.date)}${fixture.time ? ` • ${fixture.time}` : ''} • ${fixture.homeName} vs ${fixture.awayName}`;
     }
+    if (saveLogButton instanceof HTMLButtonElement) {
+      saveLogButton.disabled = false;
+    }
+    if (saveStatusNode && !String(saveStatusNode.textContent || '').trim()) {
+      saveStatusNode.textContent = 'Auto-save is on for every logged event.';
+    }
     if (statusNode) {
       statusNode.textContent = sortedEvents.length
         ? `${sortedEvents.length} event${sortedEvents.length === 1 ? '' : 's'} logged for selected fixture.`
         : 'No events logged for selected fixture.';
     }
 
-    openButtons.forEach((button) => {
-      if (button instanceof HTMLButtonElement) {
-        button.disabled = false;
+    const playerStats = buildPlayerEventIndex(currentEvents, fixture, currentPlayersByTeam)
+      .map((entry) => {
+        const eventTypes = entry && typeof entry.eventTypes === 'object' ? entry.eventTypes : {};
+        const goals = Number(eventTypes.goal || 0) + Number(eventTypes.penalty_goal || 0);
+        const assists = Number(entry.assistCount || 0);
+        const yellowCards = Number(eventTypes.yellow_card || 0);
+        const redCards = Number(eventTypes.red_card || 0);
+        const events = Number(entry.totalEvents || 0);
+        return {
+          teamId: String(entry.teamId || '').trim(),
+          teamName: String(entry.teamId || '').trim() === fixture.awayId ? fixture.awayName : fixture.homeName,
+          playerName: String(entry.name || '').trim(),
+          admissionNo: String(entry.admissionNo || '').trim(),
+          goals,
+          assists,
+          yellowCards,
+          redCards,
+          events
+        };
+      })
+      .filter((entry) => entry.playerName)
+      .sort((left, right) => {
+        if (left.teamName !== right.teamName) return left.teamName.localeCompare(right.teamName);
+        if (left.goals !== right.goals) return right.goals - left.goals;
+        if (left.assists !== right.assists) return right.assists - left.assists;
+        return left.playerName.localeCompare(right.playerName);
+      });
+
+    if (playerStatsBodyNode) {
+      if (!playerStats.length) {
+        playerStatsBodyNode.innerHTML = '<tr><td class="match-log-empty-cell" colspan="8">No player stats yet for this fixture.</td></tr>';
+      } else {
+        playerStatsBodyNode.innerHTML = playerStats
+          .map(
+            (entry) => `
+              <tr>
+                <td>${escapeHtmlText(entry.teamName)}</td>
+                <td>${escapeHtmlText(entry.playerName)}</td>
+                <td>${escapeHtmlText(entry.admissionNo || '—')}</td>
+                <td>${entry.goals}</td>
+                <td>${entry.assists}</td>
+                <td>${entry.yellowCards}</td>
+                <td>${entry.redCards}</td>
+                <td>${entry.events}</td>
+              </tr>
+            `
+          )
+          .join('');
       }
+    }
+
+    if (playerStatsStatusNode) {
+      if (!playerStats.length) {
+        playerStatsStatusNode.textContent = 'No player stats yet for selected fixture.';
+      } else {
+        playerStatsStatusNode.textContent = `${playerStats.length} player${playerStats.length === 1 ? '' : 's'} with recorded stats.`;
+      }
+    }
+
+    const topScorer = playerStats
+      .filter((entry) => entry.goals > 0)
+      .sort((left, right) => {
+        if (left.goals !== right.goals) return right.goals - left.goals;
+        return left.playerName.localeCompare(right.playerName);
+      })[0] || null;
+
+    const topAssister = playerStats
+      .filter((entry) => entry.assists > 0)
+      .sort((left, right) => {
+        if (left.assists !== right.assists) return right.assists - left.assists;
+        return left.playerName.localeCompare(right.playerName);
+      })[0] || null;
+
+    const mostBooked = playerStats
+      .map((entry) => ({
+        ...entry,
+        bookings: entry.yellowCards + entry.redCards
+      }))
+      .filter((entry) => entry.bookings > 0)
+      .sort((left, right) => {
+        if (left.bookings !== right.bookings) return right.bookings - left.bookings;
+        return left.playerName.localeCompare(right.playerName);
+      })[0] || null;
+
+    if (topScorerNode) {
+      topScorerNode.textContent = topScorer
+        ? `${topScorer.playerName} (${topScorer.goals})`
+        : 'No goals yet';
+    }
+
+    if (topAssisterNode) {
+      topAssisterNode.textContent = topAssister
+        ? `${topAssister.playerName} (${topAssister.assists})`
+        : 'No assists yet';
+    }
+
+    if (mostBookedNode) {
+      mostBookedNode.textContent = mostBooked
+        ? `${mostBooked.playerName} (${mostBooked.bookings})`
+        : 'No cards yet';
+    }
+
+    openButtons.forEach((button) => {
+      if (!(button instanceof HTMLButtonElement)) return;
+      const side = String(button.dataset.matchOpenEventSide || '').trim();
+      const teamId = side === 'right' ? fixture.awayId : fixture.homeId;
+      const allowed = canEditTeamEvents(teamId);
+      button.disabled = !allowed;
+      button.classList.toggle('is-hidden', !allowed && isStaffManagerMode);
     });
 
+    renderManagedHouseSquadWorkspace();
+    renderSquadManager();
+    renderCompetitionPolicyControls();
+    renderClockStatus();
     syncModalTeamState();
-
-    persistCurrentFixtureLog();
-  };
+    renderAutocompleteOptions();
+  }
 
   const resetModal = () => {
     selectedTypeKey = '';
+    editingEventId = '';
     typeStep.classList.remove('is-hidden');
     detailsStep.classList.add('is-hidden');
     nextButton.disabled = true;
+    saveButton.textContent = 'Save event';
     typeListNode.innerHTML = eventTypes
       .map(
         (entry) => `
@@ -1878,10 +5150,15 @@ const hydrateMatchLog = (matchLogNode) => {
     if (assistRow) {
       assistRow.classList.add('is-hidden');
     }
+    if (replacementRow) {
+      replacementRow.classList.add('is-hidden');
+    }
+    renderAutocompleteOptions();
   };
 
   const closeModal = () => {
     modal.classList.add('is-hidden');
+    pauseCompensationStartedAt = null;
     resetModal();
   };
 
@@ -1913,30 +5190,41 @@ const hydrateMatchLog = (matchLogNode) => {
       modalTeamSelect.innerHTML = '<option value="">Select team</option>';
       modalTeamSelect.disabled = true;
       if (teamLabel) teamLabel.textContent = '';
+      renderAutocompleteOptions();
       return;
     }
 
     const validTeamIds = new Set([fixture.homeId, fixture.awayId]);
-    if (!validTeamIds.has(activeTeamId)) {
-      activeTeamId = fixture.homeId;
+    const availableTeams = [
+      { id: fixture.homeId, name: fixture.homeName },
+      { id: fixture.awayId, name: fixture.awayName }
+    ].filter((entry) => validTeamIds.has(entry.id) && canEditTeamEvents(entry.id));
+
+    if (!validTeamIds.has(activeTeamId) || !canEditTeamEvents(activeTeamId)) {
+      activeTeamId = availableTeams[0]?.id || fixture.homeId;
     }
 
-    modalTeamSelect.disabled = false;
-    modalTeamSelect.innerHTML = `
-      <option value="${escapeHtmlAttribute(fixture.homeId)}">${escapeHtmlText(fixture.homeName)}</option>
-      <option value="${escapeHtmlAttribute(fixture.awayId)}">${escapeHtmlText(fixture.awayName)}</option>
-    `;
+    modalTeamSelect.disabled = availableTeams.length <= 1;
+    modalTeamSelect.innerHTML = availableTeams
+      .map((entry) => `<option value="${escapeHtmlAttribute(entry.id)}">${escapeHtmlText(entry.name)}</option>`)
+      .join('');
     modalTeamSelect.value = activeTeamId;
 
     if (teamLabel) {
       const teamName = activeTeamId === fixture.awayId ? fixture.awayName : fixture.homeName;
       teamLabel.textContent = `Team: ${teamName}`;
     }
+
+    renderAutocompleteOptions();
   };
 
   const openModalForTeam = (teamId) => {
     const fixture = getCurrentFixture();
     if (!fixture || !teamId) return;
+    if (!canEditTeamEvents(teamId)) return;
+    if (Number.isFinite(Number(matchStartedAt)) && !Number.isFinite(Number(activePauseStartedAt))) {
+      pauseCompensationStartedAt = Date.now();
+    }
     openWorkspaceModal();
     workflowSteps?.expandStep('log-events');
     activeTeamId = teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
@@ -1945,7 +5233,84 @@ const hydrateMatchLog = (matchLogNode) => {
     modal.classList.remove('is-hidden');
   };
 
+  const openModalForEdit = (eventId) => {
+    const fixture = getCurrentFixture();
+    if (!fixture || !eventId) return;
+    const existing = currentEvents.find((entry) => String(entry.id || '') === String(eventId));
+    if (!existing) return;
+    if (existing.scope === 'match') return;
+    if (!canEditTeamEvents(existing.teamId)) return;
+
+    openWorkspaceModal();
+    workflowSteps?.expandStep('log-events');
+    resetModal();
+
+    activeTeamId = existing.teamId === fixture.awayId ? fixture.awayId : fixture.homeId;
+    syncModalTeamState();
+
+    selectedTypeKey = existing.type;
+    const definition = eventTypeByKey.get(selectedTypeKey);
+    if (!definition) return;
+
+    if (playerLabelNode) {
+      playerLabelNode.firstChild.textContent = `${definition.playerLabel || 'Player name'} `;
+    }
+
+    if (assistRow) {
+      assistRow.classList.toggle('is-hidden', !definition.allowAssist);
+    }
+    if (replacementRow) {
+      replacementRow.classList.toggle('is-hidden', !definition.showReplacement);
+    }
+
+    const selectedTypeInput = typeListNode.querySelector(`input[name="match-event-type"][value="${CSS.escape(selectedTypeKey)}"]`);
+    if (selectedTypeInput instanceof HTMLInputElement) {
+      selectedTypeInput.checked = true;
+    }
+
+    if (minuteInput instanceof HTMLInputElement) {
+      minuteInput.value = Number.isFinite(existing.minute) ? String(existing.minute) : '';
+    }
+    if (stoppageInput instanceof HTMLInputElement) {
+      stoppageInput.value = Number.isFinite(existing.stoppage) ? String(existing.stoppage) : '';
+    }
+    if (playerInput instanceof HTMLInputElement) {
+      playerInput.value = String(existing.playerName || '').trim();
+    }
+    if (jerseyInput instanceof HTMLInputElement) {
+      jerseyInput.value = String(existing.jerseyNumber || '').trim();
+    }
+    if (assistInput instanceof HTMLInputElement) {
+      assistInput.value = String(existing.assistName || '').trim();
+    }
+    if (replacementInput instanceof HTMLInputElement) {
+      replacementInput.value = String(existing.replacementName || '').trim();
+    }
+    if (notesInput instanceof HTMLTextAreaElement) {
+      notesInput.value = String(existing.notes || '').trim();
+    }
+
+    editingEventId = String(existing.id || '').trim();
+    saveButton.textContent = 'Update event';
+    typeStep.classList.add('is-hidden');
+    detailsStep.classList.remove('is-hidden');
+    modal.classList.remove('is-hidden');
+    renderAutocompleteOptions();
+  };
+
   const applyFixtureSelection = () => {
+    const fixture = getCurrentFixture();
+    const fixtureSportKey = normalizeManagedSportKey(fixture?.sport || '');
+    if (fixtureSportKey) {
+      selectedManagerSportKey = fixtureSportKey;
+      selectedPolicySportKey = fixtureSportKey;
+      if (managerSportSelect instanceof HTMLSelectElement) {
+        managerSportSelect.value = fixtureSportKey;
+      }
+      if (policySportSelect instanceof HTMLSelectElement) {
+        policySportSelect.value = fixtureSportKey;
+      }
+    }
     loadCurrentFixtureLog();
     render();
   };
@@ -1963,6 +5328,7 @@ const hydrateMatchLog = (matchLogNode) => {
       ? previousFixtureId
       : fixturesForDay[0]?.fixtureId || '';
 
+    houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
     renderFixturePickers();
     applyFixtureSelection();
   };
@@ -1990,6 +5356,13 @@ const hydrateMatchLog = (matchLogNode) => {
       }
     }
 
+    if (replacementRow) {
+      replacementRow.classList.toggle('is-hidden', !definition.showReplacement);
+      if (!definition.showReplacement && replacementInput instanceof HTMLInputElement) {
+        replacementInput.value = '';
+      }
+    }
+
     typeStep.classList.add('is-hidden');
     detailsStep.classList.remove('is-hidden');
   });
@@ -2005,29 +5378,168 @@ const hydrateMatchLog = (matchLogNode) => {
     if (!selectedTypeKey || !eventTypeByKey.has(selectedTypeKey)) return;
     if (!activeTeamId || (activeTeamId !== fixture.homeId && activeTeamId !== fixture.awayId)) return;
 
+    const definition = eventTypeByKey.get(selectedTypeKey);
+    if (!definition) return;
+
     const minute = Number(minuteInput?.value);
     const stoppage = Number(stoppageInput?.value);
     const playerName = (playerInput?.value || '').trim();
     const jerseyNumber = (jerseyInput?.value || '').trim();
     const assistName = (assistInput?.value || '').trim();
+    const replacementName = (replacementInput?.value || '').trim();
     const notes = (notesInput?.value || '').trim();
+    const selectedPlayer = findParticipantByTypedName(activeTeamId, playerName, definition, 'player');
+    const selectedAssist = findParticipantByTypedName(activeTeamId, assistName, definition, 'assist');
+    const selectedReplacement = findParticipantByTypedName(activeTeamId, replacementName, definition, 'replacement');
+    const availability = getMatchAvailabilityForTeam(activeTeamId, { excludeEventId: editingEventId });
+    const validateScopedParticipant = (value, selectedParticipant, field) => {
+      const typedValue = String(value || '').trim();
+      if (!typedValue) return true;
 
-    currentEvents.push({
+      const scope = getParticipantSearchScope(definition, field);
+      if (!isSquadBoundSearchScope(scope)) {
+        return true;
+      }
+
+      if (!availability.isReady) {
+        showSmartToast('Save a valid team list with exactly 11 starters before logging on-pitch events.', { tone: 'error' });
+        return false;
+      }
+
+      if (!selectedParticipant) {
+        showSmartToast(getParticipantScopeErrorMessage(scope), { tone: 'error' });
+        return false;
+      }
+
+      return true;
+    };
+
+    if (!validateScopedParticipant(playerName, selectedPlayer, 'player')) {
+      return;
+    }
+
+    if (!validateScopedParticipant(assistName, selectedAssist, 'assist')) {
+      return;
+    }
+
+    if (!validateScopedParticipant(replacementName, selectedReplacement, 'replacement')) {
+      return;
+    }
+
+    if (definition.showReplacement) {
+      if (!playerName || !replacementName) {
+        showSmartToast('Select both the player going off and the player coming on.', { tone: 'error' });
+        return;
+      }
+
+      if (!selectedPlayer || !selectedReplacement) {
+        showSmartToast('Use the suggested player names for substitutions so the active squad updates correctly.', {
+          tone: 'error'
+        });
+        return;
+      }
+
+      if (selectedPlayer.id === selectedReplacement.id) {
+        showSmartToast('The same player cannot go off and come on in the same substitution.', { tone: 'error' });
+        return;
+      }
+
+      if (!editingEventId) {
+        if (availability.hasSquad) {
+          if (!availability.active.some((player) => player.id === selectedPlayer.id)) {
+            showSmartToast('The player going off must currently be on the pitch.', { tone: 'error' });
+            return;
+          }
+
+          if (!availability.bench.some((player) => player.id === selectedReplacement.id)) {
+            showSmartToast('The player coming on must come from the substitutes list.', { tone: 'error' });
+            return;
+          }
+        }
+      }
+    }
+
+    const nextEvent = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      scope: 'team',
       teamId: activeTeamId,
       type: selectedTypeKey,
       minute: Number.isFinite(minute) && minute >= 0 ? Math.floor(minute) : null,
       stoppage: Number.isFinite(stoppage) && stoppage > 0 ? Math.floor(stoppage) : null,
-      playerName,
+      playerName: selectedPlayer?.name || playerName,
+      playerId: selectedPlayer?.id || '',
+      playerAdmissionNo: selectedPlayer?.admissionNo || '',
+      playerHouseId: selectedPlayer?.houseId || activeTeamId,
+      playerGender: selectedPlayer?.gender || '',
+      playerType: selectedPlayer?.participantType || '',
+      playerRole: selectedPlayer?.roleLabel || '',
       jerseyNumber,
-      assistName,
+      assistName: selectedAssist?.name || assistName,
+      assistId: selectedAssist?.id || '',
+      assistAdmissionNo: selectedAssist?.admissionNo || '',
+      assistType: selectedAssist?.participantType || '',
+      assistRole: selectedAssist?.roleLabel || '',
+      replacementName: selectedReplacement?.name || replacementName,
+      replacementId: selectedReplacement?.id || '',
+      replacementAdmissionNo: selectedReplacement?.admissionNo || '',
+      replacementHouseId: selectedReplacement?.houseId || activeTeamId,
+      replacementGender: selectedReplacement?.gender || '',
+      replacementType: selectedReplacement?.participantType || '',
+      replacementRole: selectedReplacement?.roleLabel || '',
       notes,
       createdAt: Date.now()
-    });
+    };
 
+    if (editingEventId) {
+      const index = currentEvents.findIndex((entry) => String(entry.id || '') === String(editingEventId));
+      if (index >= 0) {
+        const existingCreatedAt = Number(currentEvents[index]?.createdAt);
+        currentEvents[index] = {
+          ...nextEvent,
+          id: editingEventId,
+          createdAt: Number.isFinite(existingCreatedAt) ? existingCreatedAt : Date.now(),
+          updatedAt: Date.now()
+        };
+      }
+    } else {
+      currentEvents.push(nextEvent);
+    }
+
+    pauseCompensationStartedAt = null;
     persistCurrentFixtureLog();
     render();
     closeModal();
+  });
+
+  tableBodyNode?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const deleteButton = target.closest('[data-match-delete-event]');
+    if (deleteButton instanceof HTMLElement) {
+      const eventId = String(deleteButton.dataset.matchDeleteEvent || '').trim();
+      if (!eventId) return;
+      const existing = currentEvents.find((entry) => String(entry.id || '') === eventId);
+      if (!existing) return;
+      if (!canEditTeamEvents(existing.teamId)) return;
+
+      const confirmed = window.confirm('Delete this event from the match log?');
+      if (!confirmed) return;
+
+      currentEvents = currentEvents.filter((entry) => String(entry.id || '') !== eventId);
+      persistCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const editButton = target.closest('[data-match-edit-event]');
+    if (editButton instanceof HTMLElement) {
+      const eventId = String(editButton.dataset.matchEditEvent || '').trim();
+      if (!eventId) return;
+      const existing = currentEvents.find((entry) => String(entry.id || '') === eventId);
+      if (!existing || !canEditTeamEvents(existing.teamId)) return;
+      openModalForEdit(eventId);
+    }
   });
 
   cancelButtons.forEach((button) => {
@@ -2071,6 +5583,266 @@ const hydrateMatchLog = (matchLogNode) => {
     });
   });
 
+  squadManagerNode?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const saveButton = target.closest('[data-match-squad-save]');
+    if (saveButton instanceof HTMLElement) {
+      const teamId = String(saveButton.dataset.teamId || '').trim();
+      if (!teamId) return;
+      if (!canEditCanonicalTeam(teamId)) return;
+      saveTeamSheetForTeam(teamId);
+      return;
+    }
+
+    const addButton = target.closest('[data-match-squad-add]');
+    if (addButton instanceof HTMLElement) {
+      const teamId = String(addButton.dataset.teamId || '').trim();
+      const group = String(addButton.dataset.matchSquadAdd || '').trim();
+      if (!canEditCanonicalTeam(teamId)) return;
+      const card = addButton.closest('[data-match-squad-card]');
+      const input = card?.querySelector('[data-match-squad-search-input]');
+      const typedName = input instanceof HTMLInputElement ? input.value : '';
+      const candidate = getSquadCandidateByTypedName(teamId, typedName);
+      const current = getTeamSheet(teamId);
+      const fixturePolicy = getFixtureCompetitionPolicy();
+
+      if (!candidate) {
+        showSmartToast('Player not found in the sporting squad. Add them to the house sporting squad first.', { tone: 'error' });
+        return;
+      }
+
+      if (current.starters.some((player) => player.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already in the starting lineup.`, { tone: 'error' });
+        return;
+      }
+
+      if (current.substitutes.some((player) => player.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already in this team list.`, { tone: 'error' });
+        return;
+      }
+
+      const discipline = getPlayerDisciplinaryStatus(teamId, candidate);
+      if (discipline.activeSuspension || discipline.cautionCarry > 0) {
+        const warningParts = [];
+        if (discipline.activeSuspension) {
+          warningParts.push(
+            `${candidate.name} appears to have an active suspension with ${discipline.suspensionMatchesRemaining} match${discipline.suspensionMatchesRemaining === 1 ? '' : 'es'} still to serve.`
+          );
+        }
+        if (discipline.cautionCarry > 0) {
+          warningParts.push(
+            `${candidate.name} also carries ${discipline.cautionCarry} caution${discipline.cautionCarry === 1 ? '' : 's'} under the current FIFA-style accumulation default.`
+          );
+        }
+        if (discipline.reasons.length) {
+          warningParts.push(`Source: ${discipline.reasons.join('; ')}.`);
+        }
+        warningParts.push('Add the player anyway?');
+
+        const confirmed = window.confirm(warningParts.join(' '));
+        if (!confirmed) return;
+      }
+
+      if (group === 'starters' && current.starters.length >= fixturePolicy.startingPlayers) {
+        showSmartToast(`Only ${fixturePolicy.startingPlayers} players can be in the starting lineup.`, { tone: 'error' });
+        return;
+      }
+
+      if (group === 'substitutes' && current.substitutes.length >= fixturePolicy.benchSizeLimit) {
+        showSmartToast(`Only ${fixturePolicy.benchSizeLimit} substitutes can be added.`, { tone: 'error' });
+        return;
+      }
+
+      setTeamSheetForTeam(teamId, {
+        ...current,
+        [group]: [...current[group], candidate]
+      });
+
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+
+      render();
+      return;
+    }
+
+    const clearButton = target.closest('[data-match-squad-clear]');
+    if (clearButton instanceof HTMLElement) {
+      const teamId = String(clearButton.dataset.teamId || '').trim();
+      if (!canEditCanonicalTeam(teamId)) return;
+      const confirmed = window.confirm('Clear the starting XI and substitutes for this team?');
+      if (!confirmed) return;
+
+      setTeamSheetForTeam(teamId, createEmptyMatchTeamSheet());
+      render();
+      return;
+    }
+
+    const removeButton = target.closest('[data-match-squad-remove]');
+    if (removeButton instanceof HTMLElement) {
+      const teamId = String(removeButton.dataset.teamId || '').trim();
+      if (!canEditCanonicalTeam(teamId)) return;
+      const group = String(removeButton.dataset.currentGroup || '').trim();
+      const playerId = String(removeButton.dataset.playerId || '').trim();
+      const current = getTeamSheet(teamId);
+      setTeamSheetForTeam(teamId, {
+        ...current,
+        [group]: (Array.isArray(current[group]) ? current[group] : []).filter((player) => player.id !== playerId)
+      });
+      render();
+      return;
+    }
+
+    const moveButton = target.closest('[data-match-squad-move]');
+    if (moveButton instanceof HTMLElement) {
+      const teamId = String(moveButton.dataset.teamId || '').trim();
+      if (!canEditCanonicalTeam(teamId)) return;
+      const currentGroup = String(moveButton.dataset.currentGroup || '').trim();
+      const nextGroup = String(moveButton.dataset.matchSquadMove || '').trim();
+      const playerId = String(moveButton.dataset.playerId || '').trim();
+      const current = getTeamSheet(teamId);
+      const fixturePolicy = getFixtureCompetitionPolicy();
+      const player = (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).find((entry) => entry.id === playerId);
+      if (!player) return;
+
+      if (nextGroup === 'starters' && current.starters.length >= fixturePolicy.startingPlayers) {
+        showSmartToast(`Only ${fixturePolicy.startingPlayers} players can be in the starting lineup.`, { tone: 'error' });
+        return;
+      }
+
+      if (nextGroup === 'substitutes' && current.substitutes.length >= fixturePolicy.benchSizeLimit) {
+        showSmartToast(`Only ${fixturePolicy.benchSizeLimit} substitutes can be added.`, { tone: 'error' });
+        return;
+      }
+
+      setTeamSheetForTeam(teamId, {
+        ...current,
+        [currentGroup]: (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).filter((entry) => entry.id !== playerId),
+        [nextGroup]: [...(Array.isArray(current[nextGroup]) ? current[nextGroup] : []), player]
+      });
+      render();
+    }
+  });
+
+  managerSquadNode?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const addPlayerButton = target.closest('[data-match-manager-add-player]');
+    if (addPlayerButton instanceof HTMLElement) {
+      const houseId = String(addPlayerButton.dataset.matchManagerAddPlayer || '').trim().toLowerCase();
+      if (!canEditCanonicalTeam(houseId)) return;
+      const card = addPlayerButton.closest('[data-match-manager-card]');
+      const input = card?.querySelector(`[data-match-manager-player-input="${CSS.escape(houseId)}"]`);
+      const typedName = input instanceof HTMLInputElement ? String(input.value || '').trim() : '';
+      const candidate = findManagedSquadPlayerByName(houseId, typedName);
+      if (!candidate) {
+        showSmartToast('Choose a learner from the suggested house list before adding them.', { tone: 'error' });
+        return;
+      }
+
+      const squad = getManagedHouseSquad(houseId);
+      const sportPolicy = getCompetitionPolicy(getSelectedManagerSportKey());
+      if (squad.players.some((player) => player.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already in this sporting squad.`, { tone: 'error' });
+        return;
+      }
+      if (squad.players.length >= sportPolicy.squadSizeLimit) {
+        showSmartToast(`Only ${sportPolicy.squadSizeLimit} players can be registered for one sporting squad.`, { tone: 'error' });
+        return;
+      }
+
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        players: [...squad.players, candidate]
+      });
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+      loadCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const removePlayerButton = target.closest('[data-match-manager-remove-player]');
+    if (removePlayerButton instanceof HTMLElement) {
+      const houseId = String(removePlayerButton.dataset.matchManagerRemovePlayer || '').trim().toLowerCase();
+      const playerId = String(removePlayerButton.dataset.playerId || '').trim();
+      if (!canEditCanonicalTeam(houseId) || !playerId) return;
+      const squad = getManagedHouseSquad(houseId);
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        players: squad.players.filter((player) => player.id !== playerId)
+      });
+      loadCurrentFixtureLog();
+      render();
+      return;
+    }
+
+    const addOfficialButton = target.closest('[data-match-manager-add-official]');
+    if (addOfficialButton instanceof HTMLElement) {
+      const houseId = String(addOfficialButton.dataset.matchManagerAddOfficial || '').trim().toLowerCase();
+      if (!canEditCanonicalTeam(houseId)) return;
+      const card = addOfficialButton.closest('[data-match-manager-card]');
+      const input = card?.querySelector(`[data-match-manager-official-input="${CSS.escape(houseId)}"]`);
+      const roleSelect = card?.querySelector(`[data-match-manager-official-role="${CSS.escape(houseId)}"]`);
+      const typedName = input instanceof HTMLInputElement ? String(input.value || '').trim() : '';
+      const role = roleSelect instanceof HTMLSelectElement ? String(roleSelect.value || '').trim() : 'Team Manager';
+      const candidate = findManagedOfficialByName(houseId, typedName);
+      if (!candidate) {
+        showSmartToast('Choose a staff member from the suggested house list before adding them.', { tone: 'error' });
+        return;
+      }
+
+      const squad = getManagedHouseSquad(houseId);
+      if (squad.officials.some((official) => official.id === candidate.id)) {
+        showSmartToast(`${candidate.name} is already assigned to this sporting squad.`, { tone: 'error' });
+        return;
+      }
+
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        officials: [...squad.officials, { ...candidate, assignmentRole: role, roleLabel: role }]
+      });
+      if (input instanceof HTMLInputElement) {
+        input.value = '';
+      }
+      render();
+      return;
+    }
+
+    const removeOfficialButton = target.closest('[data-match-manager-remove-official]');
+    if (removeOfficialButton instanceof HTMLElement) {
+      const houseId = String(removeOfficialButton.dataset.matchManagerRemoveOfficial || '').trim().toLowerCase();
+      const officialId = String(removeOfficialButton.dataset.officialId || '').trim();
+      if (!canEditCanonicalTeam(houseId) || !officialId) return;
+      const squad = getManagedHouseSquad(houseId);
+      saveManagedHouseSquad(houseId, {
+        ...squad,
+        officials: squad.officials.filter((official) => official.id !== officialId)
+      });
+      render();
+    }
+  });
+
+  squadManagerNode?.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const teamId = String(target.dataset.matchSquadSearchInput || '').trim();
+    if (!teamId) return;
+    renderSquadCandidatePreview(teamId);
+  });
+
+  squadManagerNode?.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const teamId = String(target.dataset.matchSquadSearchInput || '').trim();
+    if (!teamId) return;
+    renderSquadCandidatePreview(teamId);
+  });
+
   matchDaySelect.addEventListener('change', () => {
     const nextDate = String(matchDaySelect.value || '').trim();
     const nextFixtures = fixturesForDate(nextDate);
@@ -2098,15 +5870,169 @@ const hydrateMatchLog = (matchLogNode) => {
     applyFixtureSelection();
   });
 
+  managerSportSelect?.addEventListener('change', () => {
+    if (!(managerSportSelect instanceof HTMLSelectElement)) return;
+    selectedManagerSportKey = normalizeManagedSportKey(managerSportSelect.value) || managerSportOptions[0]?.key || 'soccer';
+    loadCurrentFixtureLog();
+    render();
+  });
+
+  policySportSelect?.addEventListener('change', () => {
+    if (!(policySportSelect instanceof HTMLSelectElement)) return;
+    selectedPolicySportKey = normalizeManagedSportKey(policySportSelect.value) || managerSportOptions[0]?.key || 'soccer';
+    renderCompetitionPolicyControls();
+  });
+
+  policySaveButton?.addEventListener('click', () => {
+    if (!isAdminModeEnabled()) return;
+    const currentPolicy = getSelectedPolicyCompetitionPolicy();
+    const nextPolicy = normalizeMatchCompetitionPolicy(
+      {
+        squadSizeLimit: policySquadSizeInput instanceof HTMLInputElement ? policySquadSizeInput.value : currentPolicy.squadSizeLimit,
+        startingPlayers: policyStartersInput instanceof HTMLInputElement ? policyStartersInput.value : currentPolicy.startingPlayers,
+        benchSizeLimit: policyBenchInput instanceof HTMLInputElement ? policyBenchInput.value : currentPolicy.benchSizeLimit,
+        teamListSource: policyTeamListSourceSelect instanceof HTMLSelectElement ? policyTeamListSourceSelect.value : currentPolicy.teamListSource,
+        adminCanEditCanonicalRecords: policyAdminEditSelect instanceof HTMLSelectElement ? policyAdminEditSelect.value === 'true' : currentPolicy.adminCanEditCanonicalRecords
+      },
+      currentPolicy
+    );
+
+    if (nextPolicy.startingPlayers + nextPolicy.benchSizeLimit > nextPolicy.squadSizeLimit) {
+      renderCompetitionPolicyControls('Squad size must be at least the total of starting players plus substitutes.', { tone: 'error' });
+      showSmartToast('Squad size must be at least the total of starting players plus substitutes.', { tone: 'error' });
+      return;
+    }
+
+    matchCompetitionPolicyStore = writeMatchCompetitionPolicy(matchCompetitionPolicyStore, getSelectedPolicySportKey(), nextPolicy, DEFAULT_MATCH_COMPETITION_POLICY);
+    persistMatchCompetitionPolicyStore(fixtureSectionKey, matchCompetitionPolicyStore);
+    loadCurrentFixtureLog();
+    render();
+    showSmartToast('Competition rules saved.', { tone: 'success' });
+  });
+
   modalTeamSelect?.addEventListener('change', () => {
     const fixture = getCurrentFixture();
     if (!(modalTeamSelect instanceof HTMLSelectElement) || !fixture) return;
     const nextTeamId = String(modalTeamSelect.value || '').trim();
     activeTeamId = nextTeamId === fixture.awayId ? fixture.awayId : fixture.homeId;
     syncModalTeamState();
+    renderAutocompleteOptions();
+  });
+
+  pauseReasonSelect?.addEventListener('change', () => {
+    renderClockStatus();
+  });
+
+  window.addEventListener('bhanoyi:house-sport-squad-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
+    loadCurrentFixtureLog();
+    render();
+  });
+
+  startClockButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (Number.isFinite(Number(matchStartedAt))) return;
+
+    const now = Date.now();
+    matchStartedAt = now;
+    interruptionAccumulatedMs = 0;
+    activePauseStartedAt = null;
+    activePauseReason = '';
+    pauseCompensationStartedAt = null;
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      pauseReasonSelect.value = '';
+    }
+    persistCurrentFixtureLog();
+    render();
+  });
+
+  pauseButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (!Number.isFinite(Number(matchStartedAt))) return;
+    if (Number.isFinite(Number(activePauseStartedAt))) return;
+
+    const reason = pauseReasonSelect instanceof HTMLSelectElement ? String(pauseReasonSelect.value || '').trim() : '';
+    if (!reason) return;
+
+    const now = Date.now();
+    const compensationStart = Number(pauseCompensationStartedAt);
+    const compensatedPauseStart =
+      Number.isFinite(compensationStart) && compensationStart > 0 && compensationStart <= now
+        ? compensationStart
+        : now;
+    activePauseStartedAt = compensatedPauseStart;
+    activePauseReason = reason;
+    pauseCompensationStartedAt = null;
+    currentEvents.push({
+      id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+      scope: 'match',
+      teamId: '',
+      type: 'match_pause',
+      minute: getMatchMinuteFromClock(compensatedPauseStart),
+      stoppage: null,
+      playerName: '',
+      jerseyNumber: '',
+      assistName: '',
+      playerId: '',
+      playerAdmissionNo: '',
+      playerHouseId: '',
+      playerGender: '',
+      assistId: '',
+      assistAdmissionNo: '',
+      reason,
+      notes: reason,
+      createdAt: now
+    });
+    persistCurrentFixtureLog();
+    render();
+  });
+
+  resumeButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (!Number.isFinite(Number(matchStartedAt))) return;
+    if (!Number.isFinite(Number(activePauseStartedAt))) return;
+
+    const now = Date.now();
+    const reason = String(activePauseReason || '').trim();
+    interruptionAccumulatedMs = getInterruptionElapsedMs(now);
+    activePauseStartedAt = null;
+    activePauseReason = '';
+    pauseCompensationStartedAt = null;
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      pauseReasonSelect.value = '';
+    }
+
+    currentEvents.push({
+      id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+      scope: 'match',
+      teamId: '',
+      type: 'match_resume',
+      minute: getMatchMinuteFromClock(now),
+      stoppage: null,
+      playerName: '',
+      jerseyNumber: '',
+      assistName: '',
+      playerId: '',
+      playerAdmissionNo: '',
+      playerHouseId: '',
+      playerGender: '',
+      assistId: '',
+      assistAdmissionNo: '',
+      reason,
+      notes: reason ? `Resumed after: ${reason}` : 'Play resumed',
+      createdAt: now
+    });
+    persistCurrentFixtureLog();
+    render();
   });
 
   matchLogNode.querySelector('[data-match-reset]')?.addEventListener('click', () => {
+    if (!isAdminModeEnabled()) return;
     const fixture = getCurrentFixture();
     if (!fixture) return;
     const confirmed = window.confirm(
@@ -2114,35 +6040,58 @@ const hydrateMatchLog = (matchLogNode) => {
     );
     if (!confirmed) return;
     currentEvents = [];
+    matchStartedAt = null;
+    interruptionAccumulatedMs = 0;
+    activePauseStartedAt = null;
+    activePauseReason = '';
+    pauseCompensationStartedAt = null;
+    if (pauseReasonSelect instanceof HTMLSelectElement) {
+      pauseReasonSelect.value = '';
+    }
     persistCurrentFixtureLog();
     render();
   });
 
   exportButton?.addEventListener('click', () => {
-    const fixture = getCurrentFixture();
-    if (!fixture) return;
-    const csv = buildMatchExportCsv();
-    if (!csv) return;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    const safeFixture = `${fixture.homeName}-vs-${fixture.awayName}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    const stamp = new Date().toISOString().slice(0, 10);
-    anchor.href = url;
-    anchor.download = `${safeFixture || 'match'}-event-log-${stamp}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    void exportMatchWorkbook().catch(() => {
+      showSmartToast('Could not export the match workbook right now.', { tone: 'error' });
+    });
   });
 
   exportTemplateButton?.addEventListener('click', () => {
     void exportMatchTeamSheetTemplate().catch(() => {
-      showSmartToast('Unable to export the team sheet template.', { tone: 'error' });
+      showSmartToast('Could not export the team sheet template right now.', { tone: 'error' });
     });
+  });
+
+  saveLogButton?.addEventListener('click', () => {
+    const fixture = getCurrentFixture();
+    if (!fixture) return;
+    if (saveStatusNode) {
+      saveStatusNode.textContent = 'Saving match log to DB...';
+    }
+
+    if (saveLogButton instanceof HTMLButtonElement) {
+      saveLogButton.disabled = true;
+    }
+
+    Promise.resolve(persistLocalStore(matchLogStoreStorageKey, logsByFixture))
+      .then(() => {
+        if (saveStatusNode) {
+          saveStatusNode.textContent = 'Match log saved to DB.';
+        }
+      })
+      .catch(() => {
+        if (saveStatusNode) {
+          saveStatusNode.textContent = 'Could not save to DB right now. Please try again.';
+        }
+      })
+      .finally(() => {
+        const activeFixture = getCurrentFixture();
+        if (saveLogButton instanceof HTMLButtonElement) {
+          saveLogButton.disabled = !activeFixture;
+        }
+      });
   });
 
   window.addEventListener('storage', (event) => {
@@ -2150,7 +6099,8 @@ const hydrateMatchLog = (matchLogNode) => {
     if (
       event.key !== fixtureCatalogStorageKey &&
       event.key !== fixtureDateStorageKey &&
-      event.key !== matchLogStoreStorageKey
+      event.key !== matchLogStoreStorageKey &&
+      event.key !== houseSportSquadStorageKey
     ) {
       return;
     }
@@ -2205,30 +6155,43 @@ const hydrateMatchLog = (matchLogNode) => {
   const requestedDate = normalizeFixtureDateOnlyGlobal(params.get('logDate') || '');
   const requestedSection = String(params.get('logFixtureSectionKey') || '').trim();
 
-  populateFixtureData();
-  if (requestedSection && requestedSection !== fixtureSectionKey) {
-    selectedDate = fixtureDates()[0] || '';
-  } else if (requestedDate) {
-    selectedDate = requestedDate;
-  } else {
-    selectedDate = fixtureDates()[0] || '';
-  }
-
-  renderFixturePickers();
-
-  if (!requestedSection || requestedSection === fixtureSectionKey) {
-    if (requestedFixtureId && fixtureOptions.some((entry) => entry.fixtureId === requestedFixtureId)) {
-      selectedFixtureId = requestedFixtureId;
-      const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
-      selectedDate = matchedFixture?.date || selectedDate;
-      renderFixturePickers();
-      openWorkspaceModal();
+  const initializeMatchLogState = () => {
+    ensureClockTicker();
+    populateFixtureData();
+    if (requestedSection && requestedSection !== fixtureSectionKey) {
+      selectedDate = fixtureDates()[0] || '';
+    } else if (requestedDate) {
+      selectedDate = requestedDate;
+    } else {
+      selectedDate = fixtureDates()[0] || '';
     }
-  }
 
-  applyFixtureSelection();
-  syncModalTeamState();
-};
+    renderFixturePickers();
+
+    if (!requestedSection || requestedSection === fixtureSectionKey) {
+      if (requestedFixtureId && fixtureOptions.some((entry) => entry.fixtureId === requestedFixtureId)) {
+        selectedFixtureId = requestedFixtureId;
+        const matchedFixture = fixtureOptions.find((entry) => entry.fixtureId === requestedFixtureId);
+        selectedDate = matchedFixture?.date || selectedDate;
+        renderFixturePickers();
+        openWorkspaceModal();
+      }
+    }
+
+    applyFixtureSelection();
+    syncModalTeamState();
+    renderAutocompleteOptions();
+  };
+
+  void Promise.all([
+    syncLocalStoreFromRemote(matchLogStoreStorageKey),
+    syncLocalStoreFromRemote(houseSportSquadStorageKey)
+  ])
+    .catch(() => null)
+    .finally(() => {
+      initializeMatchLogState();
+    });
+}
 
 const isGenericHouseName = (value) => /^house\s*\d+$/i.test(String(value || '').trim());
 
@@ -2287,12 +6250,16 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <input type="checkbox" data-fixture-auto-fill />
                     <span>Auto-fill dates (use rules)</span>
                   </label>
-                  <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate draft fixtures</button>
+                  <label class="fixture-autofill-toggle">
+                    <input type="checkbox" data-fixture-force-shared />
+                    <span>Force same Soccer/Netball fixtures</span>
+                  </label>
+                  <button type="button" class="btn btn-secondary" data-fixture-generate>1) Generate live fixtures</button>
                   <button type="button" class="btn btn-secondary" data-fixture-export>Export Fixture File</button>
                   <button type="button" class="btn btn-secondary" data-fixture-export-csv>Export CSV</button>
                 </div>
               </header>
-              <p class="fixture-creator-flow">Workflow: 1) Generate draft fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Finalize & sync calendar.</p>
+              <p class="fixture-creator-flow">Workflow: 1) Generate live fixtures → 2) Preview candidate dates (optional) → 3) Apply previewed dates (optional) → 4) Review fairness and confirm.</p>
               <div class="fixture-creator-sport-grid">
                 <label>
                   Sport code (required)
@@ -2302,6 +6269,70 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                     <option value="netball">Netball</option>
                   </select>
                 </label>
+                <label>
+                  Matches per opponent per leg
+                  <input type="number" min="1" max="6" step="1" value="1" data-fixture-meetings-per-leg />
+                </label>
+                <div class="fixture-fairness-control" data-fixture-fairness-dropdown>
+                  <span class="fixture-fairness-label">Fixture fairness rules</span>
+                  <button
+                    type="button"
+                    class="btn btn-secondary fixture-fairness-toggle"
+                    data-fixture-open-fairness-modal
+                    aria-haspopup="dialog"
+                  >Add Fairness Rules</button>
+                  <p class="fixture-fairness-summary" data-fixture-fairness-summary></p>
+                  <select data-fixture-fairness-rules multiple class="is-hidden" aria-hidden="true" tabindex="-1">
+                    <option value="equal_matches_season" selected>Every team plays the same number of matches each season</option>
+                    <option value="equal_matches_leg" selected>Every team plays the same number of matches in each leg</option>
+                    <option value="balanced_home_away" selected>Each team keeps balanced home/away matches per leg and season</option>
+                    <option value="equal_round_participation" selected>Each team has balanced round participation within each leg</option>
+                    <option value="unique_opponent_per_leg" selected>No duplicate opponent pairing in the same leg</option>
+                    <option value="no_double_round_booking" selected>No team plays more than once in a single round</option>
+                    <option value="fifa_no_self_match" selected>No self-fixtures (team cannot play itself)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="enrollment-class-modal fixture-fairness-modal is-hidden" data-fixture-fairness-modal>
+                <div class="enrollment-class-modal-backdrop" data-fixture-close-fairness-modal></div>
+                <article class="panel enrollment-class-modal-panel fixture-fairness-modal-panel" role="dialog" aria-modal="true" aria-label="Fixture fairness rules">
+                  <h3>Fixture Fairness Rules</h3>
+                  <p class="enrollment-class-modal-subtitle" data-fixture-fairness-subtitle>Select rules, then click Apply (state only).</p>
+                  <div class="fixture-fairness-checklist">
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="equal_matches_season" checked />
+                      <span>Every team plays the same number of matches each season</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="equal_matches_leg" checked />
+                      <span>Every team plays the same number of matches in each leg</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="balanced_home_away" checked />
+                      <span>Each team keeps balanced home/away matches per leg and season</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="equal_round_participation" checked />
+                      <span>Each team has balanced round participation within each leg</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="unique_opponent_per_leg" checked />
+                      <span>No duplicate opponent pairing in the same leg</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="no_double_round_booking" checked />
+                      <span>No team plays more than once in a single round</span>
+                    </label>
+                    <label class="fixture-fairness-option">
+                      <input type="checkbox" data-fixture-fairness-check value="fifa_no_self_match" checked />
+                      <span>No self-fixtures (team cannot play itself)</span>
+                    </label>
+                  </div>
+                  <div class="enrollment-class-modal-actions">
+                    <button type="button" class="btn btn-secondary" data-fixture-close-fairness-modal>Close</button>
+                    <button type="button" class="btn btn-primary" data-fixture-apply-fairness-rules>Apply rules</button>
+                  </div>
+                </article>
               </div>
               <div class="fixture-sport-panel is-hidden" data-fixture-sport-panel="soccer">
                 <h3>Soccer Format</h3>
@@ -2427,8 +6458,8 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
               </div>
             </div>
           </section>
-          <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="review-fixtures">
-            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
+          <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="review-fixtures">
+            <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Review and Finalize Fixtures</span>
             </button>
             <div class="sports-workflow-body" data-sports-workflow-body>
@@ -2438,6 +6469,14 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   <button type="button" class="btn btn-secondary" data-fixture-approve-resolved>4) Finalize & sync (after fixes)</button>
                   <button type="button" class="btn btn-secondary" data-fixture-approve-anyway>4) Finalize & sync (approve with unfairnesses)</button>
                 </div>
+              </div>
+              <div class="fixture-template-row">
+                <label>
+                  Use previous generated fixture as template
+                  <select data-fixture-template-select>
+                    <option value="">No template selected</option>
+                  </select>
+                </label>
               </div>
               <div class="fixture-table-wrap">
                 <table class="fixture-table">
@@ -2461,8 +6500,59 @@ const renderFixtureCreatorSection = (section, sectionIndex, context = {}) => {
                   </tbody>
                 </table>
               </div>
+              <div class="fixture-table-actions">
+                <button type="button" class="btn btn-secondary" data-fixture-save-draft>Save fixture draft</button>
+              </div>
             </div>
           </section>
+        </article>
+      </div>
+    </section>
+  `;
+};
+
+const renderPublicFixtureBoardSection = (section, sectionIndex) => {
+  const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const fixtureSectionKey = String(section.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const config = {
+    sectionKey: fallbackSectionKey,
+    fixtureSectionKey,
+    sport: String(section.sport || '').trim(),
+    competition: String(section.competition || '').trim()
+  };
+
+  return `
+    <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="fixture-board" data-section-key="${fallbackSectionKey}">
+      <div class="container">
+        <h2>Upcoming Matches</h2>
+        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel public-fixture-board" data-public-fixture-board="true" data-public-fixture-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          <header class="public-fixture-head">
+            <div>
+              <p class="public-fixture-meta"><strong>${escapeHtmlText(config.sport || 'Sport')}</strong>${config.competition ? ` · ${escapeHtmlText(config.competition)}` : ''}</p>
+              <p class="public-fixture-status" data-public-fixture-status aria-live="polite">Showing the next scheduled fixtures.</p>
+            </div>
+            <label>
+              Match day
+              <select data-public-fixture-date>
+                <option value="">Select fixture date</option>
+              </select>
+            </label>
+          </header>
+          <div class="public-fixture-leg-grid">
+            <section class="public-fixture-leg-card">
+              <h3>First Leg</h3>
+              <ul class="public-fixture-list" data-public-fixture-first-leg>
+                <li class="public-fixture-empty">No first-leg fixtures for this day.</li>
+              </ul>
+            </section>
+            <section class="public-fixture-leg-card">
+              <h3>Second Leg (Return)</h3>
+              <ul class="public-fixture-list" data-public-fixture-return-leg>
+                <li class="public-fixture-empty">No return fixtures for this day.</li>
+              </ul>
+            </section>
+          </div>
         </article>
       </div>
     </section>
@@ -2491,6 +6581,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   <p class="enrollment-class-empty">Add staff members, set post level (PL1–PL4), and assign each to a house.</p>
                 </div>
                 <div class="enrollment-staff-form" data-enrollment-staff-form>
+                  <select data-enrollment-staff-type>
+                    <option value="teaching_staff">Teaching staff</option>
+                    <option value="non_teaching_staff">Non-teaching staff</option>
+                  </select>
                   <select data-enrollment-staff-title>
                     <option value="Mr.">Mr.</option>
                     <option value="Mrs.">Mrs.</option>
@@ -2519,13 +6613,27 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                   </select>
                   <select data-enrollment-staff-assigned-class></select>
                   <input type="text" maxlength="80" data-enrollment-staff-subject placeholder="Subject / Department (optional)" />
+                  <input type="email" maxlength="120" data-enrollment-staff-login-email placeholder="Login email" />
+                  <input type="text" maxlength="120" data-enrollment-staff-login-password placeholder="Login password" />
                   <input type="email" maxlength="120" data-enrollment-staff-email placeholder="Email (optional)" />
                   <input type="text" maxlength="30" data-enrollment-staff-phone placeholder="Phone (optional)" />
-                  <input type="text" maxlength="120" data-enrollment-staff-display-override placeholder="Custom display format override (optional)" />
                   <textarea rows="2" maxlength="280" data-enrollment-staff-notes placeholder="Notes (optional)"></textarea>
                   <button type="button" class="btn btn-secondary" data-enrollment-add-staff>Add staff member</button>
                 </div>
                 <div class="enrollment-house-row" data-enrollment-staff-house-row></div>
+                <div class="enrollment-people-controls">
+                  <label class="enrollment-class-modal-field">
+                    Search people
+                    <input type="search" maxlength="140" data-enrollment-staff-search placeholder="Search by surname, initials, staff no., subject" />
+                  </label>
+                  <label class="enrollment-class-modal-field">
+                    Sort by
+                    <select data-enrollment-staff-sort>
+                      <option value="surname_asc">Surname (A–Z)</option>
+                      <option value="surname_desc">Surname (Z–A)</option>
+                    </select>
+                  </label>
+                </div>
                 <div class="enrollment-staff-list" data-enrollment-staff-list></div>
               </section>
             </div>
@@ -2536,7 +6644,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
             <div class="sports-workflow-body enrollment-workflow-body" data-enrollment-workflow-body>
               <div class="enrollment-manager-actions">
                 <button type="button" class="btn btn-secondary" data-enrollment-open-add-grade>Add grade</button>
+                <button type="button" class="btn btn-secondary" data-enrollment-sync-staff-auth data-enrollment-admin-only>Sync staff accounts</button>
               </div>
+              <p class="enrollment-class-empty">Grades/classes are saved automatically when you click Add grade or Add class.</p>
+                <p class="enrollment-class-empty" data-enrollment-staff-auth-status data-enrollment-admin-only>Staff auth sync status will appear here.</p>
               <div class="enrollment-grade-list" data-enrollment-grade-list></div>
               <p class="enrollment-status" data-enrollment-status aria-live="polite"></p>
             </div>
@@ -2577,12 +6688,10 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <h3>Manage Class</h3>
               <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
               <div class="enrollment-class-modal-actions enrollment-class-modal-actions-top">
-                <button type="button" class="btn btn-secondary" data-enrollment-close-manage-modal>Close</button>
                 <button type="button" class="btn btn-secondary" data-enrollment-clear-learners data-enrollment-admin-only>Clear class list</button>
-                <button type="button" class="btn btn-primary" data-enrollment-save-manage>Save class</button>
               </div>
-              <section class="sports-workflow-step is-expanded enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
-                <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="true">Class Details</button>
+              <section class="sports-workflow-step is-collapsed enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
+                <button type="button" class="sports-workflow-toggle" data-manage-workflow-toggle aria-expanded="false">Class Details</button>
                 <div class="sports-workflow-body enrollment-workflow-body" data-manage-workflow-body>
                   <div class="enrollment-class-manage-grid">
                     <label class="enrollment-class-modal-field">
@@ -2626,6 +6735,13 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                       </label>
                       <button type="button" class="btn btn-secondary" data-enrollment-import-learners>Import class list</button>
                     </div>
+                    <div class="enrollment-import-row" data-enrollment-admin-only>
+                      <label class="enrollment-class-modal-field enrollment-import-file-field">
+                        Bulk Excel files
+                        <input type="file" data-enrollment-bulk-import-files accept=".xlsx,.xls" multiple />
+                      </label>
+                      <button type="button" class="btn btn-secondary" data-enrollment-bulk-import-learners>Bulk upload class files</button>
+                    </div>
                     <div class="enrollment-learner-form" data-enrollment-admin-only>
                       <input type="text" maxlength="120" data-enrollment-learner-name placeholder="Learner name" />
                       <input type="text" maxlength="40" data-enrollment-learner-admission placeholder="Admission no. (optional)" />
@@ -2636,6 +6752,19 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
                         <option value="Other">Other</option>
                       </select>
                       <button type="button" class="btn btn-secondary" data-enrollment-add-learner>Add learner</button>
+                    </div>
+                    <div class="enrollment-people-controls">
+                      <label class="enrollment-class-modal-field">
+                        Search learners
+                        <input type="search" maxlength="140" data-enrollment-learner-search placeholder="Search by surname, admission, gender" />
+                      </label>
+                      <label class="enrollment-class-modal-field">
+                        Sort by
+                        <select data-enrollment-learner-sort>
+                          <option value="surname_asc">Surname (A–Z)</option>
+                          <option value="surname_desc">Surname (Z–A)</option>
+                        </select>
+                      </label>
                     </div>
                     <div class="enrollment-learner-list" data-enrollment-learner-list></div>
                   </section>
@@ -2666,7 +6795,9 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const gradeListNode = managerNode.querySelector('[data-enrollment-grade-list]');
   const statusNode = managerNode.querySelector('[data-enrollment-status]');
+  const staffAuthStatusNode = managerNode.querySelector('[data-enrollment-staff-auth-status]');
   const addGradeTrigger = managerNode.querySelector('[data-enrollment-open-add-grade]');
+  const syncStaffAuthButton = managerNode.querySelector('[data-enrollment-sync-staff-auth]');
   const gradeModal = managerNode.querySelector('[data-enrollment-grade-modal]');
   const gradeSelect = managerNode.querySelector('[data-enrollment-grade-select]');
   const addGradeButton = managerNode.querySelector('[data-enrollment-add-grade]');
@@ -2686,13 +6817,18 @@ const hydrateEnrollmentManager = (managerNode) => {
   const learnerNameInput = managerNode.querySelector('[data-enrollment-learner-name]');
   const learnerAdmissionInput = managerNode.querySelector('[data-enrollment-learner-admission]');
   const learnerGenderSelect = managerNode.querySelector('[data-enrollment-learner-gender]');
+  const learnerSearchInput = managerNode.querySelector('[data-enrollment-learner-search]');
+  const learnerSortSelect = managerNode.querySelector('[data-enrollment-learner-sort]');
   const addLearnerButton = managerNode.querySelector('[data-enrollment-add-learner]');
   const importFormatSelect = managerNode.querySelector('[data-enrollment-import-format]');
   const importFileInput = managerNode.querySelector('[data-enrollment-import-file]');
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
+  const bulkImportFileInput = managerNode.querySelector('[data-enrollment-bulk-import-files]');
+  const bulkImportLearnersButton = managerNode.querySelector('[data-enrollment-bulk-import-learners]');
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
+  const staffTypeSelect = managerNode.querySelector('[data-enrollment-staff-type]');
   const staffTitleSelect = managerNode.querySelector('[data-enrollment-staff-title]');
   const staffInitialsInput = managerNode.querySelector('[data-enrollment-staff-initials]');
   const staffFirstNameInput = managerNode.querySelector('[data-enrollment-staff-first-name]');
@@ -2702,11 +6838,14 @@ const hydrateEnrollmentManager = (managerNode) => {
   const staffPostLevelSelect = managerNode.querySelector('[data-enrollment-staff-post-level]');
   const staffAssignedClassSelect = managerNode.querySelector('[data-enrollment-staff-assigned-class]');
   const staffSubjectInput = managerNode.querySelector('[data-enrollment-staff-subject]');
+  const staffLoginEmailInput = managerNode.querySelector('[data-enrollment-staff-login-email]');
+  const staffLoginPasswordInput = managerNode.querySelector('[data-enrollment-staff-login-password]');
   const staffEmailInput = managerNode.querySelector('[data-enrollment-staff-email]');
   const staffPhoneInput = managerNode.querySelector('[data-enrollment-staff-phone]');
-  const staffDisplayOverrideInput = managerNode.querySelector('[data-enrollment-staff-display-override]');
   const staffNotesInput = managerNode.querySelector('[data-enrollment-staff-notes]');
   const addStaffButton = managerNode.querySelector('[data-enrollment-add-staff]');
+  const staffSearchInput = managerNode.querySelector('[data-enrollment-staff-search]');
+  const staffSortSelect = managerNode.querySelector('[data-enrollment-staff-sort]');
   const staffHouseRowNode = managerNode.querySelector('[data-enrollment-staff-house-row]');
   const staffListNode = managerNode.querySelector('[data-enrollment-staff-list]');
   const saveManageButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-save-manage]'));
@@ -2731,12 +6870,17 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(learnerNameInput instanceof HTMLInputElement) ||
     !(learnerAdmissionInput instanceof HTMLInputElement) ||
     !(learnerGenderSelect instanceof HTMLSelectElement) ||
+    !(learnerSearchInput instanceof HTMLInputElement) ||
+    !(learnerSortSelect instanceof HTMLSelectElement) ||
     !(addLearnerButton instanceof HTMLButtonElement) ||
     !(importFormatSelect instanceof HTMLSelectElement) ||
     !(importFileInput instanceof HTMLInputElement) ||
     !(importLearnersButton instanceof HTMLButtonElement) ||
+    !(bulkImportFileInput instanceof HTMLInputElement) ||
+    !(bulkImportLearnersButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
+    !(staffTypeSelect instanceof HTMLSelectElement) ||
     !(staffTitleSelect instanceof HTMLSelectElement) ||
     !(staffInitialsInput instanceof HTMLInputElement) ||
     !(staffFirstNameInput instanceof HTMLInputElement) ||
@@ -2746,14 +6890,18 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(staffPostLevelSelect instanceof HTMLSelectElement) ||
     !(staffAssignedClassSelect instanceof HTMLSelectElement) ||
     !(staffSubjectInput instanceof HTMLInputElement) ||
+    !(staffLoginEmailInput instanceof HTMLInputElement) ||
+    !(staffLoginPasswordInput instanceof HTMLInputElement) ||
     !(staffEmailInput instanceof HTMLInputElement) ||
     !(staffPhoneInput instanceof HTMLInputElement) ||
-    !(staffDisplayOverrideInput instanceof HTMLInputElement) ||
     !(staffNotesInput instanceof HTMLTextAreaElement) ||
     !(addStaffButton instanceof HTMLButtonElement) ||
+    !(staffSearchInput instanceof HTMLInputElement) ||
+    !(staffSortSelect instanceof HTMLSelectElement) ||
     !(staffHouseRowNode instanceof HTMLElement) ||
     !(staffListNode instanceof HTMLElement) ||
-    !saveManageButtons.length
+    !saveManageButtons.length ||
+    !(syncStaffAuthButton instanceof HTMLButtonElement)
   ) {
     return;
   }
@@ -2838,10 +6986,12 @@ const hydrateEnrollmentManager = (managerNode) => {
     refreshManageModalWorkflowHeights();
   });
 
-  const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
-  const isStaffMode = !isAdminMode && new URLSearchParams(window.location.search).get('staff') === '1';
+  const isAdminMode = isAdminModeEnabled();
+  const isStaffMode = isStaffModeEnabled();
   const sectionKey = String(config.sectionKey || 'enrollment_manager').trim() || 'enrollment_manager';
   const storageKey = `bhanoyi.enrollmentClasses.${sectionKey}`;
+  const enrollmentStoragePrefix = 'bhanoyi.enrollmentClasses.';
+  const learnerSurnameNameMigrationFlag = 'bhanoyi.migrations.learnerSurnameName.v1';
   const gradeNumbers = Array.from({ length: 7 }, (_, index) => String(index + 6));
   const allLetters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
   const defaultSchoolHouseOptions = Array.from({ length: 5 }, (_, index) => ({
@@ -2912,14 +7062,23 @@ const hydrateEnrollmentManager = (managerNode) => {
   let classesByGrade = {};
   let classProfilesByGrade = {};
   let staffMembers = [];
+  let editingStaffIndex = -1;
   let selectedManageGrade = '';
   let selectedManageLetter = '';
   let manageLearners = [];
+  let learnerSearchValue = '';
+  let learnerSortValue = 'surname_asc';
+  let staffSearchValue = '';
+  let staffSortValue = 'surname_asc';
   let selectedStaffHouseId = '';
   const staffSessionKey = `bhanoyi.staffSession.${sectionKey}`;
+  const staffSessionPasswordKey = `bhanoyi.staffSessionPassword.${sectionKey}`;
   let staffSessionEmail = '';
   let loggedInStaff = null;
   let hasAutoOpenedAssignedClass = false;
+  let pendingRemoteEnrollmentPayload = null;
+  let isRemoteEnrollmentSaveInFlight = false;
+  let hasTriggeredStaffAuthSync = false;
 
   const staffPostLevelRanks = {
     PL1: 'Educator',
@@ -2930,6 +7089,24 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const normalizeLetter = (value) => String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
   const normalizeText = (value, maxLength = 300) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
+  const staffTitleTokens = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'coach', 'mx']);
+
+  const normalizeToken = (value) => String(value || '').trim().toLowerCase().replace(/\./g, '');
+  const resolveSurnameSortKey = (value, options = {}) => {
+    const normalizedValue = normalizeText(value, 160).toLowerCase();
+    if (!normalizedValue) return '';
+    const parts = normalizedValue.split(/\s+/).filter(Boolean);
+    if (!parts.length) return '';
+
+    if (options.staffLike && staffTitleTokens.has(normalizeToken(parts[0]))) {
+      parts.shift();
+    }
+
+    if (!parts.length) return normalizedValue;
+    const surname = parts[0];
+    const rest = parts.slice(1).join(' ');
+    return `${surname} ${rest}`.trim();
+  };
 
   const normalizeLoginToken = (value) =>
     String(value || '')
@@ -2961,10 +7138,14 @@ const hydrateEnrollmentManager = (managerNode) => {
       )
     );
     const effectiveTitles = titles.length ? titles : fallbackTitles;
-    return effectiveTitles.map((title, index) => ({
-      id: toSportCodeId(title, index),
-      title
-    }));
+    return effectiveTitles.map((title, index) => {
+      const definition = resolveSportCodeDefinition(title);
+      return {
+        id: toSportCodeId(title, index),
+        title,
+        emoji: definition?.emoji || '🏅'
+      };
+    });
   };
 
   const findSportingCodeTitle = (matcher) => {
@@ -3001,8 +7182,9 @@ const hydrateEnrollmentManager = (managerNode) => {
   const formatSportingCodesSummary = (codes) => {
     const normalizedCodes = Array.isArray(codes) ? codes.map((entry) => normalizeText(entry, 80)).filter(Boolean) : [];
     if (!normalizedCodes.length) return 'No sporting code selected';
-    if (normalizedCodes.length <= 2) return normalizedCodes.join(', ');
-    return `${normalizedCodes.slice(0, 2).join(', ')} +${normalizedCodes.length - 2} more`;
+    const labeledCodes = normalizedCodes.map((entry) => formatSportCodeWithEmoji(entry));
+    if (labeledCodes.length <= 2) return labeledCodes.join(', ');
+    return `${labeledCodes.slice(0, 2).join(', ')} +${labeledCodes.length - 2} more`;
   };
 
   const houseSportsAssignmentStorageKey = 'bhanoyi.houseSportsAssignments';
@@ -3099,11 +7281,58 @@ const hydrateEnrollmentManager = (managerNode) => {
     const firstToken = normalizeLoginToken(staffLike?.firstName || '');
     const initialsToken = normalizeLoginToken(staffLike?.initials || '');
     const firstInitial = (firstToken.charAt(0) || initialsToken.charAt(0) || 'x').toLowerCase();
-    const handle = `${surnameToken}${firstInitial}`.slice(0, 24);
+    const baseHandle = `${surnameToken}${firstInitial}`.slice(0, 24) || 'staffx';
+    const passwordSeed = `${baseHandle}2026`;
     return {
-      email: `${handle}@bhanoyi.education`,
-      password: handle
+      email: `${baseHandle}@bhanoyi.education`,
+      password: passwordSeed.slice(0, 24)
     };
+  };
+
+  const isValidStaffLoginEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeText(value, 120).toLowerCase());
+
+  const isValidStaffLoginPassword = (value) => normalizeText(value, 120).length >= 6;
+
+  const splitStaffLoginEmail = (value) => {
+    const normalizedEmail = normalizeText(value, 120).toLowerCase();
+    if (!normalizedEmail) {
+      return { localPart: '', domain: 'bhanoyi.education' };
+    }
+
+    const [localPartRaw = '', domainRaw = 'bhanoyi.education'] = normalizedEmail.split('@');
+    return {
+      localPart: normalizeLoginToken(localPartRaw).slice(0, 40),
+      domain: normalizeText(domainRaw, 80).toLowerCase() || 'bhanoyi.education'
+    };
+  };
+
+  const buildUniqueStaffLoginEmail = (preferredEmail, staffLike, usedEmails) => {
+    const used = usedEmails instanceof Set ? usedEmails : new Set();
+    const defaultCredentials = buildDefaultStaffCredentials(staffLike);
+    const preferred = splitStaffLoginEmail(preferredEmail || defaultCredentials.email);
+    const fallback = splitStaffLoginEmail(defaultCredentials.email);
+    const baseLocalPart = preferred.localPart || fallback.localPart || 'staff';
+    const domain = preferred.domain || fallback.domain || 'bhanoyi.education';
+
+    let candidate = `${baseLocalPart}@${domain}`;
+    if (!used.has(candidate)) return candidate;
+
+    const suffixSeed = normalizeLoginToken(staffLike?.staffNumber || '').slice(-6);
+    if (suffixSeed) {
+      candidate = `${baseLocalPart.slice(0, Math.max(1, 24 - suffixSeed.length))}${suffixSeed}@${domain}`;
+      if (!used.has(candidate)) return candidate;
+    }
+
+    let counter = 2;
+    while (counter < 1000) {
+      const suffix = String(counter);
+      const trimmedLocalPart = baseLocalPart.slice(0, Math.max(1, 24 - suffix.length));
+      candidate = `${trimmedLocalPart}${suffix}@${domain}`;
+      if (!used.has(candidate)) return candidate;
+      counter += 1;
+    }
+
+    return `${baseLocalPart}${Date.now()}@${domain}`;
   };
 
   const dedupeLetters = (values) => {
@@ -3130,6 +7359,39 @@ const hydrateEnrollmentManager = (managerNode) => {
   const normalizeLearner = (entry) => {
     if (!entry || typeof entry !== 'object') return null;
     const allowedRclRoles = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
+
+    const formatLearnerName = (rawName, surnameValue, firstNameValue) => {
+      const surname = normalizeText(surnameValue, 80);
+      const firstName = normalizeText(firstNameValue, 80);
+      if (surname || firstName) {
+        return [surname, firstName].filter(Boolean).join(' ').trim();
+      }
+
+      const normalizedRawName = normalizeText(rawName, 120);
+      if (!normalizedRawName) return '';
+
+      if (normalizedRawName.includes(',')) {
+        const [surnamePart, ...rest] = normalizedRawName
+          .split(',')
+          .map((part) => normalizeText(part, 120))
+          .filter(Boolean);
+        const cleanRest = rest
+          .join(' ')
+          .split(/\s+/)
+          .filter((token) => !staffTitleTokens.has(normalizeToken(token)))
+          .join(' ');
+        return [surnamePart, cleanRest].filter(Boolean).join(' ').trim();
+      }
+
+      const tokens = normalizedRawName
+        .split(/\s+/)
+        .filter(Boolean)
+        .filter((token) => !staffTitleTokens.has(normalizeToken(token)));
+      if (tokens.length <= 1) return normalizedRawName;
+      const detectedSurname = tokens[tokens.length - 1];
+      const detectedGivenNames = tokens.slice(0, -1).join(' ');
+      return [detectedSurname, detectedGivenNames].filter(Boolean).join(' ').trim();
+    };
 
     const normalizeGender = (value) => {
       const raw = normalizeText(value, 20).toLowerCase();
@@ -3175,7 +7437,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       ).slice(0, 8);
     };
 
-    const name = normalizeText(entry.name, 120);
+    const name = formatLearnerName(entry.name, entry.surname, entry.firstName || entry.givenName);
     const admissionNo = normalizeText(entry.admissionNo || entry.admission || '', 40);
     const gender = normalizeGender(entry.gender || entry.sex || '');
     const houseId = normalizeHouseId(entry.houseId || entry.house || '');
@@ -3211,7 +7473,15 @@ const hydrateEnrollmentManager = (managerNode) => {
       seen.set(key, learners.length);
       learners.push(learner);
     });
-    return learners;
+
+    const resolveLearnerSortKey = (nameValue) => {
+      const normalizedName = normalizeText(nameValue, 120).toLowerCase();
+      if (!normalizedName) return '';
+      const [surname = '', ...rest] = normalizedName.split(/\s+/).filter(Boolean);
+      return `${surname} ${rest.join(' ')}`.trim();
+    };
+
+    return learners.sort((left, right) => resolveLearnerSortKey(left.name).localeCompare(resolveLearnerSortKey(right.name)));
   };
 
   const normalizeStaffPostLevel = (value) => {
@@ -3220,6 +7490,11 @@ const hydrateEnrollmentManager = (managerNode) => {
       return normalized;
     }
     return 'PL1';
+  };
+
+  const normalizeStaffType = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'non_teaching_staff' ? 'non_teaching_staff' : 'teaching_staff';
   };
 
   const normalizeStaffTitle = (value) => {
@@ -3280,17 +7555,21 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const formatStaffDefaultDisplayName = (staff) => {
-    const title = normalizeText(staff?.title, 20);
-    const initials = normalizeStaffInitials(staff?.initials || inferInitialsFromFirstName(staff?.firstName || ''));
     const surname = normalizeText(staff?.surname, 80);
-    const fallback = [normalizeText(staff?.firstName, 80), surname].filter(Boolean).join(' ');
-    const formatted = [title, initials, surname].filter(Boolean).join(' ').trim();
-    return formatted || fallback || normalizeText(staff?.name, 120);
+    const firstName = normalizeText(staff?.firstName, 80);
+    const formatted = [surname, firstName].filter(Boolean).join(' ').trim();
+    if (formatted) return formatted;
+
+    const fallbackName = normalizeText(staff?.name, 120);
+    if (!fallbackName) return '';
+    const parts = fallbackName.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return fallbackName;
+    const detectedSurname = parts[parts.length - 1];
+    const detectedGivenNames = parts.slice(0, -1).join(' ');
+    return [detectedSurname, detectedGivenNames].filter(Boolean).join(' ').trim();
   };
 
   const resolveStaffDisplayName = (staff) => {
-    const custom = normalizeText(staff?.displayNameOverride, 120);
-    if (custom) return custom;
     return formatStaffDefaultDisplayName(staff);
   };
 
@@ -3327,6 +7606,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const loginPassword = normalizeText(entry.loginPassword || '', 120) || defaultCredentials.password;
     const displayNameOverride = normalizeText(entry.displayNameOverride || entry.displayName || '', 120);
     const normalized = {
+      staffType: normalizeStaffType(entry.staffType || entry.roleType || ''),
       title,
       initials,
       firstName,
@@ -3356,13 +7636,16 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const normalizeStaffMembers = (values) => {
     const seen = new Set();
+    const usedLoginEmails = new Set();
     const normalized = [];
     (Array.isArray(values) ? values : []).forEach((entry) => {
       const staff = normalizeStaffMember(entry);
       if (!staff) return;
-      const dedupeKey = `${String(staff.surname || '').toLowerCase()}::${String(staff.initials || '').toLowerCase()}::${String(staff.staffNumber || '').toLowerCase()}`;
+      const dedupeKey = `${String(staff.surname || '').toLowerCase()}::${String(staff.initials || '').toLowerCase()}::${String(staff.staffNumber || '').toLowerCase()}::${String(staff.staffType || '').toLowerCase()}`;
       if (seen.has(dedupeKey)) return;
+      staff.loginEmail = buildUniqueStaffLoginEmail(staff.loginEmail, staff, usedLoginEmails);
       seen.add(dedupeKey);
+      usedLoginEmails.add(staff.loginEmail);
       normalized.push(staff);
     });
     return normalized;
@@ -3389,6 +7672,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!loggedInStaff) {
       staffSessionEmail = '';
       sessionStorage.removeItem(staffSessionKey);
+      sessionStorage.removeItem(staffSessionPasswordKey);
       return;
     }
     staffSessionEmail = loggedInStaff.loginEmail;
@@ -3542,28 +7826,66 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     (Array.isArray(rows) ? rows : []).forEach((row) => {
       if (!Array.isArray(row) || !row.length) return;
-      const parsedName = parseSimplifiedExcelFullName(row[0]);
+
+      const parsedAdmission = normalizeText(row[0], 40);
+      const parsedNameFromNewLayout = parseSimplifiedExcelFullName(row[1]);
+      const parsedGenderFromNewLayout = normalizeGender(row[2]);
+
+      const parsedName = parsedNameFromNewLayout || parseSimplifiedExcelFullName(row[0]);
       if (!parsedName) return;
-      learners.push({ name: parsedName, admissionNo: '', gender: normalizeGender(row[1]) });
+
+      const parsedGender = parsedGenderFromNewLayout || normalizeGender(row[1]);
+      const admissionNo = parsedNameFromNewLayout ? parsedAdmission : '';
+
+      learners.push({ name: parsedName, admissionNo, gender: parsedGender });
     });
 
     return normalizeLearners(learners);
   };
 
   const parseLearnersFromExcelFile = async (file) => {
-    const { default: ExcelJS } = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
     const buffer = await file.arrayBuffer();
-    await workbook.xlsx.load(buffer);
-
-    const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
-    if (!worksheet) return [];
-
     const rows = [];
-    worksheet.eachRow({ includeEmpty: false }, (row) => {
-      const values = Array.isArray(row.values) ? row.values.slice(1) : [];
-      rows.push(values.map((entry) => normalizeTabularCell(entry)));
-    });
+
+    try {
+      const { default: ExcelJS } = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer);
+
+      const worksheet = workbook.worksheets.find((sheet) => sheet.actualRowCount > 0) || workbook.worksheets[0];
+      if (worksheet) {
+        worksheet.eachRow({ includeEmpty: false }, (row) => {
+          const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+          rows.push(values.map((entry) => normalizeTabularCell(entry)));
+        });
+      }
+    } catch {
+      // Continue to SheetJS fallback for .xls and other workbook variants.
+    }
+
+    if (!rows.length) {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.read(buffer, {
+        type: 'array',
+        cellDates: false,
+        cellText: true
+      });
+      const firstSheetName = Array.isArray(workbook.SheetNames) && workbook.SheetNames.length ? workbook.SheetNames[0] : '';
+      const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+      if (!worksheet) return [];
+
+      const parsedRows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        raw: false,
+        defval: ''
+      });
+
+      (Array.isArray(parsedRows) ? parsedRows : []).forEach((row) => {
+        rows.push(Array.isArray(row) ? row.map((entry) => normalizeTabularCell(entry)) : []);
+      });
+    }
+
+    if (!rows.length) return [];
 
     const firstRow = Array.isArray(rows[0]) ? rows[0] : [];
     const firstRowLower = firstRow.map((entry) => normalizeText(entry, 120).toLowerCase());
@@ -3577,6 +7899,26 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     return extractLearnersFromRows(rows);
+  };
+
+  const parseClassKeyFromImportFileName = (name) => {
+    const baseName = String(name || '')
+      .trim()
+      .replace(/\.[^.]+$/, '');
+    if (!baseName) return null;
+
+    const match = baseName.match(/^(\d{1,2})\s*([a-zA-Z])$/);
+    if (!match) return null;
+
+    const grade = String(match[1] || '').trim();
+    const letter = normalizeLetter(match[2] || '');
+    if (!gradeNumbers.includes(grade) || !letter) return null;
+    return { grade, letter };
+  };
+
+  const classExistsInStore = (grade, letter) => {
+    const classes = Array.isArray(classesByGrade[grade]) ? classesByGrade[grade] : [];
+    return classes.some((entry) => normalizeLetter(entry) === normalizeLetter(letter));
   };
 
   const getImportFormat = () => {
@@ -3624,67 +7966,181 @@ const hydrateEnrollmentManager = (managerNode) => {
     return normalized;
   };
 
-  const loadStore = () => {
+  const defaultLoadedStore = () => ({
+    activeGrades: [...gradeNumbers],
+    classesByGrade: normalizeClassesStore({}),
+    classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
+    staffMembers: []
+  });
+
+  const normalizeLoadedStore = (parsed) => {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return defaultLoadedStore();
+    }
+
+    const parsedActive = Array.isArray(parsed.activeGrades)
+      ? parsed.activeGrades
+          .map((entry) => String(entry || '').trim())
+          .filter((entry) => gradeNumbers.includes(entry))
+      : [];
+
+    const normalizedActive = parsedActive.length
+      ? Array.from(new Set(parsedActive)).sort((left, right) => Number(left) - Number(right))
+      : [...gradeNumbers];
+
+    const rawClasses =
+      parsed.classesByGrade && typeof parsed.classesByGrade === 'object' && !Array.isArray(parsed.classesByGrade)
+        ? parsed.classesByGrade
+        : parsed;
+
+    const normalizedClasses = normalizeClassesStore(rawClasses);
+    return {
+      activeGrades: normalizedActive,
+      classesByGrade: normalizedClasses,
+      classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizedClasses),
+      staffMembers: normalizeStaffMembers(parsed.staffMembers)
+    };
+  };
+
+  const runLearnerSurnameNameMigration = () => {
+    if (localStorage.getItem(learnerSurnameNameMigrationFlag) === 'done') {
+      return { migratedAny: false, migratedCurrentStore: false };
+    }
+
+    let migratedAny = false;
+    let migratedCurrentStore = false;
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(enrollmentStoragePrefix)) continue;
+
+      const existingStore = readEnrollmentStoreLocal(key);
+      if (!existingStore || typeof existingStore !== 'object' || Array.isArray(existingStore)) continue;
+
+      const normalizedStore = normalizeLoadedStore(existingStore);
+      const existingUpdatedAt = Number(existingStore?.updatedAt ?? existingStore?._meta?.updatedAt);
+      const stampedPayload = Number.isFinite(existingUpdatedAt) && existingUpdatedAt > 0
+        ? stampEnrollmentStorePayload(normalizedStore, existingUpdatedAt)
+        : stampEnrollmentStorePayload(normalizedStore);
+
+      localStorage.setItem(key, JSON.stringify(stampedPayload));
+      migratedAny = true;
+      if (key === storageKey) {
+        migratedCurrentStore = true;
+      }
+    }
+
+    localStorage.setItem(learnerSurnameNameMigrationFlag, 'done');
+    return { migratedAny, migratedCurrentStore };
+  };
+
+  const loadStore = () => normalizeLoadedStore(readEnrollmentStoreLocal(storageKey));
+
+  const buildStorePayload = () => ({
+    activeGrades: [...activeGrades],
+    classesByGrade: normalizeClassesStore(classesByGrade),
+    classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade),
+    staffMembers: normalizeStaffMembers(staffMembers)
+  });
+
+  const setStaffAuthStatus = (message) => {
+    if (!(staffAuthStatusNode instanceof HTMLElement)) return;
+    staffAuthStatusNode.textContent = String(message || '').trim();
+  };
+
+  const formatStaffAuthProblems = (problems) => {
+    const rows = (Array.isArray(problems) ? problems : [])
+      .map((problem) => {
+        const staff = String(problem?.staff || '').trim();
+        const loginEmail = String(problem?.loginEmail || '').trim();
+        const reason = String(problem?.reason || '').trim();
+        return [staff, loginEmail ? `(${loginEmail})` : '', reason].filter(Boolean).join(' ');
+      })
+      .filter(Boolean);
+
+    return rows.slice(0, 3).join(' | ');
+  };
+
+  const runStaffAuthSync = async ({ manual = false } = {}) => {
+    if (!isAdminMode) {
+      setStaffAuthStatus('Staff auth sync is only available in admin mode.');
+      return false;
+    }
+
+    const normalizedStaff = normalizeStaffMembers(staffMembers);
+    if (!normalizedStaff.length) {
+      setStaffAuthStatus('No staff profiles available to sync.');
+      return false;
+    }
+
+    setStaffAuthStatus(manual ? 'Syncing staff accounts...' : 'Checking staff account sync...');
+    const result = await syncStaffAuthUsersRemoteDetailed(sectionKey, normalizedStaff);
+
+    if (result.ok) {
+      setStaffAuthStatus(`Staff auth sync complete. ${result.syncedCount} account${result.syncedCount === 1 ? '' : 's'} processed.`);
+      return true;
+    }
+
+    const problemDetails = formatStaffAuthProblems(result.problems);
+    setStaffAuthStatus(`Staff auth sync failed (${result.status || 'network'}): ${result.error || 'Unknown error.'}${problemDetails ? ` Fix: ${problemDetails}` : ''}`);
+    return false;
+  };
+
+  const maybeSyncStaffAuthUsers = () => {
+    if (!isAdminMode || hasTriggeredStaffAuthSync || !staffMembers.length) return;
+    hasTriggeredStaffAuthSync = true;
+    void runStaffAuthSync();
+  };
+
+  const flushRemoteEnrollmentSave = async () => {
+    if (isRemoteEnrollmentSaveInFlight || !pendingRemoteEnrollmentPayload) return;
+
+    isRemoteEnrollmentSaveInFlight = true;
+    const payload = pendingRemoteEnrollmentPayload;
+    pendingRemoteEnrollmentPayload = null;
+
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) {
-        return {
-          activeGrades: [...gradeNumbers],
-          classesByGrade: normalizeClassesStore({})
-        };
+      const result = await persistEnrollmentStore(sectionKey, storageKey, payload);
+      if (!result.savedRemote && statusNode) {
+        statusNode.textContent = 'Saved on this device only. Remote sync unavailable right now.';
       }
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const parsedActive = Array.isArray(parsed.activeGrades)
-          ? parsed.activeGrades
-              .map((entry) => String(entry || '').trim())
-              .filter((entry) => gradeNumbers.includes(entry))
-          : [];
-
-        const normalizedActive = parsedActive.length
-          ? Array.from(new Set(parsedActive)).sort((left, right) => Number(left) - Number(right))
-          : [...gradeNumbers];
-
-        const rawClasses =
-          parsed.classesByGrade && typeof parsed.classesByGrade === 'object' && !Array.isArray(parsed.classesByGrade)
-            ? parsed.classesByGrade
-            : parsed;
-
-        return {
-          activeGrades: normalizedActive,
-          classesByGrade: normalizeClassesStore(rawClasses),
-          classProfilesByGrade: normalizeProfilesStore(parsed.classProfilesByGrade, normalizeClassesStore(rawClasses)),
-          staffMembers: normalizeStaffMembers(parsed.staffMembers)
-        };
+    } finally {
+      isRemoteEnrollmentSaveInFlight = false;
+      if (pendingRemoteEnrollmentPayload) {
+        void flushRemoteEnrollmentSave();
       }
-
-      return {
-        activeGrades: [...gradeNumbers],
-        classesByGrade: normalizeClassesStore({}),
-        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
-        staffMembers: []
-      };
-    } catch {
-      return {
-        activeGrades: [...gradeNumbers],
-        classesByGrade: normalizeClassesStore({}),
-        classProfilesByGrade: normalizeProfilesStore({}, normalizeClassesStore({})),
-        staffMembers: []
-      };
     }
   };
 
-  const saveStore = () => {
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({
-        activeGrades: [...activeGrades],
-        classesByGrade: normalizeClassesStore(classesByGrade),
-        classProfilesByGrade: normalizeProfilesStore(classProfilesByGrade, classesByGrade),
-        staffMembers: normalizeStaffMembers(staffMembers)
-      })
-    );
+  const saveStore = ({ syncRemote = true, preserveTimestamp = false } = {}) => {
+    const basePayload = buildStorePayload();
+    let payload;
+
+    if (!syncRemote && preserveTimestamp) {
+      const existing = readEnrollmentStoreLocal(storageKey);
+      const existingUpdatedAt = Number(existing?.updatedAt ?? existing?._meta?.updatedAt);
+      payload = Number.isFinite(existingUpdatedAt) && existingUpdatedAt > 0
+        ? stampEnrollmentStorePayload(basePayload, existingUpdatedAt)
+        : basePayload;
+    } else {
+      payload = stampEnrollmentStorePayload(basePayload);
+    }
+
+    localStorage.setItem(storageKey, JSON.stringify(payload));
+
+    if (!syncRemote) return;
+    pendingRemoteEnrollmentPayload = payload;
+    void flushRemoteEnrollmentSave();
   };
+
+  syncStaffAuthButton.addEventListener('click', async () => {
+    syncStaffAuthButton.disabled = true;
+    try {
+      await runStaffAuthSync({ manual: true });
+    } finally {
+      syncStaffAuthButton.disabled = false;
+    }
+  });
 
   const getMissingGrades = () => gradeNumbers.filter((grade) => !activeGrades.includes(grade));
 
@@ -3726,6 +8182,8 @@ const hydrateEnrollmentManager = (managerNode) => {
 
   const closeManageModal = () => {
     manageModal.classList.add('is-hidden');
+    closeLearnerProfileModal();
+    closeLearnerSportsModal();
     selectedManageGrade = '';
     selectedManageLetter = '';
     manageLearners = [];
@@ -3733,6 +8191,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     learnerAdmissionInput.value = '';
     learnerGenderSelect.value = '';
     importFileInput.value = '';
+    bulkImportFileInput.value = '';
     manageCapacityInput.value = '';
   };
 
@@ -3763,6 +8222,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const assignedByClass = new Map();
 
     staffMembers.forEach((staff) => {
+      if (normalizeStaffType(staff?.staffType || '') !== 'teaching_staff') return;
       const grade = String(staff?.assignedGrade || '').trim();
       const letter = normalizeLetter(staff?.assignedClassLetter || '');
       if (!grade || !letter) return;
@@ -3799,6 +8259,311 @@ const hydrateEnrollmentManager = (managerNode) => {
     return canCurrentUserManageClass(grade, letter);
   };
 
+  let activeLearnerProfileIndex = -1;
+  const learnerProfileModal = document.createElement('div');
+  learnerProfileModal.className = 'enrollment-class-modal is-hidden';
+  learnerProfileModal.setAttribute('data-enrollment-learner-profile-modal', 'true');
+  learnerProfileModal.innerHTML = `
+    <div class="enrollment-class-modal-backdrop" data-enrollment-close-learner-profile></div>
+    <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Learner profile">
+      <h3>Learner Profile</h3>
+      <p class="enrollment-class-modal-subtitle" data-enrollment-learner-profile-title></p>
+      <div class="enrollment-class-manage-grid">
+        <label class="enrollment-class-modal-field">
+          Full name
+          <input type="text" maxlength="120" data-enrollment-learner-profile-name />
+        </label>
+        <label class="enrollment-class-modal-field">
+          Admission no.
+          <input type="text" maxlength="40" data-enrollment-learner-profile-admission />
+        </label>
+        <label class="enrollment-class-modal-field">
+          Gender
+          <select data-enrollment-learner-profile-gender>
+            <option value="">Unspecified</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Other">Other</option>
+          </select>
+        </label>
+        <label class="enrollment-class-modal-field">
+          RCL role
+          <select data-enrollment-learner-profile-rcl></select>
+        </label>
+        <label class="enrollment-class-modal-field">
+          House
+          <select data-enrollment-learner-profile-house></select>
+        </label>
+      </div>
+      <label class="enrollment-class-modal-field">
+        Sporting codes
+        <select multiple size="6" data-enrollment-learner-profile-sporting></select>
+      </label>
+      <div class="enrollment-class-modal-actions">
+        <button type="button" class="btn btn-secondary" data-enrollment-close-learner-profile>Close</button>
+        <button type="button" class="btn btn-primary" data-enrollment-save-learner-profile>Save profile</button>
+      </div>
+    </article>
+  `;
+  document.body.appendChild(learnerProfileModal);
+
+  const learnerProfileTitleNode = learnerProfileModal.querySelector('[data-enrollment-learner-profile-title]');
+  const learnerProfileNameInput = learnerProfileModal.querySelector('[data-enrollment-learner-profile-name]');
+  const learnerProfileAdmissionInput = learnerProfileModal.querySelector('[data-enrollment-learner-profile-admission]');
+  const learnerProfileGenderSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-gender]');
+  const learnerProfileRclSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-rcl]');
+  const learnerProfileHouseSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-house]');
+  const learnerProfileSportingSelect = learnerProfileModal.querySelector('[data-enrollment-learner-profile-sporting]');
+  const learnerProfileSaveButton = learnerProfileModal.querySelector('[data-enrollment-save-learner-profile]');
+  const learnerProfileCloseButtons = Array.from(
+    learnerProfileModal.querySelectorAll('[data-enrollment-close-learner-profile]')
+  );
+
+  const closeLearnerProfileModal = () => {
+    learnerProfileModal.classList.add('is-hidden');
+    activeLearnerProfileIndex = -1;
+  };
+
+  const renderLearnerProfileModal = (index) => {
+    if (
+      !(learnerProfileTitleNode instanceof HTMLElement) ||
+      !(learnerProfileNameInput instanceof HTMLInputElement) ||
+      !(learnerProfileAdmissionInput instanceof HTMLInputElement) ||
+      !(learnerProfileGenderSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileRclSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileHouseSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileSportingSelect instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const learner = manageLearners[index];
+    const canEditAssignments = canCurrentUserEditLearnerAssignments();
+    const sportingCodeDefinitions = getSportingCodeDefinitions();
+    const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
+
+    learnerProfileTitleNode.textContent = `Grade ${selectedManageGrade}${selectedManageLetter} • ${learner.name}`;
+    learnerProfileNameInput.value = String(learner.name || '');
+    learnerProfileAdmissionInput.value = String(learner.admissionNo || '');
+    learnerProfileGenderSelect.value = String(learner.gender || '');
+    learnerProfileRclSelect.innerHTML = rclRoleOptions
+      .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
+      .join('');
+
+    learnerProfileHouseSelect.innerHTML = [
+      '<option value="">Unassigned</option>',
+      ...schoolHouseOptions.map(
+        (house) =>
+          `<option value="${escapeHtmlAttribute(house.id)}" ${learner.houseId === house.id ? 'selected' : ''}>${escapeHtmlText(house.name)}</option>`
+      )
+    ].join('');
+
+    const learnerSportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
+    learnerProfileSportingSelect.innerHTML = sportingCodeDefinitions
+      .map((entry) => {
+        const selected = learnerSportingCodes.some(
+          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+        )
+          ? 'selected'
+          : '';
+        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
+      })
+      .join('');
+
+    learnerProfileNameInput.disabled = !canEditAssignments;
+    learnerProfileAdmissionInput.disabled = !canEditAssignments;
+    learnerProfileGenderSelect.disabled = !canEditAssignments;
+    learnerProfileRclSelect.disabled = !canEditAssignments;
+    learnerProfileHouseSelect.disabled = !canEditAssignments;
+    learnerProfileSportingSelect.disabled = !canEditAssignments;
+    if (learnerProfileSaveButton instanceof HTMLButtonElement) {
+      learnerProfileSaveButton.disabled = !canEditAssignments;
+    }
+  };
+
+  const openLearnerProfileModal = (index) => {
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+    activeLearnerProfileIndex = index;
+    renderLearnerProfileModal(index);
+    learnerProfileModal.classList.remove('is-hidden');
+  };
+
+  learnerProfileCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', closeLearnerProfileModal);
+  });
+
+  learnerProfileModal.addEventListener('click', (event) => {
+    if (event.target === learnerProfileModal) {
+      closeLearnerProfileModal();
+    }
+  });
+
+  learnerProfileSaveButton?.addEventListener('click', () => {
+    if (!canCurrentUserEditLearnerAssignments()) return;
+    if (
+      !(learnerProfileNameInput instanceof HTMLInputElement) ||
+      !(learnerProfileAdmissionInput instanceof HTMLInputElement) ||
+      !(learnerProfileGenderSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileRclSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileHouseSelect instanceof HTMLSelectElement) ||
+      !(learnerProfileSportingSelect instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    const index = activeLearnerProfileIndex;
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const sportingCodes = Array.from(learnerProfileSportingSelect.selectedOptions)
+      .map((entry) => normalizeText(entry.value, 80))
+      .filter(Boolean);
+
+    const normalizedLearner = normalizeLearner({
+      ...manageLearners[index],
+      name: learnerProfileNameInput.value,
+      admissionNo: learnerProfileAdmissionInput.value,
+      gender: learnerProfileGenderSelect.value,
+      rclRole: learnerProfileRclSelect.value,
+      houseId: learnerProfileHouseSelect.value,
+      sportingCodes
+    });
+
+    if (!normalizedLearner) {
+      if (statusNode) {
+        statusNode.textContent = 'Learner name is required.';
+      }
+      return;
+    }
+
+    manageLearners[index] = normalizedLearner;
+    persistLiveLearnerAssignments();
+    renderManageLearners();
+    closeLearnerProfileModal();
+  });
+
+  let activeLearnerSportsIndex = -1;
+  const learnerSportsModal = document.createElement('div');
+  learnerSportsModal.className = 'enrollment-class-modal is-hidden';
+  learnerSportsModal.setAttribute('data-enrollment-learner-sports-modal', 'true');
+  learnerSportsModal.innerHTML = `
+    <div class="enrollment-class-modal-backdrop" data-enrollment-close-learner-sports></div>
+    <article class="panel enrollment-class-modal-panel" role="dialog" aria-modal="true" aria-label="Learner sporting codes">
+      <h3>Sporting Codes</h3>
+      <p class="enrollment-class-modal-subtitle" data-enrollment-learner-sports-title></p>
+      <label class="enrollment-class-modal-field">
+        Assign sporting codes
+        <select multiple size="7" data-enrollment-learner-sports-select></select>
+      </label>
+      <div class="enrollment-class-modal-actions">
+        <button type="button" class="btn btn-secondary" data-enrollment-close-learner-sports>Close</button>
+        <button type="button" class="btn btn-primary" data-enrollment-save-learner-sports>Save sporting codes</button>
+      </div>
+    </article>
+  `;
+  document.body.appendChild(learnerSportsModal);
+
+  const learnerSportsTitleNode = learnerSportsModal.querySelector('[data-enrollment-learner-sports-title]');
+  const learnerSportsSelect = learnerSportsModal.querySelector('[data-enrollment-learner-sports-select]');
+  const learnerSportsSaveButton = learnerSportsModal.querySelector('[data-enrollment-save-learner-sports]');
+  const learnerSportsCloseButtons = Array.from(
+    learnerSportsModal.querySelectorAll('[data-enrollment-close-learner-sports]')
+  );
+
+  const closeLearnerSportsModal = () => {
+    learnerSportsModal.classList.add('is-hidden');
+    activeLearnerSportsIndex = -1;
+  };
+
+  const openLearnerSportsModal = (index) => {
+    if (!(learnerSportsTitleNode instanceof HTMLElement) || !(learnerSportsSelect instanceof HTMLSelectElement)) return;
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const learner = manageLearners[index];
+    const canEditAssignments = canCurrentUserEditLearnerAssignments();
+    const sportingCodeDefinitions = getSportingCodeDefinitions();
+    const assignedCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
+    const defaultCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
+
+    activeLearnerSportsIndex = index;
+    learnerSportsTitleNode.textContent = `${learner.name} • ${learner.gender || 'Unspecified gender'} • Default: ${defaultCode}`;
+    learnerSportsSelect.innerHTML = sportingCodeDefinitions
+      .map((entry) => {
+        const selected = assignedCodes.some(
+          (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
+        )
+          ? 'selected'
+          : '';
+        return `<option value="${escapeHtmlAttribute(entry.title)}" ${selected}>${escapeHtmlText(entry.title)}</option>`;
+      })
+      .join('');
+
+    learnerSportsSelect.disabled = !canEditAssignments;
+    if (learnerSportsSaveButton instanceof HTMLButtonElement) {
+      learnerSportsSaveButton.disabled = !canEditAssignments;
+    }
+
+    learnerSportsModal.classList.remove('is-hidden');
+  };
+
+  learnerSportsCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', closeLearnerSportsModal);
+  });
+
+  learnerSportsModal.addEventListener('click', (event) => {
+    if (event.target === learnerSportsModal) {
+      closeLearnerSportsModal();
+    }
+  });
+
+  learnerSportsSaveButton?.addEventListener('click', () => {
+    if (!canCurrentUserEditLearnerAssignments()) return;
+    if (!(learnerSportsSelect instanceof HTMLSelectElement)) return;
+
+    const index = activeLearnerSportsIndex;
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+
+    const selectedCodes = Array.from(learnerSportsSelect.selectedOptions)
+      .map((entry) => normalizeText(entry.value, 80))
+      .filter(Boolean);
+
+    const normalizedLearner = normalizeLearner({
+      ...manageLearners[index],
+      sportingCodes: selectedCodes
+    });
+    if (!normalizedLearner) return;
+
+    manageLearners[index] = normalizedLearner;
+    persistLiveLearnerAssignments();
+    renderManageLearners();
+    closeLearnerSportsModal();
+  });
+
+  learnerSearchInput.addEventListener('input', () => {
+    learnerSearchValue = learnerSearchInput.value;
+    renderManageLearners();
+  });
+
+  learnerSortSelect.addEventListener('change', () => {
+    learnerSortValue = learnerSortSelect.value === 'surname_desc' ? 'surname_desc' : 'surname_asc';
+    learnerSortSelect.value = learnerSortValue;
+    renderManageLearners();
+  });
+
+  staffSearchInput.addEventListener('input', () => {
+    staffSearchValue = staffSearchInput.value;
+    renderStaffMembers();
+  });
+
+  staffSortSelect.addEventListener('change', () => {
+    staffSortValue = staffSortSelect.value === 'surname_desc' ? 'surname_desc' : 'surname_asc';
+    staffSortSelect.value = staffSortValue;
+    renderStaffMembers();
+  });
+
   const renderManageLearners = () => {
     if (!manageLearners.length) {
       learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners added yet.</p>';
@@ -3809,35 +8574,42 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const canEditAssignments = canCurrentUserEditLearnerAssignments();
-    const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
-    const sportingCodeDefinitions = getSportingCodeDefinitions();
+    const normalizedSearch = normalizeText(learnerSearchValue, 140).toLowerCase();
+    const filteredLearners = manageLearners
+      .map((learner, index) => ({ learner, index }))
+      .filter(({ learner }) => {
+        if (!normalizedSearch) return true;
+        const haystack = [learner.name, learner.admissionNo, learner.gender]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+      .sort((left, right) => {
+        const leftKey = resolveSurnameSortKey(left.learner.name);
+        const rightKey = resolveSurnameSortKey(right.learner.name);
+        const comparison = leftKey.localeCompare(rightKey);
+        return learnerSortValue === 'surname_desc' ? -comparison : comparison;
+      });
 
-    learnerListNode.innerHTML = manageLearners
-      .map((learner, index) => {
-        const details = [learner.admissionNo || '', learner.gender || ''].filter(Boolean).join(' • ');
-        const detail = details ? ` • ${details}` : '';
+    if (!filteredLearners.length) {
+      learnerListNode.innerHTML = '<p class="enrollment-class-empty">No learners match the current search.</p>';
+      requestAnimationFrame(() => {
+        refreshManageModalWorkflowHeights();
+      });
+      return;
+    }
+
+    learnerListNode.innerHTML = filteredLearners
+      .map(({ learner, index }) => {
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
-        const sportingCodesSummary = formatSportingCodesSummary(sportingCodes);
-        const sportingCodesTitle = sportingCodes.join(', ');
-        const sportingCodesMenuMarkup = sportingCodeDefinitions
-          .map((entry) => {
-            const selected = sportingCodes.some(
-              (value) => normalizeText(value, 80).toLowerCase() === normalizeText(entry.title, 80).toLowerCase()
-            );
-            return `
-              <label class="enrollment-learner-sporting-option">
-                <input
-                  type="checkbox"
-                  data-enrollment-learner-sporting-option-index="${index}"
-                  value="${escapeHtmlAttribute(entry.title)}"
-                  ${selected ? 'checked' : ''}
-                  ${canEditAssignments ? '' : 'disabled'}
-                />
-                <span>${escapeHtmlText(entry.title)}</span>
-              </label>
-            `;
-          })
-          .join('');
+        const assignedSportsLabel = formatSportingCodesSummary(sportingCodes);
+        const defaultSportCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
+        const defaultSportChipLabel = defaultSportCode === 'No default code'
+          ? defaultSportCode
+          : formatSportCodeWithEmoji(defaultSportCode);
+        const topGenderLabel = learner.gender || 'Unspecified';
+
         const houseOptionsMarkup = schoolHouseOptions
           .map(
             (house) => `
@@ -3857,47 +8629,28 @@ const hydrateEnrollmentManager = (managerNode) => {
           )
           .join('');
 
-        const clearChoice = canEditAssignments
-          ? `
-              <label class="enrollment-house-choice enrollment-house-choice-clear">
-                <input
-                  type="radio"
-                  name="enrollment_learner_house_${index}"
-                  value=""
-                  data-enrollment-learner-house-index="${index}"
-                  ${learner.houseId ? '' : 'checked'}
-                />
-                <span>Unassigned</span>
-              </label>
-            `
-          : '';
+        
 
         return `
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
-              <span>${escapeHtmlText(learner.name)}${escapeHtmlText(detail)}</span>
-              <div class="enrollment-learner-form enrollment-learner-inline-fields">
-                <select data-enrollment-learner-rcl-index="${index}" ${canEditAssignments ? '' : 'disabled'} aria-label="RCL role">
-                  ${rclRoleOptions
-                    .map((role) => `<option value="${escapeHtmlAttribute(role)}" ${String(learner.rclRole || '') === role ? 'selected' : ''}>${escapeHtmlText(role || 'No RCL role')}</option>`)
-                    .join('')}
-                </select>
-                <details class="enrollment-learner-sporting-picker">
-                  <summary aria-label="Sporting codes">Sporting codes</summary>
-                  <div class="enrollment-learner-sporting-menu" role="group" aria-label="Sporting codes list">
-                    ${sportingCodesMenuMarkup}
-                  </div>
-                </details>
-                <span class="enrollment-class-empty enrollment-learner-sporting-summary" title="${escapeHtmlAttribute(sportingCodesTitle || 'No sporting code selected')}">${escapeHtmlText(sportingCodesSummary)}</span>
+              <div class="enrollment-learner-topline">
+                <span class="enrollment-learner-name">${escapeHtmlText(learner.name)}${learner.admissionNo ? ` • ${escapeHtmlText(learner.admissionNo)}` : ''}</span>
+                <div class="enrollment-learner-topmeta">
+                  <span class="enrollment-class-empty">${escapeHtmlText(topGenderLabel)}</span>
+                  <button
+                    type="button"
+                    class="enrollment-learner-sport-chip"
+                    data-enrollment-open-learner-sports-index="${index}"
+                    title="Assigned: ${escapeHtmlAttribute(assignedSportsLabel)}"
+                  >${escapeHtmlText(defaultSportChipLabel)}</button>
+                </div>
               </div>
               <div class="enrollment-house-row">
                 ${houseOptionsMarkup}
-                ${clearChoice}
               </div>
             </div>
-            <div class="enrollment-learner-actions">
-              ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button>` : ''}
-            </div>
+            ${isAdminMode ? `<div class="enrollment-learner-actions"><button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button></div>` : ''}
           </div>
         `;
       })
@@ -3985,10 +8738,11 @@ const hydrateEnrollmentManager = (managerNode) => {
     const teacherNames = Array.from(
       new Set(
         staffMembers
+          .filter((staff) => normalizeStaffType(staff?.staffType || '') === 'teaching_staff')
           .map((staff) => normalizeText(resolveStaffDisplayName(staff), 120))
           .filter(Boolean)
       )
-    ).sort((left, right) => left.localeCompare(right));
+    ).sort((left, right) => resolveSurnameSortKey(left, { staffLike: true }).localeCompare(resolveSurnameSortKey(right, { staffLike: true })));
 
     const hasSelectedInStaff = selected && teacherNames.includes(selected);
     manageTeacherSelect.innerHTML = [
@@ -4008,10 +8762,55 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
-    staffListNode.innerHTML = staffMembers
-      .map((staff, index) => {
+    const normalizedSearch = normalizeText(staffSearchValue, 140).toLowerCase();
+    const filteredStaff = staffMembers
+      .map((staff, index) => ({ staff, index }))
+      .filter(({ staff }) => {
+        if (!normalizedSearch) return true;
+        const assignedClass = staff.assignedGrade && staff.assignedClassLetter ? `${staff.assignedGrade}${staff.assignedClassLetter}` : '';
+        const haystack = [
+          resolveStaffDisplayName(staff),
+          staff.staffNumber,
+          staff.subject,
+          staff.email,
+          assignedClass,
+          staff.gender
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedSearch);
+      })
+      .sort((left, right) => {
+        const leftKey = resolveSurnameSortKey(left.staff.surname || resolveStaffDisplayName(left.staff), { staffLike: true });
+        const rightKey = resolveSurnameSortKey(right.staff.surname || resolveStaffDisplayName(right.staff), { staffLike: true });
+        const comparison = leftKey.localeCompare(rightKey);
+        return staffSortValue === 'surname_desc' ? -comparison : comparison;
+      });
+
+    if (!filteredStaff.length) {
+      staffListNode.innerHTML = '<p class="enrollment-class-empty">No staff members match the current search.</p>';
+      return;
+    }
+
+    staffListNode.innerHTML = filteredStaff
+      .map(({ staff, index }) => {
         const displayName = resolveStaffDisplayName(staff);
+        let isHouseManager = false;
+        try {
+          const rawRoles = localStorage.getItem('bhanoyi.houseRoleAssignments');
+          const parsedRoles = rawRoles ? JSON.parse(rawRoles) : {};
+          const houseId = String(staff.houseId || '').trim();
+          const houseEntry = houseId && parsedRoles && typeof parsedRoles === 'object' ? parsedRoles[houseId] : null;
+          const memberKey = `${sectionKey}|staff|${index}`;
+          const rolesForMember = Array.isArray(houseEntry?.staffRoles?.[memberKey]) ? houseEntry.staffRoles[memberKey] : [];
+          isHouseManager = rolesForMember.includes('house_manager');
+        } catch {
+          isHouseManager = false;
+        }
+
         const details = [
+          staff.staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff',
           staff.postLevel ? `${staff.postLevel} · ${staff.rank || staffPostLevelRanks[staff.postLevel] || ''}` : '',
           staff.gender || '',
           staff.staffNumber ? `No: ${staff.staffNumber}` : '',
@@ -4065,16 +8864,6 @@ const hydrateEnrollmentManager = (managerNode) => {
               <span>${escapeHtmlText(displayName)}${details ? ` • ${escapeHtmlText(details)}` : ''}</span>
               ${isAdminMode ? `
                 <label class="enrollment-class-modal-field enrollment-staff-display-override-field">
-                  Custom display format (optional)
-                  <input
-                    type="text"
-                    maxlength="120"
-                    value="${escapeHtmlAttribute(staff.displayNameOverride || '')}"
-                    placeholder="Default: ${escapeHtmlAttribute(formatStaffDefaultDisplayName(staff))}"
-                    data-enrollment-staff-display-override-index="${index}"
-                  />
-                </label>
-                <label class="enrollment-class-modal-field enrollment-staff-display-override-field">
                   Assigned class
                   <select data-enrollment-staff-assigned-class-index="${index}">
                     <option value="">No class assigned</option>
@@ -4099,7 +8888,11 @@ const hydrateEnrollmentManager = (managerNode) => {
               </div>
             </div>
             <div class="enrollment-learner-actions">
-              ${isAdminMode ? `<button type="button" class="enrollment-class-remove" data-enrollment-remove-staff-index="${index}" aria-label="Remove staff ${escapeHtmlAttribute(displayName)}" title="Remove staff ${escapeHtmlAttribute(displayName)}">×</button>` : ''}
+              ${isAdminMode ? `
+                    <button type="button" class="enrollment-class-edit" data-enrollment-edit-staff-index="${index}" title="Edit staff ${escapeHtmlAttribute(displayName)}">Edit</button>
+                    <button type="button" class="btn btn-secondary" data-enrollment-toggle-house-manager-index="${index}">${isHouseManager ? 'Remove House Manager' : 'Make House Manager'}</button>
+                    <button type="button" class="enrollment-class-remove" data-enrollment-remove-staff-index="${index}" aria-label="Remove staff ${escapeHtmlAttribute(displayName)}" title="Remove staff ${escapeHtmlAttribute(displayName)}">×</button>
+                  ` : ''}
             </div>
           </div>
         `;
@@ -4110,6 +8903,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   };
 
   const clearStaffForm = () => {
+    staffTypeSelect.value = 'teaching_staff';
     staffTitleSelect.value = 'Mr.';
     staffInitialsInput.value = '';
     staffFirstNameInput.value = '';
@@ -4119,12 +8913,15 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffPostLevelSelect.value = 'PL1';
     staffAssignedClassSelect.value = '';
     staffSubjectInput.value = '';
+    if (staffLoginEmailInput) staffLoginEmailInput.value = '';
+    if (staffLoginPasswordInput) staffLoginPasswordInput.value = '';
     staffEmailInput.value = '';
     staffPhoneInput.value = '';
-    staffDisplayOverrideInput.value = '';
     staffNotesInput.value = '';
     selectedStaffHouseId = '';
     renderStaffHouseSelector();
+    editingStaffIndex = -1;
+    if (addStaffButton instanceof HTMLButtonElement) addStaffButton.textContent = 'Add staff member';
   };
 
   const openManageModal = (grade, letter) => {
@@ -4137,6 +8934,10 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     selectedManageGrade = normalizedGrade;
     selectedManageLetter = normalizedLetter;
+    learnerSearchValue = '';
+    learnerSortValue = 'surname_asc';
+    learnerSearchInput.value = '';
+    learnerSortSelect.value = learnerSortValue;
     const classLabel = `Grade ${normalizedGrade}${normalizedLetter}`;
     if (manageTitleNode instanceof HTMLElement) {
       manageTitleNode.textContent = classLabel;
@@ -4165,6 +8966,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.disabled = !isAdminMode;
     importFileInput.disabled = !isAdminMode;
     importLearnersButton.disabled = !isAdminMode;
+    bulkImportFileInput.disabled = !isAdminMode;
+    bulkImportLearnersButton.disabled = !isAdminMode;
     clearLearnersButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       button.disabled = !isAdminMode;
@@ -4178,6 +8981,12 @@ const hydrateEnrollmentManager = (managerNode) => {
     importFormatSelect.value = 'excel';
     syncImportInputAccept();
     importFileInput.value = '';
+    bulkImportFileInput.value = '';
+
+    const classDetailsStep = manageModalWorkflowSteps.find(
+      (entry) => entry.stepNode.dataset.manageWorkflowId === 'class-details'
+    );
+    setManageModalWorkflowExpanded(classDetailsStep, false);
 
     renderManageLearners();
     manageModal.classList.remove('is-hidden');
@@ -4219,6 +9028,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const staffReadOnly = !isAdminMode;
+    staffTypeSelect.disabled = staffReadOnly;
     staffTitleSelect.disabled = staffReadOnly;
     staffInitialsInput.disabled = staffReadOnly;
     staffFirstNameInput.disabled = staffReadOnly;
@@ -4230,7 +9040,6 @@ const hydrateEnrollmentManager = (managerNode) => {
     staffSubjectInput.disabled = staffReadOnly;
     staffEmailInput.disabled = staffReadOnly;
     staffPhoneInput.disabled = staffReadOnly;
-    staffDisplayOverrideInput.disabled = staffReadOnly;
     staffNotesInput.disabled = staffReadOnly;
     addStaffButton.disabled = staffReadOnly;
     openStaffWorkflowButton.disabled = staffReadOnly;
@@ -4339,13 +9148,16 @@ const hydrateEnrollmentManager = (managerNode) => {
     refreshEnrollmentWorkflowHeights();
   };
 
+  const learnerNameMigrationResult = runLearnerSurnameNameMigration();
   const loaded = loadStore();
   activeGrades = loaded.activeGrades;
   classesByGrade = loaded.classesByGrade;
   classProfilesByGrade = loaded.classProfilesByGrade;
   staffMembers = normalizeStaffMembers(loaded.staffMembers);
   syncClassTeachersFromStaffAssignments();
-  saveStore();
+  if (learnerNameMigrationResult.migratedCurrentStore) {
+    saveStore({ syncRemote: true, preserveTimestamp: true });
+  }
   staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
   syncStaffSession();
 
@@ -4358,17 +9170,49 @@ const hydrateEnrollmentManager = (managerNode) => {
   renderStaffAssignedClassOptions();
   renderStaffMembers();
   render();
+  maybeSyncStaffAuthUsers();
+
+  const hydrateStoreFromRemote = async () => {
+    const remoteStore = await syncEnrollmentStoreFromRemote(sectionKey, storageKey);
+    if (!remoteStore) return;
+
+    const normalizedRemote = normalizeLoadedStore(remoteStore);
+    const currentPayload = buildStorePayload();
+    const samePayload = JSON.stringify(normalizedRemote) === JSON.stringify(currentPayload);
+    if (samePayload) return;
+
+    activeGrades = normalizedRemote.activeGrades;
+    classesByGrade = normalizedRemote.classesByGrade;
+    classProfilesByGrade = normalizedRemote.classProfilesByGrade;
+    staffMembers = normalizeStaffMembers(normalizedRemote.staffMembers);
+    syncClassTeachersFromStaffAssignments();
+    saveStore({ syncRemote: false, preserveTimestamp: true });
+    staffSessionEmail = normalizeText(sessionStorage.getItem(staffSessionKey) || '', 120).toLowerCase();
+    syncStaffSession();
+
+    if (isStaffMode && !loggedInStaff) {
+      window.location.href = 'staff.html';
+      return;
+    }
+
+    renderStaffHouseSelector();
+    renderStaffAssignedClassOptions();
+    renderStaffMembers();
+    render();
+    maybeSyncStaffAuthUsers();
+  };
+
+  void hydrateStoreFromRemote();
 
   gradeListNode.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
 
-    const removeButton = target.closest('[data-enrollment-remove-letter]');
-    if (removeButton instanceof HTMLButtonElement) {
+    const removeLetterBtn = target.closest('[data-enrollment-remove-letter]');
+    if (removeLetterBtn instanceof HTMLButtonElement) {
       if (!isAdminMode) return;
-
-      const grade = String(removeButton.dataset.enrollmentRemoveGrade || '').trim();
-      const letter = normalizeLetter(removeButton.dataset.enrollmentRemoveLetter || '');
+      const grade = String(removeLetterBtn.dataset.enrollmentRemoveGrade || '').trim();
+      const letter = normalizeLetter(removeLetterBtn.dataset.enrollmentRemoveLetter || '');
       if (!grade || !letter) return;
 
       const confirmRemove = window.confirm(`Remove class ${grade}${letter}?`);
@@ -4511,9 +9355,26 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 
   learnerListNode.addEventListener('click', (event) => {
-    if (!isAdminMode) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const profileButton = target.closest('[data-enrollment-open-learner-profile-index]');
+    if (profileButton instanceof HTMLButtonElement) {
+      const index = Number.parseInt(String(profileButton.dataset.enrollmentOpenLearnerProfileIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      openLearnerProfileModal(index);
+      return;
+    }
+
+    const sportsButton = target.closest('[data-enrollment-open-learner-sports-index]');
+    if (sportsButton instanceof HTMLButtonElement) {
+      const index = Number.parseInt(String(sportsButton.dataset.enrollmentOpenLearnerSportsIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+      openLearnerSportsModal(index);
+      return;
+    }
+
+    if (!isAdminMode) return;
     const removeLearnerButton = target.closest('[data-enrollment-remove-learner-index]');
     if (!(removeLearnerButton instanceof HTMLButtonElement)) return;
     const index = Number.parseInt(String(removeLearnerButton.dataset.enrollmentRemoveLearnerIndex || ''), 10);
@@ -4524,76 +9385,25 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 
   learnerListNode.addEventListener('change', (event) => {
-    if (!canCurrentUserEditLearnerAssignments()) return;
     const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
+    if (target.dataset.enrollmentLearnerHouseIndex === undefined) return;
+    if (!canCurrentUserEditLearnerAssignments()) return;
 
-    if (target instanceof HTMLInputElement && target.type === 'radio') {
-      const rawIndex = target.dataset.enrollmentLearnerHouseIndex;
-      if (rawIndex === undefined) return;
-      const index = Number.parseInt(String(rawIndex), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
+    const index = Number.parseInt(String(target.dataset.enrollmentLearnerHouseIndex || ''), 10);
+    if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
 
-      const houseId = String(target.value || '').trim();
-      const normalizedHouseId = schoolHouseOptions.some((house) => house.id === houseId) ? houseId : '';
-      manageLearners[index] = {
-        ...manageLearners[index],
-        houseId: normalizedHouseId
-      };
-      persistLiveLearnerAssignments();
-      return;
-    }
+    const current = manageLearners[index];
+    const nextHouseId = schoolHouseOptions.some((house) => house.id === target.value) ? target.value : '';
+    const normalizedLearner = normalizeLearner({
+      ...current,
+      houseId: nextHouseId
+    });
+    if (!normalizedLearner) return;
 
-    if (target instanceof HTMLSelectElement && target.dataset.enrollmentLearnerRclIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentLearnerRclIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
-      const normalizedLearner = normalizeLearner({
-        ...manageLearners[index],
-        rclRole: target.value
-      });
-      if (!normalizedLearner) return;
-      manageLearners[index] = normalizedLearner;
-      persistLiveLearnerAssignments();
-      renderManageLearners();
-      return;
-    }
-
-    if (target instanceof HTMLInputElement && target.type === 'checkbox' && target.dataset.enrollmentLearnerSportingOptionIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentLearnerSportingOptionIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
-      const learnerItem = target.closest('.enrollment-learner-item');
-      if (!(learnerItem instanceof HTMLElement)) return;
-      const selectedCodes = Array.from(
-        learnerItem.querySelectorAll(`input[type="checkbox"][data-enrollment-learner-sporting-option-index="${index}"]:checked`)
-      )
-        .map((entry) => normalizeText(entry.value, 80))
-        .filter(Boolean);
-      const normalizedLearner = normalizeLearner({
-        ...manageLearners[index],
-        sportingCodes: selectedCodes
-      });
-      if (!normalizedLearner) return;
-      manageLearners[index] = normalizedLearner;
-      persistLiveLearnerAssignments();
-      renderManageLearners();
-      return;
-    }
-
-    if (target instanceof HTMLSelectElement && target.dataset.enrollmentLearnerSportingIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentLearnerSportingIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= manageLearners.length) return;
-      const selectedCodes = Array.from(target.selectedOptions)
-        .map((entry) => normalizeText(entry.value, 80))
-        .filter(Boolean);
-      const normalizedLearner = normalizeLearner({
-        ...manageLearners[index],
-        sportingCodes: selectedCodes
-      });
-      if (!normalizedLearner) return;
-      manageLearners[index] = normalizedLearner;
-      persistLiveLearnerAssignments();
-      renderManageLearners();
-      return;
-    }
+    manageLearners[index] = normalizedLearner;
+    persistLiveLearnerAssignments();
+    renderManageLearners();
   });
 
   staffHouseRowNode.addEventListener('change', (event) => {
@@ -4607,6 +9417,86 @@ const hydrateEnrollmentManager = (managerNode) => {
     if (!isAdminMode) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const editButton = target.closest('[data-enrollment-edit-staff-index]');
+    if (editButton instanceof HTMLButtonElement) {
+      const index = Number.parseInt(String(editButton.dataset.enrollmentEditStaffIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
+      const staff = staffMembers[index];
+      staffTypeSelect.value = String(staff.staffType || 'teaching_staff');
+      staffTitleSelect.value = String(staff.title || 'Mr.');
+      staffInitialsInput.value = String(staff.initials || '');
+      staffFirstNameInput.value = String(staff.firstName || '');
+      staffSurnameInput.value = String(staff.surname || '');
+      staffNumberInput.value = String(staff.staffNumber || '');
+      staffGenderSelect.value = String(staff.gender || '');
+      staffPostLevelSelect.value = String(staff.postLevel || 'PL1');
+      staffAssignedClassSelect.value = staff.assignedGrade && staff.assignedClassLetter ? `${staff.assignedGrade}|${staff.assignedClassLetter}` : '';
+      staffSubjectInput.value = String(staff.subject || '');
+      staffLoginEmailInput.value = String(staff.loginEmail || '');
+      staffLoginPasswordInput.value = String(staff.loginPassword || '');
+      staffEmailInput.value = String(staff.email || '');
+      staffPhoneInput.value = String(staff.phone || '');
+      staffNotesInput.value = String(staff.notes || '');
+      selectedStaffHouseId = String(staff.houseId || '');
+      renderStaffHouseSelector();
+      editingStaffIndex = index;
+      if (addStaffButton instanceof HTMLButtonElement) addStaffButton.textContent = 'Save changes';
+
+      const staffWorkflowEntry = enrollmentWorkflowSteps.find(
+        (entry) => entry?.stepNode?.dataset?.enrollmentWorkflowId === 'staff'
+      );
+      if (staffWorkflowEntry) {
+        setEnrollmentWorkflowExpanded(staffWorkflowEntry, true);
+        requestAnimationFrame(() => {
+          refreshEnrollmentWorkflowHeights();
+        });
+      }
+
+      if (statusNode) statusNode.textContent = `Editing ${resolveStaffDisplayName(staff)}.`;
+      return;
+    }
+
+    const toggleManager = target.closest('[data-enrollment-toggle-house-manager-index]');
+    if (toggleManager instanceof HTMLButtonElement) {
+      const index = Number.parseInt(String(toggleManager.dataset.enrollmentToggleHouseManagerIndex || ''), 10);
+      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
+      const staff = staffMembers[index];
+      const houseId = String(staff.houseId || '');
+      if (!houseId) {
+        if (statusNode) statusNode.textContent = 'Assign the staff member to a house first.';
+        return;
+      }
+
+      const roleStoreKey = 'bhanoyi.houseRoleAssignments';
+      let roleStore = {};
+      try {
+        const raw = localStorage.getItem(roleStoreKey);
+        roleStore = raw ? JSON.parse(raw) : {};
+      } catch {
+        roleStore = {};
+      }
+
+      roleStore[houseId] = roleStore[houseId] || { staffRoles: {}, learnerCaptaincies: {} };
+      const memberKey = `${sectionKey}|staff|${index}`;
+      const currentRoles = Array.isArray(roleStore[houseId].staffRoles[memberKey]) ? roleStore[houseId].staffRoles[memberKey] : [];
+      const isManager = currentRoles.includes('house_manager');
+      if (isManager) {
+        roleStore[houseId].staffRoles[memberKey] = currentRoles.filter((r) => r !== 'house_manager');
+      } else {
+        roleStore[houseId].staffRoles[memberKey] = Array.from(new Set([...currentRoles, 'house_manager']));
+      }
+
+      try {
+        localStorage.setItem(roleStoreKey, JSON.stringify(roleStore));
+        renderStaffMembers();
+        if (statusNode) statusNode.textContent = `${resolveStaffDisplayName(staff)} ${isManager ? 'removed as' : 'set as'} house manager for ${houseId}.`;
+      } catch {
+        if (statusNode) statusNode.textContent = 'Could not update house manager assignment.';
+      }
+      return;
+    }
+
     const removeButton = target.closest('[data-enrollment-remove-staff-index]');
     if (!(removeButton instanceof HTMLButtonElement)) return;
 
@@ -4628,25 +9518,6 @@ const hydrateEnrollmentManager = (managerNode) => {
   staffListNode.addEventListener('change', (event) => {
     if (!isAdminMode) return;
     const target = event.target;
-
-    if (target instanceof HTMLInputElement && target.dataset.enrollmentStaffDisplayOverrideIndex !== undefined) {
-      const index = Number.parseInt(String(target.dataset.enrollmentStaffDisplayOverrideIndex || ''), 10);
-      if (!Number.isFinite(index) || index < 0 || index >= staffMembers.length) return;
-      const current = staffMembers[index];
-      const updated = normalizeStaffMember({
-        ...current,
-        displayNameOverride: target.value
-      });
-      if (!updated) return;
-      staffMembers[index] = updated;
-      syncClassTeachersFromStaffAssignments();
-      saveStore();
-      renderStaffMembers();
-      if (statusNode) {
-        statusNode.textContent = `Display format updated for ${resolveStaffDisplayName(updated)}.`;
-      }
-      return;
-    }
 
     if (target instanceof HTMLSelectElement && target.dataset.enrollmentStaffAssignedClassIndex !== undefined) {
       const index = Number.parseInt(String(target.dataset.enrollmentStaffAssignedClassIndex || ''), 10);
@@ -4693,11 +9564,13 @@ const hydrateEnrollmentManager = (managerNode) => {
     const parsedAssignedClass = parseAssignedClassValue(staffAssignedClassSelect.value);
 
     const normalized = normalizeStaffMember({
+      staffType: staffTypeSelect.value,
       title: staffTitleSelect.value,
       initials: staffInitialsInput.value,
       firstName: staffFirstNameInput.value,
       surname: staffSurnameInput.value,
-      loginEmail: staffEmailInput.value,
+      loginEmail: staffLoginEmailInput.value || staffEmailInput.value,
+      loginPassword: staffLoginPasswordInput.value || undefined,
       staffNumber: staffNumberInput.value,
       gender: staffGenderSelect.value,
       postLevel: staffPostLevelSelect.value,
@@ -4706,7 +9579,6 @@ const hydrateEnrollmentManager = (managerNode) => {
       subject: staffSubjectInput.value,
       email: staffEmailInput.value,
       phone: staffPhoneInput.value,
-      displayNameOverride: staffDisplayOverrideInput.value,
       notes: staffNotesInput.value,
       houseId: selectedStaffHouseId
     });
@@ -4719,7 +9591,8 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const duplicate = staffMembers.some(
-      (entry) =>
+      (entry, index) =>
+        index !== editingStaffIndex &&
         String(entry.surname || '').toLowerCase() === String(normalized.surname || '').toLowerCase() &&
         String(entry.initials || '').toLowerCase() === String(normalized.initials || '').toLowerCase() &&
         String(entry.staffNumber || '').toLowerCase() === String(normalized.staffNumber || '').toLowerCase()
@@ -4731,14 +9604,55 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
-    staffMembers = normalizeStaffMembers([...staffMembers, normalized]);
-    syncClassTeachersFromStaffAssignments();
-    saveStore();
-    syncStaffSession();
-    renderStaffMembers();
-    clearStaffForm();
-    if (statusNode) {
-      statusNode.textContent = `${resolveStaffDisplayName(normalized)} added. Login: ${normalized.loginEmail} | Password: ${normalized.loginPassword}`;
+    const duplicateLoginEmail = staffMembers.some(
+      (entry, index) =>
+        index !== editingStaffIndex &&
+        String(entry.loginEmail || '').trim().toLowerCase() === String(normalized.loginEmail || '').trim().toLowerCase()
+    );
+    if (duplicateLoginEmail) {
+      if (statusNode) {
+        statusNode.textContent = `Login email already in use: ${normalized.loginEmail}. Update the login email or staff number before saving.`;
+      }
+      return;
+    }
+
+    if (!isValidStaffLoginEmail(normalized.loginEmail)) {
+      if (statusNode) {
+        statusNode.textContent = `Login email is invalid: ${normalized.loginEmail}.`;
+      }
+      return;
+    }
+
+    if (!isValidStaffLoginPassword(normalized.loginPassword)) {
+      if (statusNode) {
+        statusNode.textContent = 'Login password must be at least 6 characters.';
+      }
+      return;
+    }
+
+    if (editingStaffIndex >= 0 && Number.isFinite(editingStaffIndex) && editingStaffIndex < staffMembers.length) {
+      staffMembers[editingStaffIndex] = normalized;
+      staffMembers = normalizeStaffMembers(staffMembers);
+      syncClassTeachersFromStaffAssignments();
+      saveStore();
+      syncStaffSession();
+      renderStaffMembers();
+      clearStaffForm();
+      if (addStaffButton instanceof HTMLButtonElement) addStaffButton.textContent = 'Add staff member';
+      editingStaffIndex = -1;
+      if (statusNode) {
+        statusNode.textContent = `${resolveStaffDisplayName(normalized)} updated.`;
+      }
+    } else {
+      staffMembers = normalizeStaffMembers([...staffMembers, normalized]);
+      syncClassTeachersFromStaffAssignments();
+      saveStore();
+      syncStaffSession();
+      renderStaffMembers();
+      clearStaffForm();
+      if (statusNode) {
+        statusNode.textContent = `${resolveStaffDisplayName(normalized)} added. Login: ${normalized.loginEmail} | Password: ${normalized.loginPassword}`;
+      }
     }
   });
 
@@ -4804,6 +9718,9 @@ const hydrateEnrollmentManager = (managerNode) => {
     }
 
     const format = getImportFormat();
+    const originalLabel = importLearnersButton.textContent;
+    importLearnersButton.disabled = true;
+    importLearnersButton.textContent = 'Importing...';
     try {
       const importedLearners =
         format === 'csv' ? await parseLearnersFromCsvFile(file) : await parseLearnersFromExcelFile(file);
@@ -4833,6 +9750,132 @@ const hydrateEnrollmentManager = (managerNode) => {
       if (statusNode) {
         statusNode.textContent = `Could not import the selected ${format.toUpperCase()} file.`;
       }
+    } finally {
+      importLearnersButton.disabled = !isAdminMode;
+      importLearnersButton.textContent = originalLabel;
+    }
+  });
+
+  bulkImportLearnersButton.addEventListener('click', async () => {
+    if (!isAdminMode || !selectedManageGrade || !selectedManageLetter) return;
+
+    const selectedFiles = Array.from(bulkImportFileInput.files || []);
+    if (!selectedFiles.length) {
+      if (statusNode) {
+        statusNode.textContent = 'Choose one or more Excel class files first.';
+      }
+      return;
+    }
+
+    const originalLabel = bulkImportLearnersButton.textContent;
+    bulkImportLearnersButton.disabled = true;
+    bulkImportLearnersButton.textContent = 'Bulk importing...';
+
+    const invalidNameFiles = [];
+    const unconfiguredClassFiles = [];
+    const parseFailedFiles = [];
+    const emptyFiles = [];
+    let duplicateClassTargets = 0;
+    const byClassKey = new Map();
+
+    try {
+      for (const file of selectedFiles) {
+        const target = parseClassKeyFromImportFileName(file?.name || '');
+        if (!target) {
+          invalidNameFiles.push(String(file?.name || 'Unknown file'));
+          continue;
+        }
+
+        if (!classExistsInStore(target.grade, target.letter)) {
+          unconfiguredClassFiles.push(`${target.grade}${target.letter}`);
+          continue;
+        }
+
+        let importedLearners = [];
+        try {
+          importedLearners = await parseLearnersFromExcelFile(file);
+        } catch {
+          parseFailedFiles.push(String(file?.name || `${target.grade}${target.letter}`));
+          continue;
+        }
+
+        if (!importedLearners.length) {
+          emptyFiles.push(`${target.grade}${target.letter}`);
+          continue;
+        }
+
+        const classKey = `${target.grade}|${target.letter}`;
+        if (byClassKey.has(classKey)) {
+          duplicateClassTargets += 1;
+        }
+
+        const normalizedLearners = normalizeLearners(
+          importedLearners.map((learner) => withLearnerDefaultSportingCodes(learner))
+        );
+        byClassKey.set(classKey, {
+          grade: target.grade,
+          letter: target.letter,
+          learners: normalizedLearners
+        });
+      }
+
+      if (!byClassKey.size) {
+        if (statusNode) {
+          statusNode.textContent = 'No valid class files were imported. Use names like 10A, 10 B, 11C.';
+        }
+        return;
+      }
+
+      let updatedClasses = 0;
+      let totalLearners = 0;
+
+      byClassKey.forEach((entry) => {
+        const existingProfile = getClassProfile(entry.grade, entry.letter);
+        const normalizedLearners = normalizeLearners(entry.learners);
+
+        setClassProfile(entry.grade, entry.letter, {
+          teacher: existingProfile.teacher,
+          room: existingProfile.room,
+          capacity: String(normalizedLearners.length),
+          notes: existingProfile.notes,
+          learners: normalizedLearners
+        });
+
+        syncHouseAssignmentsForClass(entry.grade, entry.letter, normalizedLearners);
+
+        if (selectedManageGrade === entry.grade && selectedManageLetter === entry.letter) {
+          manageLearners = [...normalizedLearners];
+          syncCapacityWithLearners();
+          renderManageLearners();
+        }
+
+        updatedClasses += 1;
+        totalLearners += normalizedLearners.length;
+      });
+
+      saveStore();
+      render();
+      bulkImportFileInput.value = '';
+
+      if (statusNode) {
+        const skipNotes = [
+          invalidNameFiles.length ? `${invalidNameFiles.length} invalid filename${invalidNameFiles.length === 1 ? '' : 's'}` : '',
+          unconfiguredClassFiles.length
+            ? `${unconfiguredClassFiles.length} file${unconfiguredClassFiles.length === 1 ? '' : 's'} for unconfigured classes`
+            : '',
+          emptyFiles.length ? `${emptyFiles.length} empty class list${emptyFiles.length === 1 ? '' : 's'}` : '',
+          parseFailedFiles.length ? `${parseFailedFiles.length} unreadable file${parseFailedFiles.length === 1 ? '' : 's'}` : '',
+          duplicateClassTargets ? `${duplicateClassTargets} duplicate class file${duplicateClassTargets === 1 ? '' : 's'} (latest kept)` : ''
+        ].filter(Boolean);
+
+        statusNode.textContent =
+          `Bulk import updated ${updatedClasses} class${updatedClasses === 1 ? '' : 'es'} with ${totalLearners} learner${
+            totalLearners === 1 ? '' : 's'
+          }.` + (skipNotes.length ? ` Skipped: ${skipNotes.join(', ')}.` : '');
+      }
+    } finally {
+      bulkImportLearnersButton.disabled = !isAdminMode;
+      bulkImportLearnersButton.textContent = originalLabel;
     }
   });
 
@@ -4895,9 +9938,10 @@ const hydrateEnrollmentManager = (managerNode) => {
   });
 };
 
-const buildSingleRoundRobin = (teamIds = []) => {
+const buildSingleRoundRobin = (teamIds = [], matchesPerOpponentPerLeg = 1) => {
   const normalized = teamIds.filter(Boolean);
   if (normalized.length < 2) return [];
+  const normalizedMatchesPerLeg = Math.min(6, Math.max(1, Number.parseInt(String(matchesPerOpponentPerLeg || '').trim(), 10) || 1));
 
   const rotation = [...normalized];
   if (rotation.length % 2 !== 0) {
@@ -4939,8 +9983,27 @@ const buildSingleRoundRobin = (teamIds = []) => {
     rotation[0] = fixed;
   }
 
-  const secondLegOffset = rounds;
-  const secondLeg = firstLeg.map((fixture) => ({
+  const firstLegRepeated = [];
+  for (let cycleIndex = 0; cycleIndex < normalizedMatchesPerLeg; cycleIndex += 1) {
+    const roundOffset = cycleIndex * rounds;
+    const invertOrientation = cycleIndex % 2 === 1;
+    firstLeg.forEach((fixture) => {
+      const homeId = invertOrientation ? fixture.awayId : fixture.homeId;
+      const awayId = invertOrientation ? fixture.homeId : fixture.awayId;
+      const nextRound = fixture.round + roundOffset;
+      firstLegRepeated.push({
+        ...fixture,
+        slotKey: `R${nextRound}M${fixture.match}`,
+        round: nextRound,
+        leg: 'First',
+        homeId,
+        awayId
+      });
+    });
+  }
+
+  const secondLegOffset = rounds * normalizedMatchesPerLeg;
+  const secondLeg = firstLegRepeated.map((fixture) => ({
     ...fixture,
     slotKey: `R${fixture.round + secondLegOffset}M${fixture.match}`,
     round: fixture.round + secondLegOffset,
@@ -4949,13 +10012,55 @@ const buildSingleRoundRobin = (teamIds = []) => {
     awayId: fixture.homeId
   }));
 
-  return [...firstLeg, ...secondLeg].sort((left, right) => {
+  return [...firstLegRepeated, ...secondLeg].sort((left, right) => {
     if (left.round === right.round) return left.match - right.match;
     return left.round - right.round;
   });
 };
 
+const buildGenerationTeamOrders = (teamIds = [], maxVariants = 120) => {
+  const normalized = Array.from(new Set((teamIds || []).filter(Boolean)));
+  if (!normalized.length) return [];
+
+  const variants = [];
+  const seen = new Set();
+  const addVariant = (order) => {
+    const normalizedOrder = Array.from(new Set((order || []).filter(Boolean)));
+    if (normalizedOrder.length !== normalized.length) return;
+    const key = normalizedOrder.join('|');
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push(normalizedOrder);
+  };
+
+  addVariant(normalized);
+
+  for (let shift = 1; shift < normalized.length && variants.length < maxVariants; shift += 1) {
+    const rotated = [...normalized.slice(shift), ...normalized.slice(0, shift)];
+    addVariant(rotated);
+    if (variants.length >= maxVariants) break;
+    addVariant([...rotated].reverse());
+  }
+
+  let randomGuard = 0;
+  while (variants.length < maxVariants && randomGuard < maxVariants * 8) {
+    randomGuard += 1;
+    const shuffled = [...normalized];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      const current = shuffled[index];
+      shuffled[index] = shuffled[swapIndex];
+      shuffled[swapIndex] = current;
+    }
+    addVariant(shuffled);
+  }
+
+  return variants;
+};
+
 const hydrateFixtureCreator = (fixtureNode) => {
+  if (!(fixtureNode instanceof HTMLElement)) return;
+
   const rawConfig = (fixtureNode.dataset.fixtureConfig || '').trim();
   if (!rawConfig) return;
 
@@ -4969,8 +10074,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const houseOptions = normalizeMatchTeams(config.houseOptions || []);
   if (houseOptions.length < 2) return;
 
+  if (fixtureNode.dataset.fixtureHydrated === '1') return;
+  fixtureNode.dataset.fixtureHydrated = '1';
+
   const teamPickInputs = Array.from(fixtureNode.querySelectorAll('[data-fixture-team]'));
   const autoFillToggle = fixtureNode.querySelector('[data-fixture-auto-fill]');
+  const forceSharedFixturesToggle = fixtureNode.querySelector('[data-fixture-force-shared]');
   const rulesPanel = fixtureNode.querySelector('[data-fixture-date-rules]');
   const rulesStatusNode = fixtureNode.querySelector('[data-fixture-rules-status]');
   const ruleStartDateInput = fixtureNode.querySelector('[data-fixture-rule-start-date]');
@@ -4986,6 +10095,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const rulesSaveButton = fixtureNode.querySelector('[data-fixture-rules-save]');
   const rulesPreviewNode = fixtureNode.querySelector('[data-fixture-rules-preview-output]');
   const sportSelect = fixtureNode.querySelector('[data-fixture-sport]');
+  const fairnessOpenButton = fixtureNode.querySelector('[data-fixture-open-fairness-modal]');
+  const fairnessSummaryNode = fixtureNode.querySelector('[data-fixture-fairness-summary]');
+  const fairnessRulesSelect = fixtureNode.querySelector('[data-fixture-fairness-rules]');
+  const fairnessModal = fixtureNode.querySelector('[data-fixture-fairness-modal]');
+  const fairnessOptionsNode = fixtureNode.querySelector('[data-fixture-fairness-options]');
+  const fairnessRuleCheckboxes = Array.from(fixtureNode.querySelectorAll('[data-fixture-fairness-check]'));
+  const fairnessCloseButtons = Array.from(fixtureNode.querySelectorAll('[data-fixture-close-fairness-modal]'));
+  const fairnessApplyButton = fixtureNode.querySelector('[data-fixture-apply-fairness-rules]');
   const metaNode = fixtureNode.querySelector('[data-fixture-meta]');
   const soccerPanel = fixtureNode.querySelector('[data-fixture-sport-panel="soccer"]');
   const netballPanel = fixtureNode.querySelector('[data-fixture-sport-panel="netball"]');
@@ -4996,6 +10113,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const netballQuarterMinutesInput = fixtureNode.querySelector('[data-fixture-netball-quarter-minutes]');
   const netballBreakMinutesInput = fixtureNode.querySelector('[data-fixture-netball-break-minutes]');
   const netballHalfTimeMinutesInput = fixtureNode.querySelector('[data-fixture-netball-half-time-minutes]');
+  const meetingsPerLegInput = fixtureNode.querySelector('[data-fixture-meetings-per-leg]');
   const statusNode = fixtureNode.querySelector('[data-fixture-status]');
   const bodyNode = fixtureNode.querySelector('[data-fixture-body]');
   const generateButton = fixtureNode.querySelector('[data-fixture-generate]');
@@ -5005,10 +10123,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const approvalStatusNode = fixtureNode.querySelector('[data-fixture-approval-status]');
   const approveResolvedButton = fixtureNode.querySelector('[data-fixture-approve-resolved]');
   const approveAnywayButton = fixtureNode.querySelector('[data-fixture-approve-anyway]');
+  const saveDraftButton = fixtureNode.querySelector('[data-fixture-save-draft]');
+  const fixtureTemplateSelect = fixtureNode.querySelector('[data-fixture-template-select]');
 
   if (!bodyNode || !generateButton || !exportButton) return;
 
   const workflowSteps = initSportsWorkflowSteps(fixtureNode);
+  const normalizeText = (value, maxLength = 300) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, maxLength);
 
   let lastFixtures = [];
   let lastSportKey = '';
@@ -5029,25 +10150,69 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const fixtureSectionKey = String(config.sectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fairnessModalPortalKey = `fixture-fairness-modal:${fixtureSectionKey}`;
   const fixtureDateStorageKey = `bhanoyi.fixtureDates.${fixtureSectionKey}`;
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
   const fixtureRulesStorageKey = `bhanoyi.fixtureDateRules.${fixtureSectionKey}`;
   const fixtureCreatorStateStorageKey = `bhanoyi.fixtureCreatorState.${fixtureSectionKey}`;
+  const fixtureHistoryStorageKey = `bhanoyi.fixtureHistory.${fixtureSectionKey}`;
   const defaultRulesBucket = 'default';
+  const defaultFairnessRuleIds = [
+    'equal_matches_season',
+    'equal_matches_leg',
+    'balanced_home_away',
+    'equal_round_participation',
+    'unique_opponent_per_leg',
+    'no_double_round_booking',
+    'fifa_no_self_match'
+  ];
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
   let fixtureDates = {};
   let fixtureCreatorState = {
     lastSport: '',
     sports: {}
   };
+  let fixtureTemplateHistory = [];
+  let selectedFixtureTemplateId = '';
+
+  window.addEventListener('bhanoyi:remote-persist-status', (event) => {
+    const key = String(event?.detail?.storageKey || '').trim();
+    if (
+      key !== fixtureCatalogStorageKey &&
+      key !== fixtureDateStorageKey &&
+      key !== fixtureRulesStorageKey &&
+      key !== fixtureCreatorStateStorageKey &&
+      key !== fixtureHistoryStorageKey
+    ) {
+      return;
+    }
+
+    const savedRemote = event?.detail?.savedRemote === true;
+    if (statusNode instanceof HTMLElement) {
+      statusNode.textContent = savedRemote
+        ? 'Saved remotely.'
+        : 'Saved on this device only. Remote sync unavailable right now.';
+    }
+  });
+
+  portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
 
   if (rulesPanel instanceof HTMLElement) {
     rulesPanel.classList.toggle('is-hidden', !isAdminMode);
   }
+  if (fairnessRulesSelect instanceof HTMLSelectElement) {
+    fairnessRulesSelect.disabled = !isAdminMode;
+  }
+  if (fairnessOpenButton instanceof HTMLButtonElement) {
+    fairnessOpenButton.disabled = false;
+  }
   if (autoFillToggle instanceof HTMLInputElement) {
     autoFillToggle.disabled = !isAdminMode;
     autoFillToggle.checked = false;
+  }
+  if (forceSharedFixturesToggle instanceof HTMLInputElement) {
+    forceSharedFixturesToggle.checked = false;
   }
 
   const loadFixtureDates = () => {
@@ -5084,9 +10249,172 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const saveFixtureCreatorState = () => {
     try {
       localStorage.setItem(fixtureCreatorStateStorageKey, JSON.stringify(fixtureCreatorState));
+      void persistLocalStore(fixtureCreatorStateStorageKey, fixtureCreatorState);
     } catch {
       return;
     }
+  };
+
+  const getSavedSelectedTemplateIdForSport = (sportKey) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return '';
+    const savedSportState = fixtureCreatorState.sports?.[key];
+    if (!savedSportState || typeof savedSportState !== 'object') return '';
+    return String(savedSportState.selectedTemplateId || '').trim();
+  };
+
+  const setSavedSelectedTemplateIdForSport = (sportKey, templateId) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return;
+
+    const nextTemplateId = String(templateId || '').trim();
+    const currentSportState = fixtureCreatorState.sports?.[key];
+    fixtureCreatorState.sports[key] = {
+      ...(currentSportState && typeof currentSportState === 'object' ? currentSportState : {}),
+      selectedTemplateId: nextTemplateId
+    };
+    if (!fixtureCreatorState.lastSport) {
+      fixtureCreatorState.lastSport = key;
+    }
+    saveFixtureCreatorState();
+  };
+
+  const loadFixtureTemplateHistory = () => {
+    try {
+      const raw = localStorage.getItem(fixtureHistoryStorageKey);
+      if (!raw) {
+        fixtureTemplateHistory = [];
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        fixtureTemplateHistory = [];
+        return;
+      }
+
+      fixtureTemplateHistory = parsed
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+          id: String(entry.id || '').trim(),
+          sportKey: String(entry.sportKey || '').trim(),
+          createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+          fixtures: Array.isArray(entry.fixtures) ? entry.fixtures : [],
+          fixtureDates:
+            entry.fixtureDates && typeof entry.fixtureDates === 'object' && !Array.isArray(entry.fixtureDates)
+              ? entry.fixtureDates
+              : {}
+        }))
+        .filter((entry) => entry.id && (entry.sportKey === 'soccer' || entry.sportKey === 'netball'))
+        .sort((left, right) => right.createdAt - left.createdAt);
+    } catch {
+      fixtureTemplateHistory = [];
+    }
+  };
+
+  const saveFixtureTemplateHistory = () => {
+    const payload = fixtureTemplateHistory.slice(0, 60);
+    localStorage.setItem(fixtureHistoryStorageKey, JSON.stringify(payload));
+    void persistLocalStore(fixtureHistoryStorageKey, payload);
+  };
+
+  const normalizeFixtureStoredSportKey = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'soccer' || raw === 'football') return 'soccer';
+    if (raw === 'netball') return 'netball';
+    return '';
+  };
+
+  const fixtureTemplateSignature = (fixtures) =>
+    (Array.isArray(fixtures) ? fixtures : [])
+      .map((entry) => {
+        const round = parsePositiveInt(entry?.round, 1);
+        const leg = String(entry?.leg || '').trim();
+        const match = parsePositiveInt(entry?.match, 1);
+        const homeId = String(entry?.homeId || '').trim();
+        const awayId = String(entry?.awayId || '').trim();
+        return `${round}:${leg}:${match}:${homeId}:${awayId}`;
+      })
+      .join('|');
+
+  const renderFixtureTemplateOptions = () => {
+    if (!(fixtureTemplateSelect instanceof HTMLSelectElement)) return;
+    const activeSport = selectedSportKey();
+    const savedTemplateId = getSavedSelectedTemplateIdForSport(activeSport);
+    if (savedTemplateId && savedTemplateId !== selectedFixtureTemplateId) {
+      selectedFixtureTemplateId = savedTemplateId;
+    }
+    const options = fixtureTemplateHistory
+      .filter((entry) => !activeSport || entry.sportKey === activeSport)
+      .map((entry) => {
+        const dateLabel = new Date(entry.createdAt).toLocaleString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        const sportLabel = entry.sportKey === 'netball' ? 'Netball' : 'Soccer';
+        const fixtureCount = Array.isArray(entry.fixtures) ? entry.fixtures.length : 0;
+        return `<option value="${escapeHtmlAttribute(entry.id)}">${escapeHtmlText(`${sportLabel} • ${dateLabel} • ${fixtureCount} fixtures`)}</option>`;
+      });
+
+    fixtureTemplateSelect.innerHTML = [
+      '<option value="">No template selected</option>',
+      ...options
+    ].join('');
+
+    const hasSelectedTemplateOption = Array.from(fixtureTemplateSelect.options).some(
+      (option) => String(option.value || '').trim() === selectedFixtureTemplateId
+    );
+
+    if (selectedFixtureTemplateId && hasSelectedTemplateOption) {
+      fixtureTemplateSelect.value = selectedFixtureTemplateId;
+    } else {
+      selectedFixtureTemplateId = '';
+      fixtureTemplateSelect.value = '';
+      if (activeSport) {
+        setSavedSelectedTemplateIdForSport(activeSport, '');
+      }
+    }
+  };
+
+  const addFixtureHistorySnapshot = (sportKey, fixtures) => {
+    const normalizedSport = String(sportKey || '').trim();
+    if ((normalizedSport !== 'soccer' && normalizedSport !== 'netball') || !Array.isArray(fixtures) || !fixtures.length) {
+      return '';
+    }
+
+    const sanitized = sanitizeStoredFixturesForSport(normalizedSport, fixtures);
+    if (!sanitized.length) return '';
+
+    const nextSignature = fixtureTemplateSignature(sanitized);
+    const nextFixtureDates = getFixtureDateSnapshot(sanitized);
+    const latestSameSport = fixtureTemplateHistory.find((entry) => entry.sportKey === normalizedSport);
+    if (latestSameSport && fixtureTemplateSignature(latestSameSport.fixtures) === nextSignature) {
+      latestSameSport.createdAt = Date.now();
+      latestSameSport.fixtures = sanitized;
+      latestSameSport.fixtureDates = nextFixtureDates;
+      fixtureTemplateHistory = [
+        latestSameSport,
+        ...fixtureTemplateHistory.filter((entry) => entry !== latestSameSport)
+      ].slice(0, 60);
+      saveFixtureTemplateHistory();
+      renderFixtureTemplateOptions();
+      return latestSameSport.id;
+    }
+
+    const nextEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sportKey: normalizedSport,
+      createdAt: Date.now(),
+      fixtures: sanitized,
+      fixtureDates: nextFixtureDates
+    };
+    fixtureTemplateHistory.unshift(nextEntry);
+    fixtureTemplateHistory = fixtureTemplateHistory.slice(0, 60);
+    saveFixtureTemplateHistory();
+    renderFixtureTemplateOptions();
+    return nextEntry.id;
   };
 
   const dispatchFixtureSyncEvent = () => {
@@ -5101,11 +10429,76 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   const persistFixtureDatesToStorage = () => {
     localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDates));
+    void persistLocalStore(fixtureDateStorageKey, fixtureDates);
     dispatchFixtureSyncEvent();
   };
 
   const getFixtureId = (fixture) =>
     `${fixtureSectionKey}:${fixture.sportKey}:${fixture.slotKey || `R${fixture.round}M${fixture.match}`}`;
+
+  const getFixtureDateSnapshot = (fixtures, sourceMap = fixtureDates) => {
+    const ids = new Set((Array.isArray(fixtures) ? fixtures : []).map((fixture) => getFixtureId(fixture)).filter(Boolean));
+    const source = sourceMap && typeof sourceMap === 'object' ? sourceMap : {};
+
+    return Object.fromEntries(
+      Object.entries(source)
+        .filter(([fixtureId, value]) => ids.has(fixtureId) && Boolean(normalizeFixtureStamp(value)))
+        .map(([fixtureId, value]) => [fixtureId, normalizeFixtureStamp(value)])
+    );
+  };
+
+  const replaceFixtureDatesForSport = (sportKey, fixtures, nextSnapshot = {}, { persist = true } = {}) => {
+    const activeSportKey = normalizeFixtureStoredSportKey(sportKey || fixtures?.[0]?.sportKey || selectedSportKey());
+    const keptEntries = Object.entries(fixtureDates).filter(([fixtureId]) => {
+      if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return true;
+      const fixtureSportKey = normalizeFixtureStoredSportKey(String(fixtureId).split(':')[1] || '');
+      return !activeSportKey || fixtureSportKey !== activeSportKey;
+    });
+
+    const scopedSnapshot = getFixtureDateSnapshot(fixtures, nextSnapshot);
+    fixtureDates = Object.fromEntries([...keptEntries, ...Object.entries(scopedSnapshot)]);
+
+    if (persist) {
+      persistFixtureDatesToStorage();
+    }
+
+    return scopedSnapshot;
+  };
+
+  const replaceActiveSportFixtureDates = (fixtures, nextSnapshot = {}, { persist = true } = {}) =>
+    replaceFixtureDatesForSport('', fixtures, nextSnapshot, { persist });
+
+  const mapFixtureDateSnapshotBySlot = (sourceFixtures, targetFixtures, sourceSnapshot = {}) => {
+    const sourceDateBySlot = {};
+    (Array.isArray(sourceFixtures) ? sourceFixtures : []).forEach((fixture) => {
+      const slotKey = fixtureSlotKey(fixture);
+      const fixtureId = getFixtureId(fixture);
+      const stamp = normalizeFixtureStamp(sourceSnapshot[fixtureId]);
+      if (!slotKey || !stamp) return;
+      sourceDateBySlot[slotKey] = stamp;
+    });
+
+    const targetSnapshot = {};
+    (Array.isArray(targetFixtures) ? targetFixtures : []).forEach((fixture) => {
+      const slotKey = fixtureSlotKey(fixture);
+      if (!slotKey || !sourceDateBySlot[slotKey]) return;
+      targetSnapshot[getFixtureId(fixture)] = sourceDateBySlot[slotKey];
+    });
+
+    return targetSnapshot;
+  };
+
+  const autoFillFixtureDatesSilently = (fixtures) => {
+    const result = buildAutoFillDateMap(fixtures);
+    if (!result.ok) return false;
+
+    fixtureDates = {
+      ...fixtureDates,
+      ...result.dateMap
+    };
+    persistFixtureDatesToStorage();
+    return true;
+  };
 
   const fixtureSignature = (fixtures) => fixtures.map((fixture) => getFixtureId(fixture)).join('|');
 
@@ -5156,6 +10549,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return parsed;
   };
 
+  const parseMatchesPerOpponentPerLeg = (value, fallback = 1) => {
+    const normalizedFallback = fallback == null ? 1 : fallback;
+    const parsed = parsePositiveInt(value, normalizedFallback);
+    return Math.min(6, Math.max(1, parsed));
+  };
+
+  const configuredMatchesPerOpponentPerLeg = () =>
+    parseMatchesPerOpponentPerLeg(
+      meetingsPerLegInput instanceof HTMLInputElement ? meetingsPerLegInput.value : '',
+      1
+    );
+
   const activeRulesBucket = () => {
     const sportValue = String(sportSelect instanceof HTMLSelectElement ? sportSelect.value : '').trim();
     return sportValue === 'soccer' || sportValue === 'netball' ? sportValue : defaultRulesBucket;
@@ -5175,6 +10580,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const saveRulesBundle = (bundle) => {
     const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
     localStorage.setItem(fixtureRulesStorageKey, JSON.stringify(safeBundle));
+    void persistLocalStore(fixtureRulesStorageKey, safeBundle);
   };
 
   const buildDateRulesPayload = (rules) => ({
@@ -5776,20 +11182,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ...result.dateMap
     };
 
-    const isDraftOnly = isAdminMode && pendingFixtureApproval;
-    if (!isDraftOnly) {
-      persistFixtureDatesToStorage();
-    }
+    persistFixtureDatesToStorage();
 
     if (statusNode) {
-      statusNode.textContent = isDraftOnly
-        ? `Draft fixtures updated: ${fixtures.length} dates auto-filled (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync calendar.`
-        : `Fixtures generated and ${fixtures.length} dates auto-filled using rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      statusNode.textContent = `Fixtures updated live: ${fixtures.length} dates auto-filled (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = isDraftOnly
-        ? `Auto-fill completed in draft mode (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync.`
-        : `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      rulesStatusNode.textContent = `Auto-fill completed with current date rules (${result.matchesPerDay} ${result.matchesPerDay === 1 ? 'match' : 'matches'} per day). Calendar events refreshed.`;
     }
     renderAutoFillPreview(fixtures, result.dateMap, result.matchesPerDay);
     workflowSteps?.expandStep('review-fixtures');
@@ -5817,20 +11216,13 @@ const hydrateFixtureCreator = (fixtureNode) => {
       ...lastPreviewDateMap
     };
 
-    const isDraftOnly = isAdminMode && pendingFixtureApproval;
-    if (!isDraftOnly) {
-      persistFixtureDatesToStorage();
-    }
+    persistFixtureDatesToStorage();
 
     if (statusNode) {
-      statusNode.textContent = isDraftOnly
-        ? `Draft dates applied to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync calendar.`
-        : `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      statusNode.textContent = `Applied previewed dates to ${lastFixtures.length} fixtures (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
     }
     if (rulesStatusNode) {
-      rulesStatusNode.textContent = isDraftOnly
-        ? `Previewed dates applied in draft mode (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Finalize to sync.`
-        : `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day).`;
+      rulesStatusNode.textContent = `Previewed dates applied (${lastPreviewMatchesPerDay} ${lastPreviewMatchesPerDay === 1 ? 'match' : 'matches'} per day). Calendar events refreshed.`;
     }
     renderFixtures(lastFixtures);
     workflowSteps?.expandStep('review-fixtures');
@@ -5841,6 +11233,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       label: 'Soccer',
       readSetup: () => {
         const halves = 2;
+        const matchesPerOpponentPerLeg = configuredMatchesPerOpponentPerLeg();
         const minutesPerHalf = parsePositiveInt(
           soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
           40
@@ -5851,9 +11244,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
         );
         return {
           halves,
+          matchesPerOpponentPerLeg,
           minutesPerHalf,
           breakMinutes,
-          formatLabel: `${halves} x ${minutesPerHalf} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`})`
+          formatLabel: `${halves} x ${minutesPerHalf} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}) · ${matchesPerOpponentPerLeg}x per opponent per leg`
         };
       }
     },
@@ -5861,6 +11255,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       label: 'Netball',
       readSetup: () => {
         const quarters = 4;
+        const matchesPerOpponentPerLeg = configuredMatchesPerOpponentPerLeg();
         const minutesPerQuarter = parsePositiveInt(
           netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
           15
@@ -5875,10 +11270,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
         );
         return {
           quarters,
+          matchesPerOpponentPerLeg,
           minutesPerQuarter,
           breakMinutes,
           halfTimeMinutes,
-          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time' : `half-time ${halfTimeMinutes} min`})`
+          formatLabel: `${quarters} x ${minutesPerQuarter} min (${breakMinutes === 0 ? 'no break' : `break ${breakMinutes} min`}, ${halfTimeMinutes === 0 ? 'no half-time' : `half-time ${halfTimeMinutes} min`}) · ${matchesPerOpponentPerLeg}x per opponent per leg`
         };
       }
     }
@@ -5887,6 +11283,234 @@ const hydrateFixtureCreator = (fixtureNode) => {
   const selectedSportKey = () => {
     const value = sportSelect instanceof HTMLSelectElement ? sportSelect.value : '';
     return value === 'soccer' || value === 'netball' ? value : '';
+  };
+
+  const selectedFairnessRuleIds = () => {
+    if (!(fairnessRulesSelect instanceof HTMLSelectElement)) {
+      return [...defaultFairnessRuleIds];
+    }
+
+    const selected = Array.from(fairnessRulesSelect.selectedOptions)
+      .map((option) => String(option.value || '').trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(selected));
+  };
+
+  const fairnessRuleLabelById = (ruleId) => {
+    if (!(fairnessRulesSelect instanceof HTMLSelectElement)) return String(ruleId || '').trim();
+    const match = Array.from(fairnessRulesSelect.options).find(
+      (option) => String(option.value || '').trim() === String(ruleId || '').trim()
+    );
+    return match ? normalizeText(match.textContent || match.label || match.value, 160) : String(ruleId || '').trim();
+  };
+
+  const fairnessModalSubtitleNode = fairnessModal instanceof HTMLElement
+    ? fairnessModal.querySelector('[data-fixture-fairness-subtitle]')
+    : null;
+
+  const selectedTeamIdsForFairnessChecks = () => {
+    const selected = Array.from(new Set(selectedTeamIds()));
+    if (selected.length) return selected;
+    return Array.from(new Set((lastFixtures || []).flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean)));
+  };
+
+  const evaluateFairnessRuleCompatibility = (ruleIds = []) => {
+    const normalizedRuleIds = Array.from(
+      new Set(
+        (Array.isArray(ruleIds) ? ruleIds : [])
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    const teamIds = selectedTeamIdsForFairnessChecks();
+    if (teamIds.length < 2) {
+      return {
+        ok: true,
+        reason: 'Select at least two teams to evaluate rule compatibility.'
+      };
+    }
+
+    const profile = selectedSportProfile();
+    if (!profile) {
+      return {
+        ok: true,
+        reason: 'Choose a sport to evaluate fairness rule compatibility.'
+      };
+    }
+
+    const setup = profile.readSetup();
+    const matchesPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1);
+    const formatLabel = String(setup?.formatLabel || '').trim();
+    const generationOrders = buildGenerationTeamOrders(teamIds, 40);
+    const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teamIds);
+    let lastFailureReason = '';
+
+    const hasFeasibleCandidate = generationOrders.some((teamOrder) => {
+      const candidateFixtures = buildSingleRoundRobin(teamOrder, matchesPerOpponentPerLeg).map((fixture) => ({
+        ...fixture,
+        sportKey: profile.key,
+        sportLabel: profile.label,
+        formatLabel
+      }));
+
+      const pinnedIndexes = [];
+      const constrainedFixtures = candidateFixtures.map((fixture, index) => {
+        const slotKey = fixtureSlotKey(fixture);
+        const pinned = pinnedBySlot[slotKey];
+        if (!pinned) return fixture;
+        pinnedIndexes.push(index);
+        return {
+          ...fixture,
+          homeId: pinned.homeId,
+          awayId: pinned.awayId
+        };
+      });
+
+      const repairResult = repairRoundRobinFixtureSet({
+        fixtures: constrainedFixtures,
+        teamIds: teamOrder,
+        lockedIndexes: pinnedIndexes,
+        matchesPerOpponentPerLeg
+      });
+      if (!repairResult.ok) {
+        lastFailureReason = repairResult.message;
+        return false;
+      }
+
+      const fairnessResult = enforceSelectedFairnessRules({
+        fixtures: repairResult.fixtures,
+        teamIds: teamOrder,
+        selectedRuleIds: normalizedRuleIds,
+        lockedIndexes: pinnedIndexes
+      });
+      if (!fairnessResult.ok) {
+        lastFailureReason = fairnessResult.message;
+        return false;
+      }
+
+      return true;
+    });
+
+    return {
+      ok: hasFeasibleCandidate,
+      reason: normalizeText(
+        hasFeasibleCandidate
+          ? ''
+          : (lastFailureReason || 'This rule conflicts with current pinned/manual constraints for all tested team orders.'),
+        220
+      )
+    };
+  };
+
+  const selectedFairnessRuleIdsFromModal = () =>
+    fairnessRuleCheckboxes
+      .filter((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+
+  const refreshFairnessRuleCompatibilityUi = () => {
+    if (!fairnessRuleCheckboxes.length) return;
+
+    const modalSelectedRuleIds = selectedFairnessRuleIdsFromModal();
+    const selectedSet = new Set(modalSelectedRuleIds);
+    const selectedCompatibility = evaluateFairnessRuleCompatibility(modalSelectedRuleIds);
+
+    fairnessRuleCheckboxes.forEach((checkbox) => {
+      if (!(checkbox instanceof HTMLInputElement)) return;
+      const ruleId = String(checkbox.value || '').trim();
+      const optionNode = checkbox.closest('.fixture-fairness-option');
+      if (!(optionNode instanceof HTMLElement)) return;
+
+      const clearIncompatibility = () => {
+        checkbox.disabled = false;
+        optionNode.classList.remove('is-disabled');
+        optionNode.removeAttribute('title');
+      };
+
+      if (!ruleId || selectedSet.has(ruleId)) {
+        clearIncompatibility();
+        return;
+      }
+
+      const candidateRuleIds = [...selectedSet, ruleId];
+      const compatibility = evaluateFairnessRuleCompatibility(candidateRuleIds);
+      if (compatibility.ok) {
+        clearIncompatibility();
+        return;
+      }
+
+      const reason = compatibility.reason || 'This rule conflicts with current selected rules and pinned/manual constraints.';
+      checkbox.disabled = true;
+      optionNode.classList.add('is-disabled');
+      optionNode.setAttribute('title', reason);
+    });
+
+    if (!(fairnessModalSubtitleNode instanceof HTMLElement)) return;
+    if (!modalSelectedRuleIds.length) {
+      fairnessModalSubtitleNode.textContent =
+        'No rules selected. Fixtures can be generated without fairness checks.';
+      return;
+    }
+
+    fairnessModalSubtitleNode.textContent = selectedCompatibility.ok
+      ? `Selected ${modalSelectedRuleIds.length} rule${modalSelectedRuleIds.length === 1 ? '' : 's'}. Incompatible options are disabled automatically.`
+      : `Current selected rules conflict with existing constraints: ${selectedCompatibility.reason || 'Unable to satisfy all selected fairness rules.'}`;
+  };
+
+  const refreshFairnessSummary = () => {
+    if (!(fairnessSummaryNode instanceof HTMLElement)) return;
+    const labels = selectedFairnessRuleIds()
+      .map((ruleId) => fairnessRuleLabelById(ruleId))
+      .map((label) => normalizeText(label, 160))
+      .filter(Boolean);
+
+    if (!labels.length) {
+      fairnessSummaryNode.textContent = 'No fairness rules selected.';
+      return;
+    }
+
+    fairnessSummaryNode.textContent = `Selected fairness rules (${labels.length}): ${labels.join(', ')}`;
+  };
+
+  const syncFairnessCheckboxesFromState = () => {
+    if (!fairnessRuleCheckboxes.length) return;
+    const selected = new Set(selectedFairnessRuleIds());
+    fairnessRuleCheckboxes.forEach((checkbox) => {
+      if (!(checkbox instanceof HTMLInputElement)) return;
+      const ruleId = String(checkbox.value || '').trim();
+      checkbox.checked = ruleId ? selected.has(ruleId) : false;
+    });
+    refreshFairnessRuleCompatibilityUi();
+  };
+
+  const renderFairnessDropdownOptions = () => {
+    if (!(fairnessOptionsNode instanceof HTMLElement) || !(fairnessRulesSelect instanceof HTMLSelectElement)) return;
+    const ruleItems = Array.from(fairnessRulesSelect.options)
+      .map((option, index) => {
+        const optionLabel = normalizeText(option.textContent || option.label || option.value, 200);
+        return `<li class="fixture-fairness-list-item">${escapeHtmlText(optionLabel || `Rule ${index + 1}`)}</li>`;
+      })
+      .join('');
+
+    fairnessOptionsNode.innerHTML = `<ul class="fixture-fairness-list">${ruleItems}</ul>`;
+  };
+
+  const setSelectedFairnessRuleIds = (ruleIds = []) => {
+    if (!(fairnessRulesSelect instanceof HTMLSelectElement)) return;
+    const requested = new Set(
+      (Array.isArray(ruleIds) ? ruleIds : [])
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean)
+    );
+
+    Array.from(fairnessRulesSelect.options).forEach((option) => {
+      option.selected = requested.has(String(option.value || '').trim());
+    });
+
+    refreshFairnessSummary();
+    syncFairnessCheckboxesFromState();
   };
 
   const setSelectedTeamIds = (teamIds) => {
@@ -5898,8 +11522,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const readSportSetupValues = (sportKey) => {
+    const matchesPerOpponentPerLeg = configuredMatchesPerOpponentPerLeg();
     if (sportKey === 'soccer') {
       return {
+        matchesPerOpponentPerLeg,
         halfMinutes: parsePositiveInt(
           soccerHalfMinutesInput instanceof HTMLInputElement ? soccerHalfMinutesInput.value : '',
           40
@@ -5913,6 +11539,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     if (sportKey === 'netball') {
       return {
+        matchesPerOpponentPerLeg,
         quarterMinutes: parsePositiveInt(
           netballQuarterMinutesInput instanceof HTMLInputElement ? netballQuarterMinutesInput.value : '',
           15
@@ -5932,6 +11559,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const applySportSetupValues = (sportKey, setup = {}) => {
+    if (meetingsPerLegInput instanceof HTMLInputElement) {
+      meetingsPerLegInput.value = String(parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1));
+    }
+
     if (sportKey === 'soccer') {
       if (soccerHalfMinutesInput instanceof HTMLInputElement) {
         soccerHalfMinutesInput.value = String(parsePositiveInt(setup.halfMinutes, 40));
@@ -5999,11 +11630,27 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const saveFixtureCatalog = (fixtures) => {
+    const normalizeStoredSportKey = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      if (raw === 'soccer' || raw === 'football') return 'soccer';
+      if (raw === 'netball') return 'netball';
+      return '';
+    };
+
+    const resolveCatalogEntrySportKey = (fixtureId, entry) => {
+      const parts = String(fixtureId || '').split(':');
+      return normalizeStoredSportKey(parts[1]) || normalizeStoredSportKey(entry?.sportKey || entry?.sport || '');
+    };
+
+    const activeSportKey = normalizeStoredSportKey(fixtures[0]?.sportKey || selectedSportKey());
     const catalog = {};
     fixtures.forEach((fixture) => {
       const fixtureId = getFixtureId(fixture);
       const sportProfile = sportProfiles[fixture.sportKey] || null;
       const setup = sportProfile?.readSetup?.() || {};
+      const sportLabel = sportProfile?.label || '';
+      const homeName = teamNameById(fixture.homeId);
+      const awayName = teamNameById(fixture.awayId);
       catalog[fixtureId] = {
         id: fixtureId,
         round: fixture.round,
@@ -6011,10 +11658,16 @@ const hydrateFixtureCreator = (fixtureNode) => {
         match: fixture.match,
         homeId: fixture.homeId,
         awayId: fixture.awayId,
-        homeName: teamNameById(fixture.homeId),
-        awayName: teamNameById(fixture.awayId),
-        title: `${teamNameById(fixture.homeId)} vs ${teamNameById(fixture.awayId)}`,
-        sport: sportProfile?.label || '',
+        homeName,
+        awayName,
+        title: formatFixtureCalendarTitle({
+          homeName,
+          awayName,
+          sportKey: fixture.sportKey,
+          sportLabel
+        }),
+        sportKey: fixture.sportKey,
+        sport: sportLabel,
         competition: String(config.competition || '').trim(),
         venue: String(config.venue || '').trim(),
         format: String(setup.formatLabel || '').trim(),
@@ -6023,7 +11676,28 @@ const hydrateFixtureCreator = (fixtureNode) => {
     });
 
     try {
-      localStorage.setItem(fixtureCatalogStorageKey, JSON.stringify(catalog));
+      const rawCatalog = localStorage.getItem(fixtureCatalogStorageKey);
+      const parsedCatalog = rawCatalog ? JSON.parse(rawCatalog) : {};
+      const existingCatalog = parsedCatalog && typeof parsedCatalog === 'object' ? parsedCatalog : {};
+      const nextCatalog = {};
+
+      Object.entries(existingCatalog).forEach(([fixtureId, entry]) => {
+        if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) {
+          nextCatalog[fixtureId] = entry;
+          return;
+        }
+
+        if (activeSportKey && resolveCatalogEntrySportKey(fixtureId, entry) === activeSportKey) {
+          return;
+        }
+
+        nextCatalog[fixtureId] = entry;
+      });
+
+      Object.assign(nextCatalog, catalog);
+
+      localStorage.setItem(fixtureCatalogStorageKey, JSON.stringify(nextCatalog));
+      void persistLocalStore(fixtureCatalogStorageKey, nextCatalog);
 
       const rawDates = localStorage.getItem(fixtureDateStorageKey);
       const parsedDates = rawDates ? JSON.parse(rawDates) : {};
@@ -6033,6 +11707,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       Object.keys(fixtureDatesMap).forEach((fixtureId) => {
         if (!fixtureId.startsWith(`${fixtureSectionKey}:`)) return;
+        if (activeSportKey && resolveCatalogEntrySportKey(fixtureId, existingCatalog[fixtureId]) !== activeSportKey) {
+          return;
+        }
         if (!catalogIds.has(fixtureId)) {
           delete fixtureDatesMap[fixtureId];
           datesChanged = true;
@@ -6041,6 +11718,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
       if (datesChanged) {
         localStorage.setItem(fixtureDateStorageKey, JSON.stringify(fixtureDatesMap));
+        void persistLocalStore(fixtureDateStorageKey, fixtureDatesMap);
       }
     } catch {
       return;
@@ -6102,7 +11780,342 @@ const hydrateFixtureCreator = (fixtureNode) => {
     return { homeId: String(homeId || '').trim(), awayId: String(awayId || '').trim() };
   };
 
-  const validateNoDuplicatePairingsPerLeg = (fixtures, teamIds) => {
+  const selectedFairnessRuleSet = () => new Set(selectedFairnessRuleIds());
+
+  const buildFairnessReport = (fixtures, teamIds, selectedRuleIds = []) => {
+    const normalizedFixtures = Array.isArray(fixtures) ? fixtures : [];
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    const selectedRules = new Set((Array.isArray(selectedRuleIds) ? selectedRuleIds : []).filter(Boolean));
+    const fixtureReasons = {};
+    const teamIssues = [];
+
+    const appendFixtureReason = (fixtureId, reason) => {
+      const normalizedFixtureId = String(fixtureId || '').trim();
+      const normalizedReason = String(reason || '').trim();
+      if (!normalizedFixtureId || !normalizedReason) return;
+      const existing = Array.isArray(fixtureReasons[normalizedFixtureId]) ? fixtureReasons[normalizedFixtureId] : [];
+      if (!existing.includes(normalizedReason)) {
+        existing.push(normalizedReason);
+      }
+      fixtureReasons[normalizedFixtureId] = existing;
+    };
+
+    const appendTeamIssue = (reason) => {
+      const normalizedReason = String(reason || '').trim();
+      if (!normalizedReason) return;
+      if (!teamIssues.includes(normalizedReason)) {
+        teamIssues.push(normalizedReason);
+      }
+    };
+
+    const appendReasonForTeamInFixtures = (scopeFixtures, teamId, reason) => {
+      (scopeFixtures || []).forEach((fixture) => {
+        if (fixture.homeId !== teamId && fixture.awayId !== teamId) return;
+        appendFixtureReason(getFixtureId(fixture), reason);
+      });
+    };
+
+    const legLabels = Array.from(new Set(normalizedFixtures.map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+
+    if (selectedRules.has('fifa_no_self_match')) {
+      normalizedFixtures.forEach((fixture) => {
+        if (String(fixture.homeId || '').trim() !== String(fixture.awayId || '').trim()) return;
+        const reason = `Invalid fixture: ${teamNameById(fixture.homeId)} is scheduled to play itself.`;
+        appendTeamIssue(reason);
+        appendFixtureReason(getFixtureId(fixture), reason);
+      });
+    }
+
+    if (selectedRules.has('unique_opponent_per_leg')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const pairMap = {};
+        legFixtures.forEach((fixture) => {
+          const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
+          if (!pairKey) return;
+          pairMap[pairKey] = Array.isArray(pairMap[pairKey]) ? pairMap[pairKey] : [];
+          pairMap[pairKey].push(fixture);
+        });
+
+        Object.entries(pairMap).forEach(([pairKey, list]) => {
+          if (!Array.isArray(list) || list.length <= 1) return;
+          const { teamA, teamB } = splitUnorderedPairKey(pairKey);
+          const reason = `Duplicate pairing in ${legLabel} leg: ${teamNameById(teamA)} vs ${teamNameById(teamB)} appears ${list.length} times.`;
+          appendTeamIssue(reason);
+          list.forEach((fixture) => appendFixtureReason(getFixtureId(fixture), reason));
+        });
+      });
+    }
+
+    if (selectedRules.has('equal_matches_leg')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const countByTeam = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+        legFixtures.forEach((fixture) => {
+          if (fixture.homeId in countByTeam) countByTeam[fixture.homeId] += 1;
+          if (fixture.awayId in countByTeam) countByTeam[fixture.awayId] += 1;
+        });
+
+        const values = Object.values(countByTeam);
+        if (!values.length) return;
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        if (min === max) return;
+
+        normalizedTeams.forEach((teamId) => {
+          if ((countByTeam[teamId] || 0) === min && (countByTeam[teamId] || 0) === max) return;
+          const reason = `${teamNameById(teamId)} has ${countByTeam[teamId]} match(es) in ${legLabel} leg, expected ${min}-${max} equality.`;
+          appendTeamIssue(reason);
+          appendReasonForTeamInFixtures(legFixtures, teamId, reason);
+        });
+      });
+    }
+
+    if (selectedRules.has('equal_matches_season')) {
+      const countByTeam = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      normalizedFixtures.forEach((fixture) => {
+        if (fixture.homeId in countByTeam) countByTeam[fixture.homeId] += 1;
+        if (fixture.awayId in countByTeam) countByTeam[fixture.awayId] += 1;
+      });
+
+      const values = Object.values(countByTeam);
+      if (values.length) {
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        if (min !== max) {
+          normalizedTeams.forEach((teamId) => {
+            const reason = `${teamNameById(teamId)} has ${countByTeam[teamId]} match(es) this season, expected equal totals.`;
+            appendTeamIssue(reason);
+            appendReasonForTeamInFixtures(normalizedFixtures, teamId, reason);
+          });
+        }
+      }
+    }
+
+    if (selectedRules.has('no_double_round_booking') || selectedRules.has('equal_round_participation')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const roundLabels = Array.from(new Set(legFixtures.map((entry) => Number(entry.round)).filter(Number.isFinite)));
+        const participationByTeam = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+
+        roundLabels.forEach((roundValue) => {
+          const roundFixtures = legFixtures.filter((entry) => Number(entry.round) === Number(roundValue));
+          const appearances = {};
+          roundFixtures.forEach((fixture) => {
+            appearances[fixture.homeId] = (appearances[fixture.homeId] || 0) + 1;
+            appearances[fixture.awayId] = (appearances[fixture.awayId] || 0) + 1;
+          });
+
+          Object.entries(appearances).forEach(([teamId, count]) => {
+            if (teamId in participationByTeam) {
+              participationByTeam[teamId] = (participationByTeam[teamId] || 0) + (count > 0 ? 1 : 0);
+            }
+
+            if (selectedRules.has('no_double_round_booking') && count > 1) {
+              const reason = `${teamNameById(teamId)} is scheduled ${count} times in round ${roundValue} (${legLabel} leg).`;
+              appendTeamIssue(reason);
+              roundFixtures
+                .filter((fixture) => fixture.homeId === teamId || fixture.awayId === teamId)
+                .forEach((fixture) => appendFixtureReason(getFixtureId(fixture), reason));
+            }
+          });
+        });
+
+        if (selectedRules.has('equal_round_participation')) {
+          const values = Object.values(participationByTeam);
+          if (values.length) {
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            if (max - min > 1) {
+              normalizedTeams.forEach((teamId) => {
+                const reason = `${teamNameById(teamId)} has uneven round participation in ${legLabel} leg (${participationByTeam[teamId]} rounds).`;
+                appendTeamIssue(reason);
+                appendReasonForTeamInFixtures(legFixtures, teamId, reason);
+              });
+            }
+          }
+        }
+      });
+    }
+
+    if (selectedRules.has('balanced_home_away')) {
+      legLabels.forEach((legLabel) => {
+        const legFixtures = normalizedFixtures.filter((entry) => String(entry.leg || '').trim() === legLabel);
+        const homeCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+        const awayCount = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+        legFixtures.forEach((fixture) => {
+          if (fixture.homeId in homeCount) homeCount[fixture.homeId] += 1;
+          if (fixture.awayId in awayCount) awayCount[fixture.awayId] += 1;
+        });
+
+        normalizedTeams.forEach((teamId) => {
+          const delta = Math.abs((homeCount[teamId] || 0) - (awayCount[teamId] || 0));
+          if (delta <= 1) return;
+          const reason = `${teamNameById(teamId)} has unbalanced home/away in ${legLabel} leg (${homeCount[teamId]} home vs ${awayCount[teamId]} away).`;
+          appendTeamIssue(reason);
+          appendReasonForTeamInFixtures(legFixtures, teamId, reason);
+        });
+      });
+
+      const seasonHome = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      const seasonAway = Object.fromEntries(normalizedTeams.map((teamId) => [teamId, 0]));
+      normalizedFixtures.forEach((fixture) => {
+        if (fixture.homeId in seasonHome) seasonHome[fixture.homeId] += 1;
+        if (fixture.awayId in seasonAway) seasonAway[fixture.awayId] += 1;
+      });
+      normalizedTeams.forEach((teamId) => {
+        const delta = Math.abs((seasonHome[teamId] || 0) - (seasonAway[teamId] || 0));
+        if (delta === 0) return;
+        const reason = `${teamNameById(teamId)} has unbalanced home/away over the full season (${seasonHome[teamId]} home vs ${seasonAway[teamId]} away).`;
+        appendTeamIssue(reason);
+        appendReasonForTeamInFixtures(normalizedFixtures, teamId, reason);
+      });
+    }
+
+    const flattenedReasons = Object.fromEntries(
+      Object.entries(fixtureReasons).map(([fixtureId, reasons]) => [fixtureId, Array.from(new Set(reasons)).join(' ')])
+    );
+
+    return {
+      hasUnfairness: Object.keys(flattenedReasons).length > 0,
+      fixtureReasons: flattenedReasons,
+      teamIssues,
+      affectedFixtureCount: Object.keys(flattenedReasons).length
+    };
+  };
+
+  const rebalanceHomeAwayForScope = ({ fixtures, teamIds, lockedIndexSet, scopeIndexes, tolerance }) => {
+    const allIndexes = Array.isArray(scopeIndexes) ? [...scopeIndexes] : [];
+    const teamList = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (!teamList.length || !allIndexes.length) return false;
+
+    let changed = false;
+    let guard = 0;
+
+    const countHomeAway = () => {
+      const home = Object.fromEntries(teamList.map((teamId) => [teamId, 0]));
+      const away = Object.fromEntries(teamList.map((teamId) => [teamId, 0]));
+      allIndexes.forEach((index) => {
+        const fixture = fixtures[index];
+        if (!fixture) return;
+        if (fixture.homeId in home) home[fixture.homeId] += 1;
+        if (fixture.awayId in away) away[fixture.awayId] += 1;
+      });
+      return { home, away };
+    };
+
+    while (guard < 2000) {
+      guard += 1;
+      const { home, away } = countHomeAway();
+      const deltas = Object.fromEntries(teamList.map((teamId) => [teamId, (home[teamId] || 0) - (away[teamId] || 0)]));
+      const over = teamList.filter((teamId) => deltas[teamId] > tolerance);
+      const under = teamList.filter((teamId) => deltas[teamId] < -tolerance);
+      if (!over.length || !under.length) break;
+
+      let swapIndex = -1;
+      for (const index of allIndexes) {
+        if (lockedIndexSet.has(index)) continue;
+        const fixture = fixtures[index];
+        if (!fixture) continue;
+        if (deltas[fixture.homeId] > tolerance && deltas[fixture.awayId] < -tolerance) {
+          swapIndex = index;
+          break;
+        }
+      }
+
+      if (swapIndex < 0) break;
+      const target = fixtures[swapIndex];
+      fixtures[swapIndex] = {
+        ...target,
+        homeId: target.awayId,
+        awayId: target.homeId
+      };
+      changed = true;
+    }
+
+    return changed;
+  };
+
+  const enforceSelectedFairnessRules = ({ fixtures, teamIds, selectedRuleIds = [], lockedIndexes = [] }) => {
+    const normalizedFixtures = (fixtures || []).map((entry) => ({ ...entry }));
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    const selectedRules = new Set((Array.isArray(selectedRuleIds) ? selectedRuleIds : []).filter(Boolean));
+    const lockedIndexSet = new Set(
+      (Array.isArray(lockedIndexes) ? lockedIndexes : [])
+        .filter((index) => Number.isInteger(index) && index >= 0 && index < normalizedFixtures.length)
+    );
+
+    if (selectedRules.has('balanced_home_away') && normalizedTeams.length) {
+      const legLabels = Array.from(new Set(normalizedFixtures.map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+      legLabels.forEach((legLabel) => {
+        const scopeIndexes = normalizedFixtures
+          .map((entry, index) => ({ entry, index }))
+          .filter(({ entry }) => String(entry.leg || '').trim() === legLabel)
+          .map(({ index }) => index);
+        rebalanceHomeAwayForScope({
+          fixtures: normalizedFixtures,
+          teamIds: normalizedTeams,
+          lockedIndexSet,
+          scopeIndexes,
+          tolerance: 1
+        });
+      });
+
+      rebalanceHomeAwayForScope({
+        fixtures: normalizedFixtures,
+        teamIds: normalizedTeams,
+        lockedIndexSet,
+        scopeIndexes: normalizedFixtures.map((_, index) => index),
+        tolerance: 0
+      });
+    }
+
+    const report = buildFairnessReport(normalizedFixtures, normalizedTeams, Array.from(selectedRules));
+    if (report.hasUnfairness) {
+      return {
+        ok: false,
+        message:
+          report.teamIssues[0] ||
+          'Selected fairness rules cannot be satisfied with the current pinned/manual constraints.',
+        report
+      };
+    }
+
+    return {
+      ok: true,
+      fixtures: normalizedFixtures,
+      report
+    };
+  };
+
+  const inferMatchesPerOpponentPerLegFromFixtures = (fixtures, teamIds) => {
+    const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    if (normalizedTeams.length < 2) return 1;
+
+    const allUnorderedPairs = [];
+    normalizedTeams.forEach((homeId, leftIndex) => {
+      normalizedTeams.slice(leftIndex + 1).forEach((awayId) => {
+        const pairKey = unorderedPairKey(homeId, awayId);
+        if (pairKey) allUnorderedPairs.push(pairKey);
+      });
+    });
+    if (!allUnorderedPairs.length) return 1;
+
+    const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
+    if (!legLabels.length) return 1;
+
+    const legCounts = legLabels
+      .map((legLabel) => (fixtures || []).filter((entry) => String(entry.leg || '').trim() === legLabel).length)
+      .filter((count) => Number.isFinite(count) && count > 0);
+    if (!legCounts.length) return 1;
+
+    const inferred = legCounts[0] / allUnorderedPairs.length;
+    if (!Number.isInteger(inferred) || inferred <= 0) return 1;
+    const consistent = legCounts.every((count) => count === allUnorderedPairs.length * inferred);
+    return consistent ? inferred : 1;
+  };
+
+  const validateNoDuplicatePairingsPerLeg = (fixtures, teamIds, expectedMeetingsPerOpponentPerLeg = null) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
       return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
@@ -6116,7 +12129,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
       });
     });
 
-    const expectedMatchesPerLeg = allUnorderedPairs.length;
+    const meetingsPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(
+      expectedMeetingsPerOpponentPerLeg,
+      inferMatchesPerOpponentPerLegFromFixtures(fixtures, normalizedTeams)
+    );
+    const expectedMatchesPerLeg = allUnorderedPairs.length * meetingsPerOpponentPerLeg;
     const legLabels = Array.from(new Set((fixtures || []).map((entry) => String(entry.leg || '').trim()).filter(Boolean)));
     if (!legLabels.length) {
       return { ok: false, message: 'Fixture legs are missing; unable to validate leg pairing rules.' };
@@ -6131,7 +12148,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      const seenPairs = new Set();
+      const pairCounts = Object.fromEntries(allUnorderedPairs.map((pairKey) => [pairKey, 0]));
       for (const fixture of legFixtures) {
         if (!normalizedTeams.includes(fixture.homeId) || !normalizedTeams.includes(fixture.awayId)) {
           return { ok: false, message: 'Fixture teams must come from the selected team list.' };
@@ -6142,14 +12159,22 @@ const hydrateFixtureCreator = (fixtureNode) => {
           return { ok: false, message: 'Home and away teams must be different.' };
         }
 
-        if (seenPairs.has(pairKey)) {
+        if (!(pairKey in pairCounts)) {
           return {
             ok: false,
-            message: `${teamNameById(fixture.homeId)} and ${teamNameById(fixture.awayId)} appear more than once in ${legLabel} leg.`
+            message: `${teamNameById(fixture.homeId)} and ${teamNameById(fixture.awayId)} are not a valid pairing for ${legLabel} leg.`
           };
         }
+        pairCounts[pairKey] += 1;
+      }
 
-        seenPairs.add(pairKey);
+      const invalidPair = Object.entries(pairCounts).find(([, count]) => count !== meetingsPerOpponentPerLeg);
+      if (invalidPair) {
+        const { teamA, teamB } = splitUnorderedPairKey(invalidPair[0]);
+        return {
+          ok: false,
+          message: `${teamNameById(teamA)} and ${teamNameById(teamB)} appear ${invalidPair[1]} time(s) in ${legLabel} leg; expected ${meetingsPerOpponentPerLeg}.`
+        };
       }
     }
 
@@ -6273,7 +12298,11 @@ const hydrateFixtureCreator = (fixtureNode) => {
   };
 
   const refreshCurrentUnfairnessReport = (fixtures) => {
-    currentUnfairnessReport = buildHomeAwayUnfairnessReport(fixtures, fairnessTeamIdsForFixtures(fixtures));
+    currentUnfairnessReport = buildFairnessReport(
+      fixtures,
+      fairnessTeamIdsForFixtures(fixtures),
+      selectedFairnessRuleIds()
+    );
   };
 
   const refreshFixtureApprovalUi = () => {
@@ -6284,36 +12313,75 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!shouldShow) return;
 
     if (currentUnfairnessReport.hasUnfairness) {
-      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) are highlighted with fairness concerns. Hover rows for details, then use a Finalize & sync button to push to calendar.`;
+      approvalStatusNode.textContent = `${currentUnfairnessReport.affectedFixtureCount} fixture(s) violate selected fairness rules. Resolve highlighted rows while the live calendar and standings stay in sync.`;
     } else {
-      approvalStatusNode.textContent = 'Draft is ready. Use Finalize & sync to publish fixtures to the calendar.';
+      approvalStatusNode.textContent = 'Live fixture draft is synced. Use the confirmation step only to validate fairness after review.';
     }
 
     if (approveResolvedButton instanceof HTMLButtonElement) {
       approveResolvedButton.disabled = currentUnfairnessReport.hasUnfairness;
     }
     if (approveAnywayButton instanceof HTMLButtonElement) {
-      approveAnywayButton.disabled = false;
+      approveAnywayButton.disabled = currentUnfairnessReport.hasUnfairness;
     }
+  };
+
+  const persistSportState = ({
+    sportKey,
+    fixtures,
+    selectedTeamIds: selectedIdsInput = [],
+    fairnessRuleIds = selectedFairnessRuleIds(),
+    pinnedSlotKeys = [],
+    formatLabel = '',
+    generatedAt = Date.now()
+  } = {}) => {
+    const key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') return;
+
+    const normalizedFixtures = Array.isArray(fixtures) ? fixtures.map((entry) => ({ ...entry })) : [];
+    const selectedIds = Array.isArray(selectedIdsInput)
+      ? selectedIdsInput.map((entry) => String(entry || '').trim()).filter(Boolean)
+      : [];
+    const fallbackIds = Array.from(
+      new Set(
+        normalizedFixtures
+          .flatMap((entry) => [String(entry.homeId || '').trim(), String(entry.awayId || '').trim()])
+          .filter(Boolean)
+      )
+    );
+    const persistedTeamIds = selectedIds.length ? selectedIds : fallbackIds;
+
+    fixtureCreatorState.lastSport = key;
+    fixtureCreatorState.sports[key] = {
+      selectedTeamIds: persistedTeamIds,
+      fairnessRuleIds: Array.isArray(fairnessRuleIds) ? fairnessRuleIds : [],
+      fixtures: normalizedFixtures,
+      fixtureDates: getFixtureDateSnapshot(normalizedFixtures),
+      pinnedSlotKeys: normalizePinnedSlotKeys(pinnedSlotKeys),
+      setup: readSportSetupValues(key),
+      formatLabel: String(formatLabel || '').trim(),
+      generatedAt: Number.isFinite(Number(generatedAt)) ? Number(generatedAt) : Date.now()
+    };
+    saveFixtureCreatorState();
   };
 
   const persistActiveSportState = () => {
     const activeSport = selectedSportKey();
     if (!activeSport) return;
-
-    fixtureCreatorState.lastSport = activeSport;
-    fixtureCreatorState.sports[activeSport] = {
+    persistSportState({
+      sportKey: activeSport,
+      fixtures: lastFixtures,
       selectedTeamIds: selectedTeamIds(),
-      fixtures: lastFixtures.map((entry) => ({ ...entry })),
+      fairnessRuleIds: selectedFairnessRuleIds(),
       pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
-      setup: readSportSetupValues(activeSport),
-      formatLabel: String(lastFormatLabel || '').trim()
-    };
-    saveFixtureCreatorState();
+      formatLabel: lastFormatLabel,
+      generatedAt: Date.now()
+    });
   };
 
-  const repairRoundRobinFixtureSet = ({ fixtures, teamIds, lockedIndexes = [] }) => {
+  const repairRoundRobinFixtureSet = ({ fixtures, teamIds, lockedIndexes = [], matchesPerOpponentPerLeg = 1 }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
+    const normalizedMatchesPerLeg = parseMatchesPerOpponentPerLeg(matchesPerOpponentPerLeg, 1);
     if (normalizedTeams.length < 2) {
       return { ok: false, message: 'At least two selected teams are required for round-robin fixtures.' };
     }
@@ -6331,7 +12399,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
       return { ok: false, message: 'Fixture legs are missing; cannot preserve leg rules.' };
     }
 
-    const expectedMatchesPerLeg = allUnorderedPairs.length;
+    const expectedMatchesPerLeg = allUnorderedPairs.length * normalizedMatchesPerLeg;
     if ((fixtures || []).length !== expectedMatchesPerLeg * legs.length) {
       return {
         ok: false,
@@ -6366,39 +12434,37 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      const availablePairs = new Set(allUnorderedPairs);
+      const availablePairCounts = Object.fromEntries(allUnorderedPairs.map((pairKey) => [pairKey, normalizedMatchesPerLeg]));
       const unresolvedIndexes = [];
-      const lockedPairKeys = new Set();
 
       for (const index of legIndexes) {
         if (!lockedIndexSet.has(index)) continue;
         const fixture = repairedFixtures[index];
         const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
-        if (!pairKey || !availablePairs.has(pairKey) || lockedPairKeys.has(pairKey)) {
+        if (!pairKey || !(pairKey in availablePairCounts) || availablePairCounts[pairKey] <= 0) {
           return { ok: false, message: 'Pinned fixtures conflict with each other in the same leg. Unpin or adjust one of them.' };
         }
-        availablePairs.delete(pairKey);
-        lockedPairKeys.add(pairKey);
+        availablePairCounts[pairKey] -= 1;
       }
 
       for (const index of legIndexes) {
         if (lockedIndexSet.has(index)) continue;
         const fixture = repairedFixtures[index];
         const pairKey = unorderedPairKey(fixture.homeId, fixture.awayId);
-        if (pairKey && availablePairs.has(pairKey)) {
-          availablePairs.delete(pairKey);
+        if (pairKey && pairKey in availablePairCounts && availablePairCounts[pairKey] > 0) {
+          availablePairCounts[pairKey] -= 1;
           continue;
         }
         unresolvedIndexes.push(index);
       }
 
       for (const index of unresolvedIndexes) {
-        const nextPairKey = availablePairs.values().next().value || '';
+        const nextPairKey = Object.entries(availablePairCounts).find(([, remaining]) => remaining > 0)?.[0] || '';
         if (!nextPairKey) {
           return { ok: false, message: 'Could not auto-adjust fixtures to a valid round-robin schedule.' };
         }
 
-        availablePairs.delete(nextPairKey);
+        availablePairCounts[nextPairKey] -= 1;
         const { teamA, teamB } = splitUnorderedPairKey(nextPairKey);
         const current = repairedFixtures[index];
         let nextPair = { homeId: teamA, awayId: teamB };
@@ -6416,12 +12482,12 @@ const hydrateFixtureCreator = (fixtureNode) => {
         };
       }
 
-      if (availablePairs.size) {
+      if (Object.values(availablePairCounts).some((remaining) => remaining > 0)) {
         return { ok: false, message: 'Round-robin auto-adjustment left unmatched fixture pairs.' };
       }
     }
 
-    const legValidation = validateNoDuplicatePairingsPerLeg(repairedFixtures, normalizedTeams);
+    const legValidation = validateNoDuplicatePairingsPerLeg(repairedFixtures, normalizedTeams, normalizedMatchesPerLeg);
     if (!legValidation.ok) {
       return legValidation;
     }
@@ -6448,7 +12514,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
     editedIndex,
     nextHomeId,
     nextAwayId,
-    lockedIndexes = []
+    lockedIndexes = [],
+    selectedRuleIds = [],
+    matchesPerOpponentPerLeg = 1
   }) => {
     const normalizedTeams = Array.from(new Set((teamIds || []).filter(Boolean)));
     if (normalizedTeams.length < 2) {
@@ -6496,7 +12564,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const repairResult = repairRoundRobinFixtureSet({
       fixtures: repairedFixtures,
       teamIds: normalizedTeams,
-      lockedIndexes: effectiveLockedIndexes
+      lockedIndexes: effectiveLockedIndexes,
+      matchesPerOpponentPerLeg
     });
     if (!repairResult.ok) {
       return repairResult;
@@ -6504,11 +12573,24 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
     const changedIndexes = repairResult.changedIndexes || [];
 
+    const fairnessResult = enforceSelectedFairnessRules({
+      fixtures: repairResult.fixtures,
+      teamIds: normalizedTeams,
+      selectedRuleIds,
+      lockedIndexes: effectiveLockedIndexes
+    });
+    if (!fairnessResult.ok) {
+      return {
+        ok: false,
+        message: fairnessResult.message
+      };
+    }
+
     const affectedOtherCount = changedIndexes.filter((index) => index !== editedIndex).length;
 
     return {
       ok: true,
-      fixtures: repairResult.fixtures,
+      fixtures: fairnessResult.fixtures,
       affectedOtherCount,
       changedCount: changedIndexes.length
     };
@@ -6686,8 +12768,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (statusNode) {
       if (isAdminMode && pendingFixtureApproval) {
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Draft only (not synced): ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows and finalize when ready.`
-          : 'Draft only (not synced): fairness checks passed. Click "Finalize & sync" to publish fixtures to calendar.';
+          ? `Live draft synced: ${currentUnfairnessReport.affectedFixtureCount} fixture(s) have fairness concerns. Hover highlighted rows and review them.`
+          : 'Live draft synced: fairness checks passed and calendar/log views are up to date.';
       } else if (isAdminMode && approvedWithUnfairness && currentUnfairnessReport.hasUnfairness) {
         statusNode.textContent = `Fixtures approved with fairness warnings (${currentUnfairnessReport.affectedFixtureCount} highlighted fixture${currentUnfairnessReport.affectedFixtureCount === 1 ? '' : 's'}).`;
       } else {
@@ -6698,7 +12780,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     refreshFixtureApprovalUi();
   };
 
-  const generateFixtures = ({ autoFillDates = false } = {}) => {
+  const generateFixtures = ({ autoFillDates = false, forceSharedAcrossSports = false } = {}) => {
     refreshSportPanelState();
     const profile = selectedSportProfile();
     if (!profile) {
@@ -6716,87 +12798,268 @@ const hydrateFixtureCreator = (fixtureNode) => {
     lastSportKey = profile.key;
     lastSportLabel = profile.label;
     lastFormatLabel = String(setup.formatLabel || '').trim();
+    const shouldForceShared = Boolean(forceSharedAcrossSports);
+    const mirroredSportKey = profile.key === 'soccer' ? 'netball' : 'soccer';
+    const matchesPerOpponentPerLeg = parseMatchesPerOpponentPerLeg(setup.matchesPerOpponentPerLeg, 1);
 
     const pinnedBySlot = buildPinnedFixturesBySlot(lastFixtures, pinnedFixtureSlotKeys, teams);
-    const nextFixtures = buildSingleRoundRobin(teams).map((fixture) => ({
-      ...fixture,
-      sportKey: profile.key,
-      sportLabel: profile.label,
-      formatLabel: lastFormatLabel
-    }));
+    const selectedRules = selectedFairnessRuleIds();
+    const generationOrders = buildGenerationTeamOrders(teams, 120);
+    const selectedTemplateEntry = fixtureTemplateHistory.find((entry) => entry.id === selectedFixtureTemplateId) || null;
 
-    const pinnedIndexes = [];
-    const constrainedFixtures = nextFixtures.map((fixture, index) => {
-      const slotKey = fixtureSlotKey(fixture);
-      const pinned = pinnedBySlot[slotKey];
-      if (!pinned) return fixture;
-      pinnedIndexes.push(index);
-      return {
+    let templateCandidate = null;
+    if (selectedTemplateEntry && selectedTemplateEntry.sportKey === profile.key) {
+      const templateFixtures = sanitizeStoredFixturesForSport(profile.key, selectedTemplateEntry.fixtures || []).map((fixture) => ({
         ...fixture,
-        homeId: pinned.homeId,
-        awayId: pinned.awayId
+        sportKey: profile.key,
+        sportLabel: profile.label,
+        formatLabel: lastFormatLabel
+      }));
+      const templateMeetingsPerLeg = inferMatchesPerOpponentPerLegFromFixtures(templateFixtures, teams);
+      const templateTeamIds = Array.from(
+        new Set(templateFixtures.flatMap((fixture) => [fixture.homeId, fixture.awayId]).filter(Boolean))
+      ).sort();
+      const selectedTeamSet = Array.from(new Set(teams)).sort();
+      if (
+        templateFixtures.length &&
+        templateMeetingsPerLeg === matchesPerOpponentPerLeg &&
+        templateTeamIds.length === selectedTeamSet.length &&
+        templateTeamIds.every((teamId, index) => teamId === selectedTeamSet[index])
+      ) {
+        templateCandidate = {
+          fixtures: templateFixtures,
+          teamOrder: teams
+        };
+      }
+    }
+
+    let successfulGeneration = null;
+    let generationFailureReason = 'Unable to generate fixtures that satisfy selected fairness rules.';
+
+    const generationCandidates = templateCandidate
+      ? [{ teamOrder: templateCandidate.teamOrder, fixtures: templateCandidate.fixtures }, ...generationOrders.map((teamOrder) => ({ teamOrder }))]
+      : generationOrders.map((teamOrder) => ({ teamOrder }));
+
+    generationCandidates.some((candidate) => {
+      const teamOrder = Array.isArray(candidate.teamOrder) ? candidate.teamOrder : teams;
+      const nextFixtures = Array.isArray(candidate.fixtures)
+        ? candidate.fixtures.map((fixture) => ({ ...fixture }))
+        : buildSingleRoundRobin(teamOrder, matchesPerOpponentPerLeg).map((fixture) => ({
+            ...fixture,
+            sportKey: profile.key,
+            sportLabel: profile.label,
+            formatLabel: lastFormatLabel
+          }));
+
+      const pinnedIndexes = [];
+      const constrainedFixtures = nextFixtures.map((fixture, index) => {
+        const slotKey = fixtureSlotKey(fixture);
+        const pinned = pinnedBySlot[slotKey];
+        if (!pinned) return fixture;
+        pinnedIndexes.push(index);
+        return {
+          ...fixture,
+          homeId: pinned.homeId,
+          awayId: pinned.awayId
+        };
+      });
+
+      const pinRepairResult = repairRoundRobinFixtureSet({
+        fixtures: constrainedFixtures,
+        teamIds: teamOrder,
+        lockedIndexes: pinnedIndexes,
+        matchesPerOpponentPerLeg
+      });
+
+      if (!pinRepairResult.ok) {
+        generationFailureReason = `Pinned fixture constraints conflict with round-robin fairness. ${pinRepairResult.message}`;
+        return false;
+      }
+
+      const fairnessEnforcement = enforceSelectedFairnessRules({
+        fixtures: pinRepairResult.fixtures,
+        teamIds: teamOrder,
+        selectedRuleIds: selectedRules,
+        lockedIndexes: pinnedIndexes
+      });
+
+      if (!fairnessEnforcement.ok) {
+        generationFailureReason = `Selected fairness rules could not be satisfied with current pinned/manual constraints. ${fairnessEnforcement.message}`;
+        return false;
+      }
+
+      const generationValidation = validateNoDuplicatePairingsPerLeg(
+        fairnessEnforcement.fixtures,
+        teamOrder,
+        matchesPerOpponentPerLeg
+      );
+      if (!generationValidation.ok) {
+        generationFailureReason = generationValidation.message;
+        return false;
+      }
+
+      successfulGeneration = {
+        fixtures: fairnessEnforcement.fixtures,
+        pinnedIndexes
       };
+      return true;
     });
 
-    const pinRepairResult = repairRoundRobinFixtureSet({
-      fixtures: constrainedFixtures,
-      teamIds: teams,
-      lockedIndexes: pinnedIndexes
-    });
-
-    if (!pinRepairResult.ok) {
+    if (!successfulGeneration) {
       lastFixtures = [];
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = `Pinned fixture constraints conflict with round-robin fairness. ${pinRepairResult.message}`;
+        statusNode.textContent = generationFailureReason;
       }
       return;
     }
 
-    lastFixtures = pinRepairResult.fixtures;
+    const buildFixturesForSport = (sportKey, sourceFixtures) => {
+      const sportProfile = sportProfiles[sportKey] || null;
+      const sportSetup = sportProfile?.readSetup?.() || {};
+      const targetLabel = sportProfile?.label || (sportKey === 'netball' ? 'Netball' : 'Soccer');
+      const targetFormatLabel = String(sportSetup.formatLabel || '').trim();
+      return (Array.isArray(sourceFixtures) ? sourceFixtures : []).map((fixture) => ({
+        ...fixture,
+        sportKey,
+        sportLabel: targetLabel,
+        formatLabel: targetFormatLabel
+      }));
+    };
+
+    const generatedFixturesBySport = {
+      [profile.key]: buildFixturesForSport(profile.key, successfulGeneration.fixtures)
+    };
+
+    if (shouldForceShared) {
+      generatedFixturesBySport[mirroredSportKey] = buildFixturesForSport(
+        mirroredSportKey,
+        successfulGeneration.fixtures
+      );
+    }
+
+    lastFixtures = generatedFixturesBySport[profile.key] || [];
     pinnedFixtureSlotKeys = new Set(
-      pinnedIndexes
+      successfulGeneration.pinnedIndexes
         .map((index) => fixtureSlotKey(lastFixtures[index]))
         .filter(Boolean)
     );
-
-    const generationValidation = validateNoDuplicatePairingsPerLeg(lastFixtures, teams);
-    if (!generationValidation.ok) {
-      lastFixtures = [];
-      renderFixtures(lastFixtures);
-      if (statusNode) statusNode.textContent = generationValidation.message;
-      return;
-    }
 
     refreshCurrentUnfairnessReport(lastFixtures);
     if (isAdminMode) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
-      loadFixtureDates();
-      if (autoFillDates) {
-        autoFillFixtureDates(lastFixtures);
+      saveFixtureCatalog(lastFixtures);
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        saveFixtureCatalog(generatedFixturesBySport[mirroredSportKey]);
       }
-      persistActiveSportState();
+      replaceActiveSportFixtureDates(lastFixtures, {}, { persist: false });
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        replaceFixtureDatesForSport(mirroredSportKey, generatedFixturesBySport[mirroredSportKey], {}, { persist: false });
+      }
+      const appliedDates = autoFillDates ? autoFillFixtureDates(lastFixtures) : autoFillFixtureDatesSilently(lastFixtures);
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        const primaryDateSnapshot = getFixtureDateSnapshot(lastFixtures);
+        const mirroredDateSnapshot = mapFixtureDateSnapshotBySlot(
+          lastFixtures,
+          generatedFixturesBySport[mirroredSportKey],
+          primaryDateSnapshot
+        );
+        replaceFixtureDatesForSport(
+          mirroredSportKey,
+          generatedFixturesBySport[mirroredSportKey],
+          mirroredDateSnapshot,
+          { persist: false }
+        );
+      }
+      if (!appliedDates) {
+        persistFixtureDatesToStorage();
+      } else if (shouldForceShared) {
+        persistFixtureDatesToStorage();
+      }
+      loadFixtureDates();
+      persistSportState({
+        sportKey: profile.key,
+        fixtures: lastFixtures,
+        selectedTeamIds: teams,
+        fairnessRuleIds: selectedRules,
+        pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+        formatLabel: lastFormatLabel,
+        generatedAt: Date.now()
+      });
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        const mirroredFormatLabel = String(generatedFixturesBySport[mirroredSportKey][0]?.formatLabel || '').trim();
+        persistSportState({
+          sportKey: mirroredSportKey,
+          fixtures: generatedFixturesBySport[mirroredSportKey],
+          selectedTeamIds: teams,
+          fairnessRuleIds: selectedRules,
+          pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+          formatLabel: mirroredFormatLabel,
+          generatedAt: Date.now()
+        });
+      }
+      addFixtureHistorySnapshot(profile.key, lastFixtures);
+      if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+        addFixtureHistorySnapshot(mirroredSportKey, generatedFixturesBySport[mirroredSportKey]);
+      }
       renderFixtures(lastFixtures);
       if (statusNode) {
+        const sharedPrefix = shouldForceShared
+          ? 'Soccer and Netball fixtures generated together with matching pairings.'
+          : 'Fixtures generated and synced live.';
         statusNode.textContent = currentUnfairnessReport.hasUnfairness
-          ? `Draft generated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-          : 'Draft generated. Review/edit fixtures, then click Finalize & sync to publish to calendar.';
+          ? `${sharedPrefix} Fairness concerns remain in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+          : appliedDates
+            ? `${sharedPrefix} Calendar, log views, and standings are up to date.`
+            : `${sharedPrefix} Calendar events will appear after dates are assigned.`;
       }
-      showSmartToast('Draft fixtures generated. Calendar sync happens only on Finalize & sync.', { tone: 'info' });
+      showSmartToast(
+        shouldForceShared
+          ? 'Generated matching Soccer and Netball fixtures in one pass.'
+          : 'Fixtures generated and synced live.',
+        { tone: 'success' }
+      );
       return;
     }
 
     pendingFixtureApproval = false;
     approvedWithUnfairness = false;
     saveFixtureCatalog(lastFixtures);
+    if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+      saveFixtureCatalog(generatedFixturesBySport[mirroredSportKey]);
+    }
+    addFixtureHistorySnapshot(profile.key, lastFixtures);
+    if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+      addFixtureHistorySnapshot(mirroredSportKey, generatedFixturesBySport[mirroredSportKey]);
+    }
     loadFixtureDates();
     if (autoFillDates && isAdminMode) {
       autoFillFixtureDates(lastFixtures);
       loadFixtureDates();
     }
 
-    persistActiveSportState();
+    persistSportState({
+      sportKey: profile.key,
+      fixtures: lastFixtures,
+      selectedTeamIds: teams,
+      fairnessRuleIds: selectedRules,
+      pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+      formatLabel: lastFormatLabel,
+      generatedAt: Date.now()
+    });
+    if (shouldForceShared && Array.isArray(generatedFixturesBySport[mirroredSportKey])) {
+      const mirroredFormatLabel = String(generatedFixturesBySport[mirroredSportKey][0]?.formatLabel || '').trim();
+      persistSportState({
+        sportKey: mirroredSportKey,
+        fixtures: generatedFixturesBySport[mirroredSportKey],
+        selectedTeamIds: teams,
+        fairnessRuleIds: selectedRules,
+        pinnedSlotKeys: Array.from(pinnedFixtureSlotKeys),
+        formatLabel: mirroredFormatLabel,
+        generatedAt: Date.now()
+      });
+    }
 
     renderFixtures(lastFixtures);
   };
@@ -6808,12 +13071,26 @@ const hydrateFixtureCreator = (fixtureNode) => {
     const saved = fixtureCreatorState.sports?.[key];
     if (!saved || typeof saved !== 'object') return false;
 
+    const sanitizedFixtures = sanitizeStoredFixturesForSport(key, saved.fixtures || []);
+    if (!sanitizedFixtures.length) return false;
+
+    const fixtureTeamIds = Array.from(
+      new Set(
+        sanitizedFixtures
+          .flatMap((entry) => [String(entry.homeId || '').trim(), String(entry.awayId || '').trim()])
+          .filter(Boolean)
+      )
+    );
+
     const selectedIds = Array.isArray(saved.selectedTeamIds)
       ? saved.selectedTeamIds.map((entry) => String(entry || '').trim()).filter(Boolean)
       : [];
-    if (selectedIds.length) {
-      setSelectedTeamIds(selectedIds);
+    const restoredTeamIds = selectedIds.length ? selectedIds : fixtureTeamIds;
+    if (restoredTeamIds.length) {
+      setSelectedTeamIds(restoredTeamIds);
     }
+
+    setSelectedFairnessRuleIds(saved.fairnessRuleIds);
 
     applySportSetupValues(key, saved.setup || {});
     refreshSportPanelState();
@@ -6822,10 +13099,10 @@ const hydrateFixtureCreator = (fixtureNode) => {
     if (!profile) return false;
 
     const teams = selectedTeamIds();
-    const sanitizedFixtures = sanitizeStoredFixturesForSport(key, saved.fixtures || []);
-    if (!sanitizedFixtures.length) return false;
+    const effectiveTeams = teams.length ? teams : fixtureTeamIds;
 
-    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, teams);
+    const expectedSavedMeetings = parseMatchesPerOpponentPerLeg(saved?.setup?.matchesPerOpponentPerLeg, null);
+    const integrity = validateNoDuplicatePairingsPerLeg(sanitizedFixtures, effectiveTeams, expectedSavedMeetings);
     if (!integrity.ok) return false;
     const setup = profile.readSetup();
     lastSportKey = key;
@@ -6849,6 +13126,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
     approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
 
     saveFixtureCatalog(lastFixtures);
+    replaceActiveSportFixtureDates(lastFixtures, saved.fixtureDates || {});
     loadFixtureDates();
     renderFixtures(lastFixtures);
 
@@ -6856,6 +13134,118 @@ const hydrateFixtureCreator = (fixtureNode) => {
       statusNode.textContent = `${profile.label}: loaded last saved fixture state.`;
     }
     showSmartToast(`${profile.label}: loaded last saved fixture state.`, { tone: 'info' });
+    return true;
+  };
+
+  const normalizeCatalogSportKey = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'soccer') return 'soccer';
+    if (raw === 'netball') return 'netball';
+    return '';
+  };
+
+  const inferSportFromCatalog = () => {
+    try {
+      const raw = localStorage.getItem(fixtureCatalogStorageKey);
+      if (!raw) return '';
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return '';
+      const sportKeys = Array.from(new Set(
+        Object.entries(parsed)
+          .flatMap(([fixtureId, entry]) => {
+            const idSport = normalizeCatalogSportKey(String(fixtureId || '').split(':')[1] || '');
+            const valueSport = normalizeCatalogSportKey(entry?.sportKey || entry?.sport || '');
+            return [idSport, valueSport].filter(Boolean);
+          })
+      ));
+      return sportKeys[0] || '';
+    } catch {
+      return '';
+    }
+  };
+
+  const restorePublishedCatalogForSport = (sportKey) => {
+    let key = String(sportKey || '').trim();
+    if (key !== 'soccer' && key !== 'netball') {
+      key = inferSportFromCatalog();
+    }
+    if (key !== 'soccer' && key !== 'netball') return false;
+
+    let parsedCatalog = {};
+    try {
+      const raw = localStorage.getItem(fixtureCatalogStorageKey);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return false;
+      parsedCatalog = parsed;
+    } catch {
+      return false;
+    }
+
+    const reconstructedFixtures = Object.entries(parsedCatalog)
+      .map(([fixtureId, entry]) => {
+        const parts = String(fixtureId || '').split(':');
+        const fixtureSportKey =
+          normalizeCatalogSportKey(parts[1]) ||
+          normalizeCatalogSportKey(entry?.sportKey || entry?.sport || '');
+        if (fixtureSportKey !== key) return null;
+        if (!entry || typeof entry !== 'object') return null;
+        const fallbackSlot = `${String(entry.leg || 'First')}::R${parsePositiveInt(entry.round, 1)}M${parsePositiveInt(entry.match, 1)}`;
+        return {
+          slotKey: String(parts.slice(2).join(':') || entry.slotKey || fallbackSlot).trim(),
+          round: parsePositiveInt(entry.round, 1),
+          leg: String(entry.leg || '').trim() || 'First',
+          match: parsePositiveInt(entry.match, 1),
+          homeId: String(entry.homeId || '').trim(),
+          awayId: String(entry.awayId || '').trim(),
+          sportKey: fixtureSportKey,
+          sportLabel: String(entry.sport || '').trim(),
+          formatLabel: String(entry.format || '').trim()
+        };
+      })
+      .filter(Boolean)
+      .filter((entry) => entry.homeId && entry.awayId && entry.homeId !== entry.awayId)
+      .sort((left, right) => {
+        if (left.round !== right.round) return left.round - right.round;
+        if (left.match !== right.match) return left.match - right.match;
+        return left.slotKey.localeCompare(right.slotKey);
+      });
+
+    if (!reconstructedFixtures.length) return false;
+
+    const fixtureTeamIds = Array.from(
+      new Set(reconstructedFixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))
+    );
+    const integrity = validateNoDuplicatePairingsPerLeg(reconstructedFixtures, fixtureTeamIds);
+    if (!integrity.ok) return false;
+
+    if (fixtureTeamIds.length) {
+      setSelectedTeamIds(fixtureTeamIds);
+    }
+
+    const profile = selectedSportProfile();
+    if (!profile) return false;
+    const setup = profile.readSetup();
+
+    lastSportKey = key;
+    lastSportLabel = profile.label;
+    lastFormatLabel = String(setup.formatLabel || reconstructedFixtures[0]?.formatLabel || '').trim();
+    pendingFixtureApproval = false;
+    approvedWithUnfairness = false;
+    pinnedFixtureSlotKeys = new Set();
+    lastFixtures = reconstructedFixtures.map((entry) => ({
+      ...entry,
+      sportLabel: profile.label,
+      formatLabel: String(entry.formatLabel || lastFormatLabel || '').trim()
+    }));
+
+    refreshCurrentUnfairnessReport(lastFixtures);
+    loadFixtureDates();
+    renderFixtures(lastFixtures);
+
+    if (statusNode) {
+      statusNode.textContent = `${profile.label}: restored ${lastFixtures.length} saved fixture(s) from published catalog.`;
+    }
     return true;
   };
 
@@ -6907,8 +13297,23 @@ const hydrateFixtureCreator = (fixtureNode) => {
     });
   };
 
+  const buildVisibleMatchLabelMap = (fixtures) => {
+    const scopeCounts = {};
+    const labels = {};
+
+    (fixtures || []).forEach((fixture) => {
+      const scopeKey = `${Number(fixture?.round) || 0}::${String(fixture?.leg || '').trim()}`;
+      scopeCounts[scopeKey] = (scopeCounts[scopeKey] || 0) + 1;
+      const fixtureId = getFixtureId(fixture);
+      labels[fixtureId] = `R${fixture.round}M${scopeCounts[scopeKey]}`;
+    });
+
+    return labels;
+  };
+
   const buildFixtureCsvContent = () => {
     const exportFixtures = getExportFixtures();
+    const visibleMatchLabelById = buildVisibleMatchLabelMap(exportFixtures);
     const lines = [
       ['Competition', config.competition || ''].map(escapeCsvValue).join(','),
       ['Sport', lastSportLabel || ''].map(escapeCsvValue).join(','),
@@ -6925,7 +13330,7 @@ const hydrateFixtureCreator = (fixtureNode) => {
         [
           fixture.round,
           fixture.leg,
-          `R${fixture.round}M${fixture.match}`,
+          visibleMatchLabelById[fixtureId] || `R${fixture.round}M${fixture.match}`,
           stampValue.date || '',
           stampValue.time || '',
           fixture.formatLabel || '',
@@ -6962,210 +13367,160 @@ const hydrateFixtureCreator = (fixtureNode) => {
     };
 
     try {
-      const { default: ExcelJS } = await import('exceljs');
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = 'Bhanoyi Secondary School Website';
-      workbook.created = new Date();
-      const sheet = workbook.addWorksheet('Fixtures', {
-        pageSetup: {
-          paperSize: 9,
-          orientation: 'portrait',
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-          horizontalCentered: true,
-          margins: {
-            left: 0.35,
-            right: 0.35,
-            top: 0.55,
-            bottom: 0.5,
-            header: 0.2,
-            footer: 0.2
-          }
-        }
-      });
-
-      sheet.views = [{ state: 'frozen', ySplit: 8 }];
-      sheet.columns = [
-        { header: 'Round', key: 'round', width: 8 },
-        { header: 'Leg', key: 'leg', width: 11 },
-        { header: 'Match', key: 'match', width: 12 },
-        { header: 'Date', key: 'date', width: 18 },
-        { header: 'Kickoff', key: 'kickoff', width: 10 },
-        { header: 'Format', key: 'format', width: 28 },
-        { header: 'Home', key: 'home', width: 17 },
-        { header: 'Away', key: 'away', width: 17 }
-      ];
-
-      const primaryBlue = '1F6FCB';
-      const deepBlue = '173A5E';
-      const headerBlue = '1B4E7C';
-      const lightBlue = 'EAF3FF';
-      const white = 'FFFFFF';
-      const metaBlue = 'F5FAFF';
-      const borderColor = 'D0E0F0';
-
-      sheet.mergeCells('A1:H1');
-      sheet.mergeCells('A2:H2');
-      sheet.mergeCells('A3:H3');
-      sheet.mergeCells('A4:H4');
-      sheet.mergeCells('A5:H5');
-      sheet.getCell('A1').value = 'BHANOYI SECONDARY SCHOOL';
-      sheet.getCell('A2').value = 'Official Sports Fixture';
-      sheet.getCell('A3').value = `${config.competition || 'Inter-House League'}${lastSportLabel ? ` • ${lastSportLabel}` : ''}`;
-      sheet.getCell('A4').value = config.venue ? `Venue: ${config.venue}` : '';
-      sheet.getCell('A5').value = `Generated on: ${new Date().toLocaleString('en-GB')}`;
-
-      ['A1', 'A2', 'A3', 'A4', 'A5'].forEach((ref, index) => {
-        const cell = sheet.getCell(ref);
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
-        cell.font = {
-          name: 'Calibri',
-          size: index === 0 ? 17 : index === 1 ? 13 : 10.5,
-          bold: index <= 2,
-          color: { argb: index <= 2 ? `FF${white}` : `FF${deepBlue}` }
-        };
-        if (index <= 2) {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: `FF${index === 0 ? deepBlue : primaryBlue}` }
-          };
-        } else {
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: `FF${metaBlue}` }
-          };
-        }
-      });
-
-      sheet.getRow(1).height = 56;
-      sheet.getRow(2).height = 44;
-      sheet.getRow(3).height = 40;
-      sheet.getRow(4).height = 36;
-      sheet.getRow(5).height = 36;
-
-      try {
-        const logoResponse = await fetch('/branding/bhanoyi-logo.png');
-        if (logoResponse.ok) {
-          const logoBuffer = await logoResponse.arrayBuffer();
-          const imageId = workbook.addImage({
-            buffer: logoBuffer,
-            extension: 'png'
-          });
-          sheet.addImage(imageId, {
-            tl: { col: 0.1, row: 0.15 },
-            ext: { width: 86, height: 86 }
-          });
-        }
-      } catch {
-        // Logo is optional in export; continue without it.
-      }
-
-      const headerRowNumber = 7;
-      const headerLabels = ['Round', 'Leg', 'Match', 'Date', 'Kickoff', 'Format', 'Home', 'Away'];
-      const headerRow = sheet.getRow(headerRowNumber);
-      headerRow.values = headerLabels;
-      headerRow.height = 40;
-      headerRow.eachCell((cell) => {
-        cell.font = {
-          name: 'Calibri',
-          size: 10.5,
-          bold: true,
-          color: { argb: `FF${white}` }
-        };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: `FF${headerBlue}` }
-        };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = {
-          top: { style: 'thin', color: { argb: `FF${borderColor}` } },
-          left: { style: 'thin', color: { argb: `FF${borderColor}` } },
-          bottom: { style: 'medium', color: { argb: `FF${borderColor}` } },
-          right: { style: 'thin', color: { argb: `FF${borderColor}` } }
-        };
-      });
-
-      const dataStartRow = headerRowNumber + 1;
       const exportFixtures = getExportFixtures();
-      exportFixtures.forEach((fixture, index) => {
+      const visibleMatchLabelById = buildVisibleMatchLabelMap(exportFixtures);
+      const compactFormatLabel = (value) => {
+        const raw = normalizeText(value, 220);
+        if (!raw) return '';
+        const structureMatch = raw.match(/(\d+)\s*x\s*(\d+)\s*min/i);
+        const repeatMatch = raw.match(/(\d+)x\s+per\s+opponent\s+per\s+leg/i);
+        if (structureMatch) {
+          const base = `${structureMatch[1]}x${structureMatch[2]} min`;
+          const repeatSuffix = repeatMatch ? ` · ${repeatMatch[1]}x/leg` : '';
+          return `${base}${repeatSuffix}`;
+        }
+        return raw.length > 30 ? `${raw.slice(0, 27)}…` : raw;
+      };
+
+      const fixtureRows = [];
+      let previousRound = Number.NaN;
+      let previousLeg = '';
+      let secondLegBannerInserted = false;
+
+      exportFixtures.forEach((fixture) => {
         const fixtureId = getFixtureId(fixture);
         const stampValue = splitFixtureStamp(fixtureDates[fixtureId]);
-        const row = sheet.getRow(dataStartRow + index);
-        row.values = [
-          fixture.round,
-          fixture.leg,
-          `R${fixture.round}M${fixture.match}`,
-          formatFriendlyDate(stampValue.date),
-          stampValue.time || 'TBD',
-          fixture.formatLabel || '',
-          teamNameById(fixture.homeId),
-          teamNameById(fixture.awayId)
-        ];
-        row.height = 36;
+        const normalizedLeg = String(fixture.leg || '').trim();
+        const isNewLeg = normalizedLeg !== previousLeg;
+        const isNewRound = Number(fixture.round) !== Number(previousRound);
 
-        row.eachCell((cell, columnIndex) => {
-          cell.font = { name: 'Calibri', size: 10.5, color: { argb: `FF${deepBlue}` } };
-          cell.alignment = {
-            vertical: 'middle',
-            horizontal: columnIndex <= 5 ? 'center' : 'left',
-            wrapText: columnIndex === 6
-          };
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: `FF${index % 2 === 0 ? white : lightBlue}` }
-          };
-          cell.border = {
-            top: { style: 'thin', color: { argb: `FF${borderColor}` } },
-            left: { style: 'thin', color: { argb: `FF${borderColor}` } },
-            bottom: { style: 'thin', color: { argb: `FF${borderColor}` } },
-            right: { style: 'thin', color: { argb: `FF${borderColor}` } }
-          };
+        if (!secondLegBannerInserted && /^return$/i.test(normalizedLeg)) {
+          fixtureRows.push({
+            round: 'SECOND LEG STARTS',
+            leg: '',
+            match: '',
+            date: '',
+            kickoff: '',
+            format: '',
+            home: '',
+            away: '',
+            __kind: 'leg-break'
+          });
+          secondLegBannerInserted = true;
+        }
+
+        if (isNewLeg || isNewRound) {
+          fixtureRows.push({
+            round: `Round ${fixture.round} • ${normalizedLeg || 'Leg'}`,
+            leg: '',
+            match: '',
+            date: '',
+            kickoff: '',
+            format: '',
+            home: '',
+            away: '',
+            __kind: 'round-break'
+          });
+        }
+
+        fixtureRows.push({
+          round: fixture.round,
+          leg: normalizedLeg,
+          match: visibleMatchLabelById[fixtureId] || `R${fixture.round}M${fixture.match}`,
+          date: formatFriendlyDate(stampValue.date),
+          kickoff: stampValue.time || 'TBD',
+          format: compactFormatLabel(fixture.formatLabel || ''),
+          home: teamNameById(fixture.homeId),
+          away: teamNameById(fixture.awayId),
+          __kind: 'fixture'
         });
+
+        previousRound = Number(fixture.round);
+        previousLeg = normalizedLeg;
       });
 
-      let runStart = 0;
-      while (runStart < exportFixtures.length) {
-        const runFixture = exportFixtures[runStart];
-        const runKey = `${runFixture.round}::${runFixture.leg}`;
-        let runEnd = runStart;
-        while (runEnd + 1 < exportFixtures.length) {
-          const nextFixture = exportFixtures[runEnd + 1];
-          const nextKey = `${nextFixture.round}::${nextFixture.leg}`;
-          if (nextKey !== runKey) break;
-          runEnd += 1;
+      const selectedRuleLabels = selectedFairnessRuleIds()
+        .map((ruleId) => fairnessRuleLabelById(ruleId))
+        .map((label) => normalizeText(label, 200))
+        .filter(Boolean);
+      const firstLegCount = exportFixtures.filter((entry) => String(entry.leg || '').trim() === 'First').length;
+      const returnLegCount = exportFixtures.filter((entry) => String(entry.leg || '').trim() === 'Return').length;
+      const fixtureTeamCount = Array.from(new Set(exportFixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))).length;
+      const pinnedCount = getPinnedFixtureIndexes(lastFixtures).length;
+
+      await exportProfessionalWorkbook({
+        fileName: `${baseName}.xlsx`,
+        sheetName: 'Fixtures',
+        title: 'Official Sports Fixture',
+        contextLine: `${config.competition || 'Inter-House League'}${lastSportLabel ? ` • ${lastSportLabel}` : ''}`,
+        metaLine: config.venue ? `Venue: ${config.venue}` : '',
+        columns: [
+          { header: 'Round', key: 'round', width: 8, align: 'center' },
+          { header: 'Leg', key: 'leg', width: 11, align: 'center' },
+          { header: 'Match', key: 'match', width: 12, align: 'center' },
+          { header: 'Date', key: 'date', width: 18, align: 'center' },
+          { header: 'Kickoff', key: 'kickoff', width: 10, align: 'center' },
+          { header: 'Format', key: 'format', width: 28, align: 'center', wrapText: true },
+          { header: 'Home', key: 'home', width: 17, align: 'left' },
+          { header: 'Away', key: 'away', width: 17, align: 'left' }
+        ],
+        rows: fixtureRows,
+        note: 'Important NB: Fixtures subject to change without prior notice.',
+        signatures: [
+          {
+            anchor: 'right',
+            name: 'Mr. B.C Dlamini',
+            role: 'Sports Committee Coordinator',
+            shiftColumns: 2
+          }
+        ],
+        footerSections: [
+          {
+            title: 'Fixture Summary',
+            lines: [
+              `Total fixtures: ${exportFixtures.length} (${firstLegCount} First leg, ${returnLegCount} Return leg).`,
+              `Teams scheduled: ${fixtureTeamCount}.`,
+              `Matches per opponent per leg: ${configuredMatchesPerOpponentPerLeg()}.`,
+              `Pinned fixture constraints: ${pinnedCount}.`,
+              currentUnfairnessReport.hasUnfairness
+                ? `Fairness check status: ${currentUnfairnessReport.affectedFixtureCount} fixture(s) currently flagged.`
+                : 'Fairness check status: no active fairness violations in current draft.'
+            ]
+          },
+          {
+            title: 'Applied Fairness Rules',
+            lines: selectedRuleLabels.length
+              ? selectedRuleLabels.map((label, index) => `${index + 1}. ${label}`)
+              : ['No fairness rules selected by admin.']
+          }
+        ],
+        afterRows: ({ sheet, dataStartRow }) => {
+          const endColumn = 'H';
+          fixtureRows.forEach((row, rowIndex) => {
+            if (!row.__kind || row.__kind === 'fixture') return;
+            const targetRow = dataStartRow + rowIndex;
+            sheet.mergeCells(`A${targetRow}:${endColumn}${targetRow}`);
+            const titleCell = sheet.getCell(`A${targetRow}`);
+            titleCell.value = row.round || '';
+            titleCell.font = {
+              name: 'Calibri',
+              size: row.__kind === 'leg-break' ? 10.5 : 10,
+              bold: true,
+              color: { argb: 'FF173A5E' }
+            };
+            titleCell.alignment = {
+              horizontal: row.__kind === 'leg-break' ? 'center' : 'left',
+              vertical: 'middle'
+            };
+            titleCell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: row.__kind === 'leg-break' ? 'FFEAF3FF' : 'FFF5FAFF' }
+            };
+            sheet.getRow(targetRow).height = row.__kind === 'leg-break' ? 22 : 20;
+          });
         }
-
-        if (runEnd > runStart) {
-          const startRow = dataStartRow + runStart;
-          const endRow = dataStartRow + runEnd;
-          sheet.mergeCells(`A${startRow}:A${endRow}`);
-          sheet.mergeCells(`B${startRow}:B${endRow}`);
-          sheet.getCell(`A${startRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-          sheet.getCell(`B${startRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
-        }
-
-        runStart = runEnd + 1;
-      }
-
-      const noteRowNumber = dataStartRow + exportFixtures.length + 2;
-      sheet.mergeCells(`A${noteRowNumber}:H${noteRowNumber}`);
-      const noteCell = sheet.getCell(`A${noteRowNumber}`);
-      noteCell.value = 'Notice: Fixture times and dates are synchronized with the school calendar. Updates should be communicated through official school channels.';
-      noteCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: `FF${deepBlue}` } };
-      noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-
-      const workbookBuffer = await workbook.xlsx.writeBuffer();
-      downloadBlob(
-        new Blob([workbookBuffer], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        }),
-        `${baseName}.xlsx`
-      );
+      });
       showSmartToast('Professional fixture file exported (.xlsx).', { tone: 'success' });
       return;
     } catch {
@@ -7193,7 +13548,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
 
   generateButton.addEventListener('click', () => {
     const wantsAutoFill = isAdminMode && autoFillToggle instanceof HTMLInputElement && autoFillToggle.checked;
-    generateFixtures({ autoFillDates: wantsAutoFill });
+    const wantsSharedFixtures =
+      forceSharedFixturesToggle instanceof HTMLInputElement && forceSharedFixturesToggle.checked;
+    generateFixtures({ autoFillDates: wantsAutoFill, forceSharedAcrossSports: wantsSharedFixtures });
     workflowSteps?.expandStep('review-fixtures');
     const statusMessage = String(statusNode?.textContent || '').trim();
     if (statusMessage) {
@@ -7203,6 +13560,155 @@ const hydrateFixtureCreator = (fixtureNode) => {
   });
   teamPickInputs.forEach((input) => {
     input.addEventListener('change', generateFixtures);
+  });
+
+  const applyFairnessRulesSelection = () => {
+    persistActiveSportState();
+    if (!lastFixtures.length) return;
+
+    const enforcement = enforceSelectedFairnessRules({
+      fixtures: lastFixtures,
+      teamIds: fairnessTeamIdsForFixtures(lastFixtures),
+      selectedRuleIds: selectedFairnessRuleIds(),
+      lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+    });
+
+    if (!enforcement.ok) {
+      currentUnfairnessReport =
+        enforcement.report ||
+        buildFairnessReport(lastFixtures, fairnessTeamIdsForFixtures(lastFixtures), selectedFairnessRuleIds());
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+      renderFixtures(lastFixtures);
+      if (statusNode) {
+        statusNode.textContent = `Selected fairness rules require adjustments: ${enforcement.message}`;
+      }
+      return;
+    }
+
+    lastFixtures = enforcement.fixtures;
+    refreshCurrentUnfairnessReport(lastFixtures);
+    if (isAdminMode) {
+      pendingFixtureApproval = true;
+      approvedWithUnfairness = false;
+    } else {
+      pendingFixtureApproval = false;
+      approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+    }
+    persistActiveSportState();
+    renderFixtures(lastFixtures);
+    if (statusNode) {
+      statusNode.textContent = 'Fairness rules updated and applied to current fixtures.';
+    }
+  };
+
+  const resolveFairnessModalNode = () => {
+    if (fairnessModal instanceof HTMLElement) {
+      return portalOverlayToBody(fairnessModal, fairnessModalPortalKey);
+    }
+    const existing = document.querySelector(`[data-overlay-portal-key="${fairnessModalPortalKey}"]`);
+    return existing instanceof HTMLElement ? existing : null;
+  };
+
+  const closeFairnessModal = () => {
+    const modalNode = resolveFairnessModalNode();
+    if (!(modalNode instanceof HTMLElement)) return;
+    modalNode.classList.add('is-hidden');
+    modalNode.style.removeProperty('display');
+    modalNode.style.removeProperty('visibility');
+    modalNode.style.removeProperty('opacity');
+    modalNode.style.removeProperty('pointer-events');
+  };
+
+  const openFairnessModal = () => {
+    const modalNode = resolveFairnessModalNode();
+    if (!(modalNode instanceof HTMLElement)) {
+      if (statusNode) {
+        statusNode.textContent = 'Could not open fairness rules modal. Please refresh and try again.';
+      }
+      showSmartToast('Could not open fairness rules modal.', { tone: 'error' });
+      return;
+    }
+
+    syncFairnessCheckboxesFromState();
+    refreshFairnessRuleCompatibilityUi();
+    modalNode.classList.remove('is-hidden');
+    modalNode.style.display = 'grid';
+    modalNode.style.visibility = 'visible';
+    modalNode.style.opacity = '1';
+    modalNode.style.pointerEvents = 'auto';
+  };
+
+  fairnessOpenButton?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openFairnessModal();
+  });
+
+  fixtureNode.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const trigger = target.closest('[data-fixture-open-fairness-modal]');
+    if (!(trigger instanceof HTMLButtonElement)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openFairnessModal();
+  });
+
+  fairnessRulesSelect?.addEventListener('change', () => {
+    refreshFairnessSummary();
+    renderFairnessDropdownOptions();
+  });
+
+  fairnessCloseButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.addEventListener('click', () => {
+      closeFairnessModal();
+    });
+  });
+
+  fairnessRuleCheckboxes.forEach((checkbox) => {
+    if (!(checkbox instanceof HTMLInputElement)) return;
+    checkbox.addEventListener('change', () => {
+      refreshFairnessRuleCompatibilityUi();
+    });
+  });
+
+  fairnessApplyButton?.addEventListener('click', () => {
+    const selectedRuleIds = fairnessRuleCheckboxes
+      .filter((checkbox) => checkbox instanceof HTMLInputElement && checkbox.checked)
+      .map((checkbox) => String(checkbox.value || '').trim())
+      .filter(Boolean);
+
+    if (!selectedRuleIds.length) {
+      const allowNoRules = window.confirm(
+        'No fairness rules are selected. Continue without fairness checks? This may allow uneven or conflicting fixtures.'
+      );
+      if (!allowNoRules) {
+        return;
+      }
+    }
+
+    setSelectedFairnessRuleIds(selectedRuleIds);
+    closeFairnessModal();
+    showSmartToast(
+      selectedRuleIds.length === 0
+        ? 'No fairness rules selected.'
+        : `Applied ${selectedRuleIds.length} fairness rule${selectedRuleIds.length === 1 ? '' : 's'}.`,
+      { tone: selectedRuleIds.length === 0 ? 'info' : 'success' }
+    );
+  });
+
+  resolveFairnessModalNode()?.addEventListener('click', (event) => {
+    if (event.target === resolveFairnessModalNode()) {
+      closeFairnessModal();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    closeFairnessModal();
   });
 
   rulesSaveButton?.addEventListener('click', () => {
@@ -7266,9 +13772,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
-      } else {
-        persistFixtureDatesToStorage();
       }
+      persistFixtureDatesToStorage();
       renderFixtures(lastFixtures);
       return;
     }
@@ -7287,9 +13792,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
       if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
-      } else {
-        persistFixtureDatesToStorage();
       }
+      persistFixtureDatesToStorage();
       renderFixtures(lastFixtures);
       return;
     }
@@ -7307,7 +13811,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
         editedIndex: rowIndex,
         nextHomeId: nextHome,
         nextAwayId: nextAway,
-        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures),
+        selectedRuleIds: selectedFairnessRuleIds(),
+        matchesPerOpponentPerLeg: configuredMatchesPerOpponentPerLeg()
       });
 
       if (!repairResult.ok) {
@@ -7316,33 +13822,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
         return;
       }
 
-      if (repairResult.affectedOtherCount > 0) {
-        const proceed = window.confirm(
-          `Apply and rebalance fixtures? ${repairResult.affectedOtherCount} other fixture(s) will auto-update.`
-        );
-        if (!proceed) {
-          renderFixtures(lastFixtures);
-          return;
-        }
-      }
-
       lastFixtures = repairResult.fixtures;
       refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode) {
-        pendingFixtureApproval = true;
-        approvedWithUnfairness = false;
-      } else {
-        pendingFixtureApproval = false;
-        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-        saveFixtureCatalog(lastFixtures);
-        persistActiveSportState();
-      }
+      pendingFixtureApproval = isAdminMode;
+      approvedWithUnfairness = !isAdminMode && currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+      persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
         if (pendingFixtureApproval) {
           statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+            ? `Live fixture draft updated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+            : 'Live fixture draft updated and synced.';
         } else {
           statusNode.textContent = repairResult.affectedOtherCount > 0
             ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
@@ -7365,7 +13856,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
         editedIndex: rowIndex,
         nextHomeId: nextHome,
         nextAwayId: nextAway,
-        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures),
+        selectedRuleIds: selectedFairnessRuleIds(),
+        matchesPerOpponentPerLeg: configuredMatchesPerOpponentPerLeg()
       });
 
       if (!repairResult.ok) {
@@ -7374,33 +13867,18 @@ const hydrateFixtureCreator = (fixtureNode) => {
         return;
       }
 
-      if (repairResult.affectedOtherCount > 0) {
-        const proceed = window.confirm(
-          `Apply and rebalance fixtures? ${repairResult.affectedOtherCount} other fixture(s) will auto-update.`
-        );
-        if (!proceed) {
-          renderFixtures(lastFixtures);
-          return;
-        }
-      }
-
       lastFixtures = repairResult.fixtures;
       refreshCurrentUnfairnessReport(lastFixtures);
-      if (isAdminMode) {
-        pendingFixtureApproval = true;
-        approvedWithUnfairness = false;
-      } else {
-        pendingFixtureApproval = false;
-        approvedWithUnfairness = currentUnfairnessReport.hasUnfairness;
-        saveFixtureCatalog(lastFixtures);
-        persistActiveSportState();
-      }
+      pendingFixtureApproval = isAdminMode;
+      approvedWithUnfairness = !isAdminMode && currentUnfairnessReport.hasUnfairness;
+      saveFixtureCatalog(lastFixtures);
+      persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
         if (pendingFixtureApproval) {
           statusNode.textContent = currentUnfairnessReport.hasUnfairness
-            ? `Draft updated (not synced): fairness concerns detected in ${currentUnfairnessReport.affectedFixtureCount} fixture(s). Finalize & sync when ready.`
-            : 'Draft updated (not synced): fairness checks passed. Click "Finalize & sync" to publish.';
+            ? `Live fixture draft updated with fairness concerns in ${currentUnfairnessReport.affectedFixtureCount} fixture(s).`
+            : 'Live fixture draft updated and synced.';
         } else {
           statusNode.textContent = repairResult.affectedOtherCount > 0
             ? `Fixture updated. ${repairResult.affectedOtherCount} additional fixture(s) auto-adjusted to preserve round-robin rules.`
@@ -7434,10 +13912,33 @@ const hydrateFixtureCreator = (fixtureNode) => {
         pinnedFixtureSlotKeys.add(slotKey);
       }
 
+      const enforcement = enforceSelectedFairnessRules({
+        fixtures: lastFixtures,
+        teamIds: fairnessTeamIdsForFixtures(lastFixtures),
+        selectedRuleIds: selectedFairnessRuleIds(),
+        lockedIndexes: getPinnedFixtureIndexes(lastFixtures)
+      });
+
+      if (!enforcement.ok) {
+        if (pinnedFixtureSlotKeys.has(slotKey)) {
+          pinnedFixtureSlotKeys.delete(slotKey);
+        } else {
+          pinnedFixtureSlotKeys.add(slotKey);
+        }
+        if (statusNode) {
+          statusNode.textContent = `Pin action rejected: ${enforcement.message}`;
+        }
+        renderFixtures(lastFixtures);
+        return;
+      }
+
+      lastFixtures = enforcement.fixtures;
+
       if (isAdminMode) {
         pendingFixtureApproval = true;
         approvedWithUnfairness = false;
       }
+      saveFixtureCatalog(lastFixtures);
       persistActiveSportState();
       renderFixtures(lastFixtures);
       if (statusNode) {
@@ -7475,14 +13976,14 @@ const hydrateFixtureCreator = (fixtureNode) => {
     refreshCurrentUnfairnessReport(lastFixtures);
     const hasUnfairness = currentUnfairnessReport.hasUnfairness;
 
-    if (hasUnfairness && !allowUnfairness) {
+    if (hasUnfairness) {
       pendingFixtureApproval = true;
       approvedWithUnfairness = false;
       renderFixtures(lastFixtures);
       if (statusNode) {
-        statusNode.textContent = 'Resolve highlighted fairness concerns, then click "Finalize & sync (after fixes)".';
+        statusNode.textContent = 'Selected fairness rules are mandatory. Resolve highlighted issues before finalizing.';
       }
-      showSmartToast('Resolve highlighted fairness concerns before approval.', { tone: 'info' });
+      showSmartToast('Selected fairness rules are mandatory and cannot be bypassed.', { tone: 'info' });
       return;
     }
 
@@ -7515,6 +14016,100 @@ const hydrateFixtureCreator = (fixtureNode) => {
     approveFixturePreview({ allowUnfairness: true });
   });
 
+  saveDraftButton?.addEventListener('click', () => {
+    if (!lastFixtures.length) {
+      if (statusNode) {
+        statusNode.textContent = 'No fixtures to save yet. Generate fixtures first.';
+      }
+      showSmartToast('No fixtures to save yet. Generate fixtures first.', { tone: 'error' });
+      return;
+    }
+
+    saveFixtureCatalog(lastFixtures);
+    persistActiveSportState();
+    persistFixtureDatesToStorage();
+    if (statusNode) {
+      statusNode.textContent = 'Fixture draft saved and kept live for calendar, match logs, and standings.';
+    }
+    showSmartToast('Fixture draft saved and synced live.', { tone: 'success' });
+  });
+
+  fixtureTemplateSelect?.addEventListener('change', () => {
+    selectedFixtureTemplateId = String(fixtureTemplateSelect.value || '').trim();
+    if (!selectedFixtureTemplateId) {
+      if (statusNode instanceof HTMLElement) {
+        statusNode.textContent = 'No template selected.';
+      }
+      return;
+    }
+
+    const templateEntry = fixtureTemplateHistory.find((entry) => entry.id === selectedFixtureTemplateId);
+    if (!templateEntry) {
+      if (statusNode instanceof HTMLElement) {
+        statusNode.textContent = 'Selected template was not found.';
+      }
+      return;
+    }
+
+    if (sportSelect instanceof HTMLSelectElement && sportSelect.value !== templateEntry.sportKey) {
+      sportSelect.value = templateEntry.sportKey;
+      refreshSportPanelState();
+    }
+
+    const profile = selectedSportProfile();
+    const targetSportKey = profile?.key || templateEntry.sportKey;
+    const targetSportLabel = profile?.label || (templateEntry.sportKey === 'netball' ? 'Netball' : 'Soccer');
+    const setup = profile?.readSetup?.() || {};
+    const normalizedFormatLabel = String(setup.formatLabel || '').trim();
+
+    const templateFixtures = sanitizeStoredFixturesForSport(targetSportKey, templateEntry.fixtures || []).map((entry) => ({
+      ...entry,
+      sportKey: targetSportKey,
+      sportLabel: targetSportLabel,
+      formatLabel: String(entry.formatLabel || normalizedFormatLabel || '').trim()
+    }));
+
+    if (!templateFixtures.length) {
+      if (statusNode instanceof HTMLElement) {
+        statusNode.textContent = 'Selected template has no valid fixtures to load.';
+      }
+      return;
+    }
+
+    const templateTeamIds = Array.from(
+      new Set(templateFixtures.flatMap((entry) => [entry.homeId, entry.awayId]).filter(Boolean))
+    );
+    if (templateTeamIds.length) {
+      setSelectedTeamIds(templateTeamIds);
+    }
+
+    lastSportKey = targetSportKey;
+    lastSportLabel = targetSportLabel;
+    lastFormatLabel = normalizedFormatLabel || String(templateFixtures[0]?.formatLabel || '').trim();
+    lastFixtures = templateFixtures;
+    pinnedFixtureSlotKeys = new Set();
+    pendingFixtureApproval = true;
+    approvedWithUnfairness = false;
+    refreshCurrentUnfairnessReport(lastFixtures);
+    replaceActiveSportFixtureDates(lastFixtures, {}, { persist: false });
+    persistActiveSportState();
+    saveFixtureCatalog(lastFixtures);
+    const restoredTemplateDates = replaceActiveSportFixtureDates(lastFixtures, templateEntry.fixtureDates || {});
+    if (!Object.keys(restoredTemplateDates).length) {
+      autoFillFixtureDatesSilently(lastFixtures);
+    }
+    loadFixtureDates();
+    persistActiveSportState();
+    renderFixtures(lastFixtures);
+
+    if (statusNode instanceof HTMLElement) {
+      const hasTemplateDates = Object.keys(getFixtureDateSnapshot(lastFixtures)).length > 0;
+      statusNode.textContent = hasTemplateDates
+        ? `Template loaded and synced (${lastFixtures.length} fixtures). Calendar and standings now follow this ${targetSportLabel.toLowerCase()} fixture set.`
+        : `Template loaded and synced (${lastFixtures.length} fixtures). Standings and logs are live; calendar events will appear after dates are assigned.`;
+    }
+  });
+
   sportSelect?.addEventListener('change', () => {
     hydrateDateRules(activeRulesBucket());
     const activeSport = selectedSportKey();
@@ -7523,7 +14118,9 @@ const hydrateFixtureCreator = (fixtureNode) => {
       saveFixtureCreatorState();
     }
     refreshSportPanelState();
+    renderFixtureTemplateOptions();
     if (!restoreSavedStateForSport(activeSport)) {
+      setSelectedFairnessRuleIds(defaultFairnessRuleIds);
       pinnedFixtureSlotKeys = new Set();
       generateFixtures();
     }
@@ -7536,7 +14133,8 @@ const hydrateFixtureCreator = (fixtureNode) => {
     netballQuartersInput,
     netballQuarterMinutesInput,
     netballBreakMinutesInput,
-    netballHalfTimeMinutesInput
+    netballHalfTimeMinutesInput,
+    meetingsPerLegInput
   ].forEach((input) => {
     input?.addEventListener('change', () => {
       refreshSportPanelState();
@@ -7566,37 +14164,66 @@ const hydrateFixtureCreator = (fixtureNode) => {
     renderFixtures(lastFixtures);
   });
 
-  loadFixtureDates();
-  loadFixtureCreatorState();
-  if (sportSelect instanceof HTMLSelectElement) {
-    const savedSport = String(fixtureCreatorState.lastSport || '').trim();
-    if (savedSport === 'soccer' || savedSport === 'netball') {
-      sportSelect.value = savedSport;
+  const bootstrapFixtureCreatorState = async () => {
+    await Promise.all([
+      syncLocalStoreFromRemote(fixtureCatalogStorageKey),
+      syncLocalStoreFromRemote(fixtureDateStorageKey),
+      syncLocalStoreFromRemote(fixtureRulesStorageKey),
+      syncLocalStoreFromRemote(fixtureCreatorStateStorageKey),
+      syncLocalStoreFromRemote(fixtureHistoryStorageKey)
+    ]).catch(() => null);
+
+    loadFixtureDates();
+    loadFixtureCreatorState();
+    loadFixtureTemplateHistory();
+    if (sportSelect instanceof HTMLSelectElement) {
+      const savedSport = String(fixtureCreatorState.lastSport || '').trim();
+      const fallbackSport = inferSportFromCatalog();
+      const bootSport = savedSport === 'soccer' || savedSport === 'netball' ? savedSport : fallbackSport;
+      if (bootSport === 'soccer' || bootSport === 'netball') {
+        sportSelect.value = bootSport;
+      }
     }
-  }
-  hydrateDateRules(activeRulesBucket());
-  refreshSportPanelState();
-  const bootSport = selectedSportKey();
-  if (!restoreSavedStateForSport(bootSport)) {
-    generateFixtures();
-  }
+    hydrateDateRules(activeRulesBucket());
+    refreshSportPanelState();
+    renderFixtureTemplateOptions();
+    refreshFairnessSummary();
+    renderFairnessDropdownOptions();
+    const bootSport = selectedSportKey();
+    if (!restoreSavedStateForSport(bootSport) && !restorePublishedCatalogForSport(bootSport || inferSportFromCatalog())) {
+      generateFixtures();
+    }
+  };
+
+  void bootstrapFixtureCreatorState();
 };
 
 const renderSchoolCalendarSection = (section, sectionIndex) => {
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
   const adminMode = isAdminModeEnabled();
+  const publicAudience = isPublicAudienceEnabled();
   const config = {
     sectionKey: fallbackSectionKey,
-    fixtureSectionKey: (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'
+    fixtureSectionKey: (section.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator',
+    publicAudience
   };
 
   return `
     <section class="section ${section.alt ? 'section-alt' : ''}" data-section-index="${sectionIndex}" data-section-type="calendar" data-section-key="${fallbackSectionKey}">
       <div class="container">
         <h2>${section.title || 'View School Calendar'}</h2>
-        ${section.body ? `<p class="lead">${section.body}</p>` : ''}
-        <article class="panel school-calendar-shell" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+        ${section.body && !publicAudience ? `<p class="lead">${section.body}</p>` : ''}
+        <article class="panel school-calendar-shell ${publicAudience ? 'is-public-view' : ''}" data-school-calendar-shell="true" data-school-calendar-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          ${
+            publicAudience
+              ? '<p class="school-calendar-public-note">Browse term dates, fixtures, and school events. Tap any date to view details.</p>'
+              : ''
+          }
           <div class="calendar-event-editor-backdrop is-hidden" data-calendar-editor-backdrop></div>
+          ${
+            publicAudience
+              ? '<div class="school-calendar-root school-calendar-root-public" data-school-calendar></div><section class="school-calendar-inline-day-panel is-hidden" data-calendar-inline-day-panel><div class="calendar-day-overlay-header school-calendar-inline-day-header"><h3 data-calendar-inline-day-title>Events</h3><button type="button" class="btn btn-secondary" data-calendar-inline-day-close>Hide details</button></div><div class="calendar-day-overlay-list" data-calendar-inline-day-list></div></section>'
+              : `
           <section class="calendar-workflow-step is-expanded" data-calendar-workflow-step data-calendar-default-open>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="true">
               <span>View Calendar Month</span>
@@ -7604,7 +14231,8 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
             <div class="calendar-workflow-body" data-calendar-workflow-body>
               <div class="school-calendar-root" data-school-calendar></div>
             </div>
-          </section>
+          </section>`
+          }
           ${
             adminMode
               ? `
@@ -7797,6 +14425,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const dayOverlayTitle = calendarShell.querySelector('[data-calendar-day-title]');
   const dayOverlayList = calendarShell.querySelector('[data-calendar-day-list]');
   const dayOverlayCloseButton = calendarShell.querySelector('[data-calendar-day-close]');
+  const inlineDayPanel = calendarShell.querySelector('[data-calendar-inline-day-panel]');
+  const inlineDayTitle = calendarShell.querySelector('[data-calendar-inline-day-title]');
+  const inlineDayList = calendarShell.querySelector('[data-calendar-inline-day-list]');
+  const inlineDayCloseButton = calendarShell.querySelector('[data-calendar-inline-day-close]');
   const sportsOverlay = calendarShell.querySelector('[data-calendar-sports-overlay]');
   const sportsOverlayCloseButton = calendarShell.querySelector('[data-calendar-sports-close]');
   const sportsOverlayActions = calendarShell.querySelector('[data-calendar-sports-actions]');
@@ -7822,6 +14454,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
   if (!calendarRoot) return;
 
   const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
+  const isStaffMode = new URLSearchParams(window.location.search).get('staff') === '1';
+  const isPublicCalendarView = !isAdminMode && !isStaffMode && config.publicAudience === true;
+  const isCompactPublicCalendar = isPublicCalendarView && window.matchMedia('(max-width: 760px)').matches;
+  const useInlineDayPanel = isCompactPublicCalendar;
   if (adminPanel) {
     adminPanel.classList.toggle('is-hidden', !isAdminMode);
   }
@@ -7896,6 +14532,26 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const fixtureCatalogStorageKey = `bhanoyi.fixtures.${fixtureSectionKey}`;
   const eventTypesStorageKey = `bhanoyi.schoolCalendarEventTypes.${sectionKey}`;
   const termsStorageKey = `bhanoyi.schoolTerms.${sectionKey}`;
+
+  window.addEventListener('bhanoyi:remote-persist-status', (event) => {
+    const key = String(event?.detail?.storageKey || '').trim();
+    if (
+      key !== eventsStorageKey &&
+      key !== eventTypesStorageKey &&
+      key !== termsStorageKey &&
+      key !== fixtureDateStorageKey &&
+      key !== fixtureCatalogStorageKey
+    ) {
+      return;
+    }
+
+    const savedRemote = event?.detail?.savedRemote === true;
+    if (statusNode instanceof HTMLElement) {
+      statusNode.textContent = savedRemote
+        ? 'Saved remotely.'
+        : 'Saved on this device only. Remote sync unavailable right now.';
+    }
+  });
 
   const params = new URLSearchParams(window.location.search);
   const incomingFixtureId = (params.get('fixtureId') || '').trim();
@@ -7991,18 +14647,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     return raw.replace(/\s+/g, ' ');
   };
 
-  const eventTypeIconMap = {
-    sports: '🏆',
-    religious: '🕊️',
-    cultural: '🎭',
-    entertainment: '🎉',
-    academic: '📘',
-    meeting: '🗓️',
-    assembly: '📣',
-    exam: '📝',
-    holiday: '🌴',
-    community: '🤝'
-  };
+  const eventTypeIconMap = ENTITY_EMOJI_REGISTRY.eventTypes;
 
   const resolveEventTypeIcon = (value) => {
     const normalized = normalizeEventTypeLabel(value).toLowerCase();
@@ -8043,6 +14688,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       new Set((types || []).map((entry) => normalizeEventTypeLabel(entry)).filter(Boolean))
     );
     localStorage.setItem(eventTypesStorageKey, JSON.stringify(normalized));
+    void persistLocalStore(eventTypesStorageKey, normalized);
     return normalized;
   };
 
@@ -8159,6 +14805,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       end: normalizeDateString(term.end)
     }));
     localStorage.setItem(termsStorageKey, JSON.stringify(payload));
+    void persistLocalStore(termsStorageKey, payload);
   };
 
   let terms = loadTerms();
@@ -8303,6 +14950,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       };
     });
     localStorage.setItem(eventsStorageKey, JSON.stringify(serialized));
+    void persistLocalStore(eventsStorageKey, serialized);
 
     try {
       const rawMap = localStorage.getItem(fixtureDateStorageKey);
@@ -8326,6 +14974,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
       });
 
       localStorage.setItem(fixtureDateStorageKey, JSON.stringify(nextMap));
+      void persistLocalStore(fixtureDateStorageKey, nextMap);
       window.dispatchEvent(
         new CustomEvent('bhanoyi:fixtures-updated', {
           detail: {
@@ -8385,11 +15034,16 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const buildFixtureEventTitle = (fixtureId, fixtureCatalog) => {
     const entry = fixtureCatalog?.[fixtureId];
     if (entry && typeof entry === 'object') {
-      const title = String(entry.title || '').trim();
-      if (title) return title;
       const home = String(entry.homeName || '').trim();
       const away = String(entry.awayName || '').trim();
-      if (home && away) return `${home} vs ${away}`;
+      const title = formatFixtureCalendarTitle({
+        homeName: home,
+        awayName: away,
+        sportKey: entry.sportKey || '',
+        sportLabel: entry.sport || '',
+        fallbackTitle: String(entry.title || '').trim()
+      });
+      if (title) return title;
     }
     const [section, round, leg, match, homeId, awayId] = String(fixtureId || '').split(':');
     if (section && round && leg && match && homeId && awayId) {
@@ -8481,7 +15135,7 @@ const hydrateSchoolCalendar = (calendarShell) => {
     }
   };
 
-  const events = loadEvents();
+  let events = loadEvents();
   let activeOverlayDate = '';
   let isReconcilingFixtures = false;
   let sportsOverlayHandledForCurrentSelection = false;
@@ -8539,6 +15193,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
         const isTimedFixture = Boolean(fixtureTime);
 
         const existingStyle = existingStyleByFixtureId.get(fixtureId) || {};
+        const fixtureDefinition = fixtureCatalog?.[fixtureId] && typeof fixtureCatalog[fixtureId] === 'object'
+          ? fixtureCatalog[fixtureId]
+          : {};
+        const sportDefinition = resolveSportCodeDefinition(fixtureDefinition.sportKey || fixtureDefinition.sport || '');
 
         const newEntry = calendar.addEvent({
           id: `${fixtureId}:event`,
@@ -8551,6 +15209,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
           extendedProps: {
             eventType: existingStyle.eventType || 'Sports',
             fixtureId,
+            sportKey: sportDefinition?.key || '',
+            sportLabel: sportDefinition?.label || String(fixtureDefinition.sport || '').trim(),
             notes: existingStyle.notes || '',
             fixtureAuto: true
           }
@@ -8602,13 +15262,14 @@ const hydrateSchoolCalendar = (calendarShell) => {
     const fixtureId = String(eventEntry?.extendedProps?.fixtureId || '').trim();
 
     if (fixtureId) {
-      const matched = rawTitle.match(/^(.+?)\s+(?:vs|v\.?|versus)\s+(.+)$/i);
+      const fixtureTitle = stripFixtureSportPrefix(rawTitle);
+      const matched = fixtureTitle.match(/^(.+?)\s+(?:vs|v\.?|versus)\s+(.+)$/i);
       if (matched) {
         const homeCode = shortFixtureTeamCode(matched[1]);
         const awayCode = shortFixtureTeamCode(matched[2]);
         return `${homeCode} vs ${awayCode}`;
       }
-      return truncateCalendarTitle(rawTitle, 13);
+      return truncateCalendarTitle(fixtureTitle || rawTitle, 13);
     }
 
     return truncateCalendarTitle(rawTitle, 20);
@@ -8746,8 +15407,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
     sportsOverlayHandledForCurrentSelection = true;
   };
 
-  const renderDayOverlayList = (dateString) => {
-    if (!(dayOverlayList instanceof HTMLElement)) return;
+  const renderDayEventList = (targetNode, dateString) => {
+    if (!(targetNode instanceof HTMLElement)) return;
 
     const dayEvents = calendar
       .getEvents()
@@ -8755,24 +15416,36 @@ const hydrateSchoolCalendar = (calendarShell) => {
       .sort((left, right) => eventStartStamp(left) - eventStartStamp(right));
 
     if (!dayEvents.length) {
-      dayOverlayList.innerHTML = '<p class="calendar-day-empty">No events on this day.</p>';
+      targetNode.innerHTML = '<p class="calendar-day-empty">No events on this day.</p>';
       return;
     }
 
-    dayOverlayList.innerHTML = dayEvents
+    targetNode.innerHTML = dayEvents
       .map((entry) => {
-        const eventType = escapeHtmlText(String(entry.extendedProps?.eventType || 'General'));
-        const eventTypeWithIcon = escapeHtmlText(formatEventTypeWithIcon(eventType));
-        const title = escapeHtmlText(String(entry.title || 'Untitled event'));
+        const sportLabel = String(entry.extendedProps?.sportLabel || entry.extendedProps?.sportKey || '').trim();
+        const eventType = sportLabel || String(entry.extendedProps?.eventType || 'General');
+        const eventTypeWithIcon = escapeHtmlText(
+          sportLabel ? formatSportCodeWithEmoji(sportLabel) : formatEventTypeWithIcon(eventType)
+        );
+        const rawTitle = String(entry.title || 'Untitled event');
+        const visibleTitle = sportLabel ? stripFixtureSportPrefix(rawTitle) : rawTitle;
+        const title = escapeHtmlText(visibleTitle);
         const eventId = escapeHtmlAttribute(String(entry.id || ''));
         const timeLabel = escapeHtmlText(formatTimeLabel(entry));
-        return `
-          <div class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
-            <button type="button" class="calendar-day-event-open" data-calendar-day-event-open="${eventId}">
+        const detailMarkup = `
               <span class="calendar-day-event-time">${timeLabel}</span>
               <span class="calendar-day-event-title">${title}</span>
-              <span class="calendar-day-event-type">${eventTypeWithIcon}</span>
-            </button>
+              <span class="calendar-day-event-type">${eventTypeWithIcon}</span>`;
+        const eventMarkup = isAdminMode
+          ? `<button type="button" class="calendar-day-event-open" data-calendar-day-event-open="${eventId}">
+${detailMarkup}
+            </button>`
+          : `<div class="calendar-day-event-open calendar-day-event-display" role="group" aria-label="${title}">
+${detailMarkup}
+            </div>`;
+        return `
+          <div class="calendar-day-event-row" data-calendar-day-event-id="${eventId}">
+            ${eventMarkup}
             ${
               isAdminMode
                 ? `<button type="button" class="btn btn-secondary calendar-day-event-delete" data-calendar-day-event-delete="${eventId}" aria-label="Delete ${title}">Delete</button>`
@@ -8784,10 +15457,43 @@ const hydrateSchoolCalendar = (calendarShell) => {
       .join('');
   };
 
+  const renderDayOverlayList = (dateString) => {
+    renderDayEventList(dayOverlayList, dateString);
+  };
+
+  const renderInlineDayList = (dateString) => {
+    renderDayEventList(inlineDayList, dateString);
+  };
+
+  const hideInlineDayPanel = () => {
+    activeOverlayDate = '';
+    if (inlineDayPanel instanceof HTMLElement) {
+      inlineDayPanel.classList.add('is-hidden');
+    }
+  };
+
   const showDayOverlay = (dateString) => {
     const normalized = normalizeDateString(dateString);
-    if (!(dayOverlay instanceof HTMLElement) || !normalized) return;
+    if (!normalized) return;
     activeOverlayDate = normalized;
+    if (useInlineDayPanel) {
+      if (inlineDayTitle instanceof HTMLElement) {
+        inlineDayTitle.textContent = `Events • ${formatOverlayDateTitle(normalized)}`;
+      }
+      renderInlineDayList(normalized);
+      if (inlineDayPanel instanceof HTMLElement) {
+        inlineDayPanel.classList.remove('is-hidden');
+        inlineDayPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      const firstInlineRow = inlineDayPanel?.querySelector('[data-calendar-day-event-open]');
+      if (firstInlineRow instanceof HTMLButtonElement) {
+        firstInlineRow.focus();
+      } else if (inlineDayCloseButton instanceof HTMLButtonElement) {
+        inlineDayCloseButton.focus();
+      }
+      return;
+    }
+    if (!(dayOverlay instanceof HTMLElement)) return;
     if (dayOverlayTitle instanceof HTMLElement) {
       dayOverlayTitle.textContent = `Events • ${formatOverlayDateTitle(normalized)}`;
     }
@@ -8803,6 +15509,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   const refreshDayOverlay = () => {
     if (!activeOverlayDate) return;
+    if (useInlineDayPanel) {
+      renderInlineDayList(activeOverlayDate);
+      return;
+    }
     renderDayOverlayList(activeOverlayDate);
   };
 
@@ -8904,7 +15614,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
     plugins: [dayGridPlugin, interactionPlugin],
     initialView: 'dayGridMonth',
     height: 'auto',
-    dayMaxEvents: 3,
+    dayMaxEvents: isCompactPublicCalendar ? 2 : 3,
+    fixedWeekCount: !isCompactPublicCalendar,
+    showNonCurrentDates: !isCompactPublicCalendar,
+    headerToolbar: isCompactPublicCalendar
+      ? { left: 'prev,next', center: 'title', right: '' }
+      : { left: 'prev,next today', center: 'title', right: '' },
     eventOrder: 'start,-duration,allDay,title',
     editable: isAdminMode,
     eventStartEditable: isAdminMode,
@@ -8912,7 +15627,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
     eventContent: (arg) => {
       if (arg.event.display === 'background') return true;
       const typeLabel = normalizeEventTypeLabel(arg.event.extendedProps?.eventType || 'General');
-      const icon = resolveEventTypeIcon(typeLabel);
+      const fixtureSport = resolveSportCodeDefinition(
+        arg.event.extendedProps?.sportKey || arg.event.extendedProps?.sportLabel || ''
+      );
+      const icon = fixtureSport?.emoji || resolveEventTypeIcon(typeLabel);
       const compactTitle = compactCalendarEventTitle(arg.event);
 
       const wrapper = document.createElement('div');
@@ -9069,7 +15787,14 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   window.addEventListener('storage', (event) => {
     if (!event.key) return;
-    if (event.key === fixtureDateStorageKey || event.key === fixtureCatalogStorageKey) {
+    if (event.key === eventsStorageKey || event.key === eventTypesStorageKey || event.key === termsStorageKey) {
+      refreshCalendarStateFromStorage();
+      return;
+    }
+    if (
+      event.key === fixtureDateStorageKey ||
+      event.key === fixtureCatalogStorageKey
+    ) {
       reconcileFixtureEvents();
     }
   });
@@ -9082,6 +15807,10 @@ const hydrateSchoolCalendar = (calendarShell) => {
 
   dayOverlayCloseButton?.addEventListener('click', () => {
     hideDayOverlay();
+  });
+
+  inlineDayCloseButton?.addEventListener('click', () => {
+    hideInlineDayPanel();
   });
 
   dayOverlay?.addEventListener('click', (event) => {
@@ -9134,6 +15863,22 @@ const hydrateSchoolCalendar = (calendarShell) => {
         writeEventToForm(eventEntry);
         hideDayOverlay();
       }
+    }
+  });
+
+  inlineDayPanel?.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const openButton = target.closest('[data-calendar-day-event-open]');
+    if (!(openButton instanceof HTMLButtonElement)) return;
+    const eventId = String(openButton.dataset.calendarDayEventOpen || '').trim();
+    if (!eventId) return;
+    const eventEntry = calendar.getEventById(eventId);
+    if (!eventEntry) return;
+    if (isAdminMode) {
+      writeEventToForm(eventEntry);
+      hideInlineDayPanel();
     }
   });
 
@@ -9501,6 +16246,50 @@ const hydrateSchoolCalendar = (calendarShell) => {
     });
   }
 
+  const refreshCalendarStateFromStorage = () => {
+    eventTypes = loadEventTypes();
+    terms = loadTerms();
+
+    if (isAdminMode && form instanceof HTMLFormElement) {
+      renderEventTypeOptions();
+      renderEventTypesEditor();
+      clearForm();
+    }
+
+    if (isAdminMode && termsForm instanceof HTMLFormElement) {
+      hydrateTermsForm();
+    }
+
+    calendar
+      .getEvents()
+      .filter((entry) => entry.display !== 'background')
+      .forEach((entry) => entry.remove());
+
+    events = loadEvents();
+    events.forEach((entry) => {
+      calendar.addEvent(entry);
+    });
+
+    renderTermBackgroundEvents(calendar);
+    reconcileFixtureEvents();
+    refreshDayOverlay();
+    renderDayEventCountBadges();
+  };
+
+  const bootstrapCalendarRemoteSync = async () => {
+    await Promise.all([
+      syncLocalStoreFromRemote(eventsStorageKey),
+      syncLocalStoreFromRemote(eventTypesStorageKey),
+      syncLocalStoreFromRemote(termsStorageKey),
+      syncLocalStoreFromRemote(fixtureDateStorageKey),
+      syncLocalStoreFromRemote(fixtureCatalogStorageKey)
+    ]).catch(() => null);
+
+    refreshCalendarStateFromStorage();
+  };
+
+  void bootstrapCalendarRemoteSync();
+
   const targetDate = normalizeDateString(incomingDate);
   if (targetDate) {
     calendar.gotoDate(targetDate);
@@ -9508,11 +16297,12 @@ const hydrateSchoolCalendar = (calendarShell) => {
 };
 
 const renderSectionByType = (section, sectionIndex, context = {}) => {
-  if (!isAdminModeEnabled() && isAdminOnlySectionForPublic(section)) {
+  if (isPublicAudienceEnabled() && isAdminOnlySectionForPublic(section)) {
     return '';
   }
 
   const fallbackSectionKey = section.sectionKey || `section_${sectionIndex}`;
+  const publicConcise = isPublicAudienceEnabled();
   const effectiveSection = resolveAudienceSectionCopy(
     resolveContactInformationSection(resolveHomePrincipalSidePanel(section, context), context),
     context
@@ -9523,6 +16313,9 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
   }
 
   if (effectiveSection.type === 'fixture-creator') {
+    if (!isAdminModeEnabled()) {
+      return renderPublicFixtureBoardSection(effectiveSection, sectionIndex);
+    }
     return renderFixtureCreatorSection(effectiveSection, sectionIndex, context);
   }
 
@@ -9550,7 +16343,8 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
               .map((item, index) =>
                 renderCard(item, effectiveSection.clickable, {
                   sectionKey: fallbackSectionKey,
-                  sortOrder: index
+                  sortOrder: index,
+                  concise: publicConcise
                 })
               )
               .join('')}
@@ -9569,13 +16363,17 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
         <div class="container section-grid">
           <div>
             <h2>${effectiveSection.title}</h2>
-            <p>${effectiveSection.body}</p>
-            ${effectiveSection.list ? `<ul class="list">${effectiveSection.list.map((entry) => `<li>${entry}</li>`).join('')}</ul>` : ''}
+            <p>${publicConcise ? toConcisePublicText(effectiveSection.body, 120) : effectiveSection.body}</p>
+            ${effectiveSection.list
+              ? `<ul class="list">${effectiveSection.list
+                  .map((entry) => `<li>${publicConcise ? toConcisePublicText(entry, 88) : entry}</li>`)
+                  .join('')}</ul>`
+              : ''}
           </div>
           <aside class="panel">
             <img class="split-panel-image ${hasPanelImage ? '' : 'is-hidden'}" src="${hasPanelImage ? panelImageUrl : ''}" alt="${effectiveSection.panel.title}" loading="lazy" />
             <h3>${effectiveSection.panel.title}</h3>
-            <p>${effectiveSection.panel.body}</p>
+            <p>${publicConcise ? toConcisePublicText(effectiveSection.panel.body, 110) : effectiveSection.panel.body}</p>
             ${effectiveSection.panel.link ? `<a href="${effectiveSection.panel.link.href}">${effectiveSection.panel.link.label}</a>` : ''}
           </aside>
         </div>
@@ -9593,7 +16391,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
           <div class="contact-grid">
             ${effectiveSection.items
               .map(
-                (item, index) => `<article class="panel" data-contact-index="${index}"><h3>${item.title}</h3><p>${item.body}</p></article>`
+                (item, index) => `<article class="panel" data-contact-index="${index}"><h3>${item.title}</h3><p>${publicConcise ? toConcisePublicText(item.body, 90) : item.body}</p></article>`
               )
               .join('')}
           </div>
@@ -9618,7 +16416,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
                       ${item.tag ? `<span class="notice-tag">${item.tag}</span>` : ''}
                     </div>
                     <h3 class="notice-title">${item.title}</h3>
-                    <p class="notice-body">${item.body}</p>
+                    <p class="notice-body">${publicConcise ? toConcisePublicText(item.body, 100) : item.body}</p>
                   </article>
                 `
               )
@@ -9641,7 +16439,7 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
                 `
                   <article class="panel download-item" data-editable-download="true" data-download-id="${item.id || ''}" data-sort-order="${index}">
                     <h3>${item.title}</h3>
-                    <p>${item.body}</p>
+                    <p>${publicConcise ? toConcisePublicText(item.body, 95) : item.body}</p>
                     <a class="btn btn-secondary download-link" href="${item.href}">${item.linkLabel || 'Download'}</a>
                   </article>
                 `
@@ -9652,6 +16450,10 @@ const renderSectionByType = (section, sectionIndex, context = {}) => {
         </div>
       </section>
     `;
+  }
+
+  if (effectiveSection.type === 'league-standings') {
+    return renderLeagueStandingsSection(effectiveSection, sectionIndex, context);
   }
 
   return '';
@@ -10354,6 +17156,270 @@ export const initMatchEventLogs = () => {
   logs.forEach((log) => hydrateMatchLog(log));
 };
 
+const hydratePublicFixtureBoard = (boardNode) => {
+  const rawConfig = String(boardNode?.dataset?.publicFixtureConfig || '').trim();
+  if (!rawConfig) return;
+
+  let config;
+  try {
+    config = JSON.parse(rawConfig);
+  } catch {
+    return;
+  }
+
+  const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
+  const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
+  const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
+  const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+  const activeStaffProfile = isStaffModeEnabled() ? resolveActiveStaffProfile() : null;
+  const managedHouseId = String(activeStaffProfile?.houseId || '').trim().toLowerCase();
+  const isStaffManagerMode = isStaffModeEnabled() && Boolean(managedHouseId);
+  const canOpenMatchLogs = isAdminModeEnabled() || isStaffManagerMode;
+
+  const statusNode = boardNode.querySelector('[data-public-fixture-status]');
+  const dateSelect = boardNode.querySelector('[data-public-fixture-date]');
+  const firstLegList = boardNode.querySelector('[data-public-fixture-first-leg]');
+  const returnLegList = boardNode.querySelector('[data-public-fixture-return-leg]');
+
+  if (!(dateSelect instanceof HTMLSelectElement) || !(firstLegList instanceof HTMLElement) || !(returnLegList instanceof HTMLElement)) {
+    return;
+  }
+
+  let selectedDate = '';
+  let fixtureCatalog = {};
+  let fixtureDateMap = {};
+  let logsByFixture = {};
+
+  const parseDateTimeStamp = (stamp) => {
+    const normalized = normalizeFixtureStampGlobal(stamp);
+    if (!normalized) return Number.MAX_SAFE_INTEGER;
+    const parsed = splitFixtureStampGlobal(normalized);
+    const candidate = parsed.time ? `${parsed.date}T${parsed.time}` : `${parsed.date}T23:59`;
+    const epoch = new Date(candidate).getTime();
+    return Number.isFinite(epoch) ? epoch : Number.MAX_SAFE_INTEGER;
+  };
+
+  const formatDateLabel = (dateValue) => {
+    const normalized = normalizeFixtureDateOnlyGlobal(dateValue);
+    if (!normalized) return 'Unknown date';
+    const parsed = new Date(`${normalized}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return normalized;
+    return parsed.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+  };
+
+  const formatTimeLabel = (value) => {
+    const normalized = normalizeFixtureTimeOnlyGlobal(value);
+    return normalized || 'TBD';
+  };
+
+  const resolveLegBucket = (fixture) => {
+    const raw = String(fixture?.leg || fixture?.legLabel || '').trim().toLowerCase();
+    if (/(return|second|leg\s*2|\b2\b)/i.test(raw)) return 'return';
+    if (/(first|leg\s*1|\b1\b)/i.test(raw)) return 'first';
+    return 'first';
+  };
+
+  const canAccessFixture = (fixture) => {
+    if (isAdminModeEnabled()) return true;
+    if (!isStaffManagerMode) return false;
+
+    const homeId = String(fixture?.homeId || '').trim().toLowerCase();
+    const awayId = String(fixture?.awayId || '').trim().toLowerCase();
+    return homeId === managedHouseId || awayId === managedHouseId;
+  };
+
+  const readFixtures = () => {
+    const rows = Object.entries(fixtureCatalog)
+      .map(([fixtureId, fixtureData]) => {
+        const fixture = fixtureData && typeof fixtureData === 'object' ? fixtureData : {};
+        const stamp = splitFixtureStampGlobal(fixtureDateMap[fixtureId]);
+        if (!stamp.date) return null;
+
+        const homeName = String(fixture.homeName || fixture.homeId || 'Home').trim() || 'Home';
+        const awayName = String(fixture.awayName || fixture.awayId || 'Away').trim() || 'Away';
+        if (!homeName || !awayName) return null;
+
+        return {
+          fixtureId,
+          date: stamp.date,
+          time: stamp.time,
+          homeId: String(fixture.homeId || '').trim().toLowerCase(),
+          awayId: String(fixture.awayId || '').trim().toLowerCase(),
+          legBucket: resolveLegBucket(fixture),
+          homeName,
+          awayName,
+          stamp: normalizeFixtureStampGlobal(fixtureDateMap[fixtureId])
+        };
+      })
+      .filter(Boolean)
+      .filter((fixture) => canAccessFixture(fixture))
+      .sort((left, right) => {
+        const leftStamp = parseDateTimeStamp(left.stamp);
+        const rightStamp = parseDateTimeStamp(right.stamp);
+        if (leftStamp !== rightStamp) return leftStamp - rightStamp;
+        return left.fixtureId.localeCompare(right.fixtureId);
+      });
+
+    return rows;
+  };
+
+  const renderFixtures = (targetNode, fixtures, emptyText) => {
+    if (!fixtures.length) {
+      targetNode.innerHTML = `<li class="public-fixture-empty">${escapeHtmlText(emptyText)}</li>`;
+      return;
+    }
+
+    targetNode.innerHTML = fixtures
+      .map(
+        (fixture) => {
+          const storedLog = logsByFixture[fixture.fixtureId];
+          const summaryMeta = summarizeMatchLogEntry(storedLog);
+          const summaryLabel = summaryMeta.compactLabel || 'No log yet';
+          const logButtonMarkup = canOpenMatchLogs
+            ? `
+              <div class="fixture-date-edit-wrap">
+                <span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>
+                <button
+                  type="button"
+                  class="fixture-date-link"
+                  data-fixture-open-log
+                  data-fixture-log-id="${escapeHtmlAttribute(fixture.fixtureId)}"
+                  data-fixture-log-date="${escapeHtmlAttribute(fixture.date)}"
+                >${summaryMeta.eventCount > 0 ? 'Edit<wbr> log' : 'Log<wbr> match'}</button>
+              </div>
+            `
+            : '';
+
+          return `
+          <li class="public-fixture-item">
+            <p class="public-fixture-time">${escapeHtmlText(formatTimeLabel(fixture.time))}</p>
+            <p class="public-fixture-teams">${escapeHtmlText(fixture.homeName)} <span aria-hidden="true">vs</span> ${escapeHtmlText(fixture.awayName)}</p>
+            ${logButtonMarkup}
+          </li>
+        `;
+        }
+      )
+      .join('');
+  };
+
+  const render = () => {
+    const allFixtures = readFixtures();
+    const now = Date.now();
+    const dates = Array.from(new Set(allFixtures.map((entry) => entry.date))).sort((left, right) => {
+      return parseDateTimeStamp(`${left}T00:00`) - parseDateTimeStamp(`${right}T00:00`);
+    });
+
+    const nextUpcomingFixture = allFixtures.find((entry) => parseDateTimeStamp(entry.stamp) >= now) || null;
+    const nextUpcomingDate = nextUpcomingFixture?.date || '';
+    const fallbackDate = nextUpcomingDate || dates[dates.length - 1] || '';
+
+    if (!selectedDate || !dates.includes(selectedDate)) {
+      selectedDate = fallbackDate;
+    }
+
+    dateSelect.innerHTML = [
+      '<option value="">Select fixture date</option>',
+      ...dates.map((dateValue) => {
+        const label = formatDateLabel(dateValue);
+        return `<option value="${escapeHtmlAttribute(dateValue)}"${dateValue === selectedDate ? ' selected' : ''}>${escapeHtmlText(label)}</option>`;
+      })
+    ].join('');
+
+    const fixturesForDay = allFixtures.filter((entry) => entry.date === selectedDate);
+    const firstLegFixtures = fixturesForDay.filter((entry) => entry.legBucket === 'first');
+    const returnLegFixtures = fixturesForDay.filter((entry) => entry.legBucket === 'return');
+
+    renderFixtures(firstLegList, firstLegFixtures, 'No first-leg fixtures for this day.');
+    renderFixtures(returnLegList, returnLegFixtures, 'No return fixtures for this day.');
+
+    if (statusNode) {
+      if (!allFixtures.length) {
+        statusNode.textContent = isStaffManagerMode ? 'No fixtures for your house have been published yet.' : 'No fixtures published yet.';
+      } else if (!selectedDate) {
+        statusNode.textContent = 'Choose a day to view fixtures.';
+      } else {
+        statusNode.textContent = `${fixturesForDay.length} fixture${fixturesForDay.length === 1 ? '' : 's'} on ${formatDateLabel(selectedDate)}.`;
+      }
+    }
+  };
+
+  const refresh = () => {
+    fixtureCatalog = readLocalStorageObject(fixtureCatalogStorageKey);
+    fixtureDateMap = readLocalStorageObject(fixtureDateStorageKey);
+    logsByFixture = readLocalStorageObject(matchLogByFixtureStorageKey);
+    render();
+  };
+
+  dateSelect.addEventListener('change', () => {
+    selectedDate = String(dateSelect.value || '').trim();
+    render();
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (!event.key) return;
+    if (
+      event.key !== fixtureCatalogStorageKey &&
+      event.key !== fixtureDateStorageKey &&
+      event.key !== matchLogByFixtureStorageKey
+    ) {
+      return;
+    }
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:fixtures-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.sectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  window.addEventListener('bhanoyi:match-log-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  boardNode.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-fixture-open-log]');
+    if (!(trigger instanceof HTMLElement)) return;
+
+    event.preventDefault();
+    const fixtureId = String(trigger.dataset.fixtureLogId || '').trim();
+    const fixtureDate = normalizeFixtureDateOnlyGlobal(trigger.dataset.fixtureLogDate || '');
+    if (!fixtureId) return;
+
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:open-match-log-modal', {
+        detail: {
+          fixtureSectionKey,
+          fixtureId,
+          fixtureDate,
+          preferredSide: 'left'
+        }
+      })
+    );
+  });
+
+  void Promise.all([
+    syncLocalStoreFromRemote(fixtureCatalogStorageKey),
+    syncLocalStoreFromRemote(fixtureDateStorageKey)
+  ])
+    .catch(() => null)
+    .finally(() => {
+      refresh();
+    });
+};
+
+export const initPublicFixtureBoards = () => {
+  const boards = Array.from(document.querySelectorAll('[data-public-fixture-board="true"]'));
+  boards.forEach((board) => hydratePublicFixtureBoard(board));
+};
+
 export const initFixtureCreators = () => {
   const creators = Array.from(document.querySelectorAll('[data-fixture-creator="true"]'));
   creators.forEach((creator) => hydrateFixtureCreator(creator));
@@ -10367,6 +17433,11 @@ export const initSchoolCalendars = () => {
 export const initEnrollmentManagers = () => {
   const managers = Array.from(document.querySelectorAll('[data-enrollment-manager="true"]'));
   managers.forEach((manager) => hydrateEnrollmentManager(manager));
+};
+
+export const initLeagueStandings = () => {
+  const tables = Array.from(document.querySelectorAll('[data-league-standings="true"]'));
+  tables.forEach((table) => hydrateLeagueStandings(table));
 };
 
 export const renderFooter = (siteContent) => `

@@ -235,6 +235,7 @@
       "key": "sports",
       "metaTitle": "Sports | Bhanoyi Secondary School",
       "metaDescription": "Sports programmes, teams, fixtures, and learner development through athletics at Bhanoyi Secondary School.",
+      "sectionOrder": [2, 1, 3, 4, 0],
       "hero": {
         "eyebrow": "Athletics and teamwork",
         "title": "Sports",
@@ -246,7 +247,7 @@
           "title": "Follow Live Match Events",
           "sectionKey": "sports_match_log",
           "body": "Follow football or netball match events as they happen, with score updates shown live.",
-          "sport": "Football / Netball",
+          "sport": "Netball/Football",
           "competition": "Inter-House Friendly",
           "venue": "Main Field",
           "houseOptions": [
@@ -280,7 +281,7 @@
           "title": "View Season Fixtures",
           "sectionKey": "sports_fixture_creator",
           "body": "View the full home-and-away round-robin schedule for the selected houses.",
-          "sport": "Football / Netball",
+          "sport": "Netball/Football",
           "competition": "Inter-House League",
           "venue": "Main Field",
           "houseOptions": [
@@ -289,6 +290,21 @@
             { "id": "house_3", "name": "House 3" },
             { "id": "house_4", "name": "House 4" },
             { "id": "house_5", "name": "House 5" }
+          ]
+        },
+        {
+          "type": "league-standings",
+          "title": "League Standings Log",
+          "subtitle": "Inter-House League · Netball/Football · 2026 Season",
+          "fixtureSectionKey": "sports_fixture_creator",
+          "lastUpdated": "05 Mar 2026",
+          "sortNote": "Tie-break order: Pts > GD > GF",
+          "items": [
+            { "team": "House 1", "mp": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "pts": 0 },
+            { "team": "House 2", "mp": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "pts": 0 },
+            { "team": "House 3", "mp": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "pts": 0 },
+            { "team": "House 4", "mp": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "pts": 0 },
+            { "team": "House 5", "mp": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "pts": 0 }
           ]
         },
         {

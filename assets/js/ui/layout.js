@@ -1,16 +1,12 @@
-import {
-  initFixtureCreators,
-  initEnrollmentManagers,
-  initMatchEventLogs,
-  initSchoolCalendars,
-  initLatestNewsReaders,
-  initLatestNewsRotators,
-  renderFooter,
-  renderHeader,
-  renderSectionByIndex,
-  renderPageEmailForms,
-  renderSectionsWithContext
-} from './components.js';
+let componentsModulePromise;
+
+const loadComponentsModule = () => {
+  if (!componentsModulePromise) {
+    componentsModulePromise = import('./components.js');
+  }
+
+  return componentsModulePromise;
+};
 
 const upsertDescriptionMeta = (content) => {
   let element = document.querySelector('meta[name="description"]');
@@ -60,6 +56,137 @@ const bindMobileNav = () => {
       }
     });
   });
+};
+
+const resolveActiveStaffSessionEmail = () => {
+  if (typeof sessionStorage === 'undefined') return '';
+
+  try {
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = String(sessionStorage.key(index) || '').trim();
+      if (!key.startsWith('bhanoyi.staffSession.')) continue;
+      const value = String(sessionStorage.getItem(key) || '').trim().toLowerCase();
+      if (value) return value;
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+};
+
+const hasActiveStaffSession = () => Boolean(resolveActiveStaffSessionEmail());
+
+const installPublicCrudSurfaceGuard = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('admin') === '1' || params.get('staff') === '1') return;
+  if (document.body.dataset.publicCrudGuardInstalled === 'true') return;
+
+  // If another initialization path has already determined the audience
+  // (e.g. `renderSite` detected an active admin/staff session and set
+  // `document.body.dataset.audience`), respect that and avoid sanitizing
+  // the DOM. This prevents a race where components render admin controls
+  // then the guard later removes them because it couldn't detect the
+  // session fast enough.
+  try {
+    const existingAudience = String(document.body.dataset.audience || '').trim();
+    if (existingAudience === 'admin' || existingAudience === 'staff') {
+      document.body.dataset.publicCrudGuardInstalled = 'true';
+      return;
+    }
+  } catch {
+    // ignore and continue with the async detection below
+  }
+
+  // If the URL doesn't explicitly request admin/staff, detect a signed-in
+  // admin session asynchronously (e.g. Supabase). If a session exists, do
+  // not sanitize the DOM. This prevents logged-in admins from losing admin
+  // controls when `?admin=1` is not present.
+  (async () => {
+    if (hasActiveStaffSession()) {
+      document.body.dataset.publicCrudGuardInstalled = 'true';
+      return;
+    }
+
+    try {
+      const api = await import('../admin/api.ts');
+      if (api && typeof api.getSession === 'function') {
+        const session = await api.getSession().catch(() => null);
+        if (session) {
+          // mark installed to avoid repeated work and exit without sanitizing
+          document.body.dataset.publicCrudGuardInstalled = 'true';
+          return;
+        }
+      }
+    } catch {
+      // ignore and fall back to sanitizing
+    }
+
+    const sensitiveSelectors = [
+    '[data-post-news]',
+    '[data-standings-export]',
+    '[data-standings-export-combined]',
+    '[data-match-export]',
+    '[data-match-reset]',
+    '[data-match-clock-start]',
+    '[data-match-pause]',
+    '[data-match-resume]',
+    '[data-match-open-event-side]',
+    '[data-match-save-log]',
+    '[data-match-edit-event]',
+    '[data-match-delete-event]',
+    '[data-fixture-generate]',
+    '[data-fixture-export]',
+    '[data-fixture-export-csv]',
+    '[data-fixture-open-fairness-modal]',
+    '[data-fixture-rules-preview]',
+    '[data-fixture-rules-save]',
+    '[data-fixture-approve-resolved]',
+    '[data-fixture-approve-anyway]',
+    '[data-fixture-save-draft]',
+    '[data-enrollment-admin-only]',
+    '[data-enrollment-add-staff]',
+    '[data-enrollment-open-add-grade]',
+    '[data-enrollment-import-learners]',
+    '[data-enrollment-bulk-import-learners]',
+    '[data-enrollment-add-learner]',
+    '[data-calendar-admin-only]',
+    '[data-calendar-save]',
+    '[data-calendar-new]',
+    '[data-calendar-delete]',
+    '[data-event-type-add]',
+    '[data-event-types-save]',
+    '[data-terms-save]',
+    '[data-calendar-day-event-delete]',
+    '.calendar-color-popover'
+  ];
+
+  const sanitize = (root = document) => {
+    sensitiveSelectors.forEach((selector) => {
+      root.querySelectorAll(selector).forEach((node) => node.remove());
+    });
+
+    root.querySelectorAll('[data-editable-card], [data-editable-section]').forEach((node) => {
+      node.removeAttribute('data-editable-card');
+      node.removeAttribute('data-editable-section');
+    });
+  };
+
+    sanitize(document);
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          sanitize(node);
+        });
+      });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+    document.body.dataset.publicCrudGuardInstalled = 'true';
+  })();
 };
 
 const initCollapsiblePageSections = (pageKey) => {
@@ -207,7 +334,188 @@ const initCollapsiblePageSections = (pageKey) => {
   }
 };
 
-export const renderSite = (siteContent, page) => {
+// Global logout widget: appears bottom-right on all pages when a user is logged in (admin or staff)
+const installGlobalLogout = () => {
+  if (typeof document === 'undefined') return;
+  const existing = document.querySelector('.global-logout-wrap');
+  if (existing) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'global-logout-wrap';
+  wrap.style.position = 'fixed';
+  wrap.style.right = '16px';
+  wrap.style.bottom = '16px';
+  wrap.style.zIndex = '1100';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-secondary global-logout-btn';
+  btn.textContent = 'Logout';
+  btn.style.display = 'none';
+
+  btn.addEventListener('click', async () => {
+    // clear staff session storage keys
+    try {
+      const toRemove = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const k = sessionStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('bhanoyi.staffSession.') || k.startsWith('bhanoyi.staffSessionPassword.')) {
+          toRemove.push(k);
+        }
+      }
+      toRemove.forEach((k) => sessionStorage.removeItem(k));
+    } catch {
+      // ignore
+    }
+
+    // attempt to sign out Supabase admin session if present
+    try {
+      const api = await import('../admin/api.ts');
+      if (api && typeof api.signOut === 'function') {
+        await api.signOut();
+      }
+    } catch {
+      // ignore
+    }
+
+    // reload to reflect logged-out state
+    window.location.reload();
+  });
+
+  wrap.appendChild(btn);
+  document.body.appendChild(wrap);
+
+  const detect = async () => {
+    try {
+      let visible = false;
+
+      // detect staff session keys
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const k = sessionStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('bhanoyi.staffSession.') && String(sessionStorage.getItem(k) || '').trim()) {
+          visible = true;
+          break;
+        }
+      }
+
+      // detect Supabase admin session
+      if (!visible) {
+        try {
+          const api = await import('../admin/api.ts');
+          if (api && typeof api.getSession === 'function') {
+            const session = await api.getSession().catch(() => null);
+            if (session) visible = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      btn.style.display = visible ? '' : 'none';
+    } catch {
+      btn.style.display = 'none';
+    }
+  };
+
+  detect();
+    window.addEventListener('storage', detect);
+  
+    
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', () => {
+    try {
+      installGlobalLogout();
+    } catch {}
+  });
+}
+
+export const renderSite = async (siteContent, page) => {
+  const params = new URLSearchParams(window.location.search);
+  const requestedAdminMode = params.get('admin') === '1';
+  const requestedStaffMode = !requestedAdminMode && params.get('staff') === '1';
+  let adminMode = requestedAdminMode;
+  let staffMode = requestedStaffMode;
+
+  const configuredAdminEmails = String(import.meta.env.VITE_ADMIN_EMAILS || '')
+    .split(',')
+    .map((entry) => String(entry || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  const isAllowedAdminEmail = (email) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail || !configuredAdminEmails.length) return false;
+    return configuredAdminEmails.includes(normalizedEmail);
+  };
+
+  const clearAdminQueryFlag = () => {
+    try {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.delete('admin');
+      window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+    } catch {
+      // ignore URL cleanup failures
+    }
+  };
+
+  const resolveAllowedAdminSession = async () => {
+    try {
+      const api = await import('../admin/api.ts');
+      if (!api || typeof api.getSession !== 'function') return null;
+      const session = await api.getSession().catch(() => null);
+      const email = String(session?.user?.email || '').trim().toLowerCase();
+      if (!session || !isAllowedAdminEmail(email)) return null;
+      return session;
+    } catch {
+      return null;
+    }
+  };
+
+  if (requestedAdminMode) {
+    const allowedAdminSession = await resolveAllowedAdminSession();
+    if (!allowedAdminSession) {
+      adminMode = false;
+      clearAdminQueryFlag();
+    }
+  }
+
+  // If no explicit URL flag is present, try to detect a signed-in admin session
+  // (e.g. Supabase session). This ensures admin UI surfaces appear for signed-in
+  // admins without needing the `?admin=1` query param before components load.
+  if (!adminMode && !staffMode) {
+    if (hasActiveStaffSession()) {
+      staffMode = true;
+    }
+  }
+
+  if (!adminMode && !staffMode) {
+    const allowedAdminSession = await resolveAllowedAdminSession();
+    if (allowedAdminSession) {
+      adminMode = true;
+    }
+  }
+
+  document.body.dataset.audience = adminMode ? 'admin' : staffMode ? 'staff' : 'public';
+
+  const {
+    initFixtureCreators,
+    initPublicFixtureBoards,
+    initEnrollmentManagers,
+    initLeagueStandings,
+    initMatchEventLogs,
+    initSchoolCalendars,
+    initLatestNewsReaders,
+    initLatestNewsRotators,
+    renderFooter,
+    renderHeader,
+    renderSectionByIndex,
+    renderPageEmailForms,
+    renderSectionsWithContext
+  } = await loadComponentsModule();
+
   document.title = page.metaTitle;
   upsertDescriptionMeta(page.metaDescription);
   upsertFavicon(siteContent.school.logoPath);
@@ -284,6 +592,9 @@ export const renderSite = (siteContent, page) => {
   initLatestNewsReaders();
   initMatchEventLogs();
   initFixtureCreators();
+  initPublicFixtureBoards();
+  initLeagueStandings();
   initSchoolCalendars();
   initEnrollmentManagers();
+  installPublicCrudSurfaceGuard();
 };
