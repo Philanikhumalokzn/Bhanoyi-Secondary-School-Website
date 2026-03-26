@@ -2867,16 +2867,23 @@ function hydrateMatchLog(matchLogNode) {
 
   if (managerSportSelect instanceof HTMLSelectElement) {
     managerSportSelect.value = selectedManagerSportKey;
+    managerSportSelect.disabled = isAdminModeEnabled();
   }
 
-  const canManageTeam = (teamId) => {
+  const canViewTeam = (teamId) => {
     const normalizedTeamId = String(teamId || '').trim().toLowerCase();
     if (!normalizedTeamId) return false;
     if (isAdminModeEnabled()) return true;
     return isStaffManagerMode && normalizedTeamId === managedHouseId;
   };
 
-  const canEditTeamEvents = (teamId) => isAdminModeEnabled() && canManageTeam(teamId);
+  const canEditCanonicalTeam = (teamId) => {
+    const normalizedTeamId = String(teamId || '').trim().toLowerCase();
+    if (!normalizedTeamId) return false;
+    return isStaffManagerMode && normalizedTeamId === managedHouseId;
+  };
+
+  const canEditTeamEvents = (teamId) => isAdminModeEnabled() && canViewTeam(teamId);
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
 
@@ -2902,7 +2909,9 @@ function hydrateMatchLog(matchLogNode) {
 
   const getAccessibleHouseIds = () => {
     if (isAdminModeEnabled()) {
-      return Array.from(new Set((Array.isArray(config.houseOptions) ? config.houseOptions : []).map((entry) => String(entry.id || '').trim().toLowerCase()).filter(Boolean)));
+      const fixture = getCurrentFixture();
+      if (!fixture) return [];
+      return Array.from(new Set([fixture.homeId, fixture.awayId].map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean)));
     }
     return managedHouseId ? [managedHouseId] : [];
   };
@@ -2966,6 +2975,28 @@ function hydrateMatchLog(matchLogNode) {
     };
   };
 
+  const getCanonicalTeamListForTeam = (teamId) => {
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    const savedSheet = getTeamSheet(normalizedTeamId, { saved: true });
+    return {
+      starters: normalizeMatchPlayersForTeam(savedSheet.starters || [], { houseId: normalizedTeamId }),
+      substitutes: normalizeMatchPlayersForTeam(savedSheet.substitutes || [], { houseId: normalizedTeamId })
+    };
+  };
+
+  const getTeamListSearchPlayers = (teamId, { readOnly = false } = {}) => {
+    if (readOnly) {
+      const normalizedTeamId = getNormalizedTeamId(teamId);
+      const canonical = getCanonicalTeamListForTeam(normalizedTeamId);
+      return normalizeMatchPlayersForTeam([...canonical.starters, ...canonical.substitutes], { houseId: normalizedTeamId });
+    }
+
+    const normalizedTeamId = getNormalizedTeamId(teamId);
+    const current = getTeamSheet(normalizedTeamId);
+    const selectedIds = new Set([...current.starters, ...current.substitutes].map((player) => player.id));
+    return getPlayersForTeam(normalizedTeamId).filter((player) => !selectedIds.has(player.id));
+  };
+
   const resolveFixturePlayersByTeam = (fixture, entry) => {
     const housePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel());
     const nextSource = resolveManagedSquadPlayersByTeam(fixture);
@@ -2988,9 +3019,13 @@ function hydrateMatchLog(matchLogNode) {
 
     const accessibleHouseIds = getAccessibleHouseIds();
     if (!accessibleHouseIds.length) {
-      managerSquadNode.innerHTML = '<div class="match-log-squad-empty">No house assignment was found for this staff account.</div>';
+      managerSquadNode.innerHTML = isAdminModeEnabled()
+        ? '<div class="match-log-squad-empty">Choose a fixture to inspect the submitted squads for the two teams.</div>'
+        : '<div class="match-log-squad-empty">No house assignment was found for this staff account.</div>';
       if (managerStatusNode instanceof HTMLElement) {
-        managerStatusNode.textContent = 'This staff account needs a house assignment before it can manage sports squads.';
+        managerStatusNode.textContent = isAdminModeEnabled()
+          ? 'Choose a fixture to inspect canonical squad records for the two teams.'
+          : 'This staff account needs a house assignment before it can manage sports squads.';
       }
       return;
     }
@@ -3007,8 +3042,11 @@ function hydrateMatchLog(matchLogNode) {
       const totalHouseStaff = availableOfficials.length + squad.officials.length;
       const remainingPlayerSlots = Math.max(0, MAX_HOUSE_SPORT_SQUAD_PLAYERS - squad.players.length);
       const houseLabel = getHouseLabel(houseId);
+      const readOnly = !canEditCanonicalTeam(houseId);
       const playerListId = `match-manager-player-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
       const officialListId = `match-manager-official-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+      const searchListId = `match-manager-search-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
+      const searchRecords = [...squad.players, ...squad.officials];
 
       return `
         <article class="match-log-squad-card" data-match-manager-card="${escapeHtmlAttribute(houseId)}">
@@ -3020,6 +3058,22 @@ function hydrateMatchLog(matchLogNode) {
             </div>
           </header>
           <p class="match-log-squad-helper">Only learners from this house can join the squad. Match-day team lists are chosen from these saved players.</p>
+          ${readOnly
+            ? `
+          <div class="match-log-squad-controls">
+            <label>
+              Search submitted squad
+              <input type="text" list="${searchListId}" placeholder="Type player or staff name" autocomplete="off" />
+              <datalist id="${searchListId}">
+                ${searchRecords
+                  .map((entry) => `<option value="${escapeHtmlAttribute(entry.name)}" label="${escapeHtmlAttribute(entry.assignmentRole || entry.roleLabel || entry.admissionNo || entry.name)}"></option>`)
+                  .join('')}
+              </datalist>
+            </label>
+          </div>
+          <p class="match-log-squad-helper">Read only. Team managers own the canonical squad records for this fixture.</p>
+          `
+            : `
           <div class="match-log-squad-controls">
             <label>
               Add player
@@ -3050,6 +3104,7 @@ function hydrateMatchLog(matchLogNode) {
               <button type="button" class="btn btn-secondary" data-match-manager-add-official="${escapeHtmlAttribute(houseId)}">Add official</button>
             </div>
           </div>
+          `}
           <div class="match-log-squad-columns">
             <section class="match-log-squad-group">
               <header class="match-log-squad-group-head">
@@ -3067,9 +3122,11 @@ function hydrateMatchLog(matchLogNode) {
                             </div>
                             <span class="match-log-squad-item-meta">${escapeHtmlText(player.admissionNo ? `Adm ${player.admissionNo}` : 'Learner')}</span>
                           </div>
-                          <div class="match-log-squad-item-actions">
+                          ${readOnly
+                            ? ''
+                            : `<div class="match-log-squad-item-actions">
                             <button type="button" class="btn btn-secondary" data-match-manager-remove-player="${escapeHtmlAttribute(houseId)}" data-player-id="${escapeHtmlAttribute(player.id)}">Remove</button>
-                          </div>
+                          </div>`}
                         </li>
                       `
                     )
@@ -3093,9 +3150,11 @@ function hydrateMatchLog(matchLogNode) {
                             </div>
                             <span class="match-log-squad-item-meta">${escapeHtmlText(official.assignmentRole || official.roleLabel || 'Official')}</span>
                           </div>
-                          <div class="match-log-squad-item-actions">
+                          ${readOnly
+                            ? ''
+                            : `<div class="match-log-squad-item-actions">
                             <button type="button" class="btn btn-secondary" data-match-manager-remove-official="${escapeHtmlAttribute(houseId)}" data-official-id="${escapeHtmlAttribute(official.id)}">Remove</button>
-                          </div>
+                          </div>`}
                         </li>
                       `
                     )
@@ -3120,6 +3179,9 @@ function hydrateMatchLog(matchLogNode) {
         })
         .join(' · ');
       managerStatusNode.textContent = `Managing ${sportLabel} squads. ${summary}.`;
+      if (isAdminModeEnabled()) {
+        managerStatusNode.textContent = `Inspecting submitted ${sportLabel} squads for this fixture. ${summary}. Team managers own these records.`;
+      }
     }
   };
 
@@ -3559,7 +3621,7 @@ function hydrateMatchLog(matchLogNode) {
       return;
     }
 
-    const renderSquadList = (teamId, groupKey, title, entries) => {
+    const renderSquadList = (teamId, groupKey, title, entries, { editable = true } = {}) => {
       const moveTarget = groupKey === 'starters' ? 'substitutes' : 'starters';
       const moveLabel = groupKey === 'starters' ? 'To bench' : 'To XI';
       return `
@@ -3587,15 +3649,17 @@ function hydrateMatchLog(matchLogNode) {
                         <span class="match-log-squad-item-meta">${escapeHtmlText(meta || 'Learner')}</span>
                         ${reasons ? `<span class="match-log-squad-item-reasons">${escapeHtmlText(reasons)}</span>` : ''}
                       </div>
-                      <div class="match-log-squad-item-actions">
+                      ${editable
+                        ? `<div class="match-log-squad-item-actions">
                         <button type="button" class="btn btn-secondary" data-match-squad-move="${moveTarget}" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">${moveLabel}</button>
                         <button type="button" class="btn btn-secondary" data-match-squad-remove="true" data-current-group="${groupKey}" data-team-id="${escapeHtmlAttribute(teamId)}" data-player-id="${escapeHtmlAttribute(player.id)}">Remove</button>
-                      </div>
+                      </div>`
+                        : ''}
                     </li>
                   `;
                 })
                 .join('')}</ul>`
-            : '<p class="match-log-squad-empty">No players added yet.</p>'}
+            : `<p class="match-log-squad-empty">${editable ? 'No players added yet.' : 'No submitted players in this group yet.'}</p>`}
         </section>
       `;
     };
@@ -3604,22 +3668,23 @@ function hydrateMatchLog(matchLogNode) {
       { teamId: fixture.homeId, teamName: fixture.homeName },
       { teamId: fixture.awayId, teamName: fixture.awayName }
     ]
-      .filter(({ teamId }) => canManageTeam(teamId))
+      .filter(({ teamId }) => canViewTeam(teamId))
       .map(({ teamId, teamName }) => {
       const teamPlayers = getPlayersForTeam(teamId);
       const teamSheet = getTeamSheet(teamId);
       const savedTeamSheet = getTeamSheet(teamId, { saved: true });
-      const availability = getMatchAvailabilityForTeam(teamId, { saved: false });
-      const validation = validateMatchTeamSheet(teamSheet);
+      const readOnly = !canEditCanonicalTeam(teamId);
+      const displayedTeamSheet = readOnly ? getCanonicalTeamListForTeam(teamId) : teamSheet;
+      const availability = getMatchAvailabilityForTeam(teamId, { saved: readOnly });
+      const validation = validateMatchTeamSheet(displayedTeamSheet);
       const savedValidation = validateMatchTeamSheet(savedTeamSheet);
       const isDirty = Boolean(squadDirtyByTeam?.[teamId]);
-      const selectedIds = new Set([...teamSheet.starters, ...teamSheet.substitutes].map((player) => player.id));
-      const availablePlayers = teamPlayers.filter((player) => !selectedIds.has(player.id));
-      const selectedCount = teamSheet.starters.length + teamSheet.substitutes.length;
+      const searchPlayers = getTeamListSearchPlayers(teamId, { readOnly });
+      const selectedCount = displayedTeamSheet.starters.length + displayedTeamSheet.substitutes.length;
       const totalSquadPlayers = teamPlayers.length;
-      const remainingSquadChoices = availablePlayers.length;
-      const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - teamSheet.starters.length);
-      const remainingBench = Math.max(0, MAX_MATCH_SUBSTITUTES - teamSheet.substitutes.length);
+      const remainingSquadChoices = searchPlayers.length;
+      const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - displayedTeamSheet.starters.length);
+      const remainingBench = Math.max(0, MAX_MATCH_SUBSTITUTES - displayedTeamSheet.substitutes.length);
       const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
       const activeNames = availability.isReady
         ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
@@ -3627,9 +3692,13 @@ function hydrateMatchLog(matchLogNode) {
           ? 'Starting XI must be exactly 11 players before this team list can go live.'
           : 'No team list set yet. Set the starting XI and substitutes before logging on-pitch events.';
       const validationMessage = validation.isReady
-        ? `Starting XI fixed at ${MAX_MATCH_STARTERS}. Substitutes ${teamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}.`
+        ? `Starting XI fixed at ${MAX_MATCH_STARTERS}. Substitutes ${displayedTeamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}.`
         : validation.errors[0];
-      const saveStateMessage = isDirty
+      const saveStateMessage = readOnly
+        ? savedValidation.isReady
+          ? 'Submitted team list is locked for match logging.'
+          : 'No submitted team list yet.'
+        : isDirty
         ? 'Unsaved team list changes.'
         : savedValidation.isReady
           ? 'Saved team list is live for event logging.'
@@ -3640,18 +3709,19 @@ function hydrateMatchLog(matchLogNode) {
           <header class="match-log-squad-card-head">
             <div>
               <h4>${escapeHtmlText(teamName)}</h4>
-              <p class="match-log-squad-summary">Starting XI ${teamSheet.starters.length}/${MAX_MATCH_STARTERS} · Substitutes ${teamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}</p>
+              <p class="match-log-squad-summary">Starting XI ${displayedTeamSheet.starters.length}/${MAX_MATCH_STARTERS} · Substitutes ${displayedTeamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}</p>
               <p class="match-log-squad-helper">Team list selected ${selectedCount}/${totalSquadPlayers} squad players. Remaining: ${remainingStarters} starters, ${remainingBench} substitutes, ${remainingSquadChoices} still available to add.</p>
             </div>
-            <button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>
+            ${readOnly ? '' : `<button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>`}
           </header>
           <p class="match-log-squad-helper">Goals, own goals, penalty goals, injuries, assists, and substitutions only use the current team list and on-pitch squad.</p>
           <div class="match-log-squad-controls">
             <label>
-              Find player
+              ${readOnly ? 'Search submitted team list' : 'Find player'}
               <input type="text" data-match-squad-search-input="${escapeHtmlAttribute(teamId)}" list="${datalistId}" placeholder="Type learner name" autocomplete="off" />
+              <input type="hidden" data-match-squad-search-mode="${readOnly ? 'readonly' : 'editable'}" />
               <datalist id="${datalistId}">
-                ${availablePlayers
+                ${searchPlayers
                   .map((player) => {
                     const discipline = getPlayerDisciplinaryStatus(teamId, player);
                     const descriptor = getDisciplinaryStatusDescriptor(discipline);
@@ -3667,11 +3737,13 @@ function hydrateMatchLog(matchLogNode) {
                   .join('')}
               </datalist>
             </label>
-            <div class="match-log-squad-control-actions">
+            ${readOnly
+              ? ''
+              : `<div class="match-log-squad-control-actions">
               <button type="button" class="btn btn-secondary" data-match-squad-add="starters" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Starting XI</button>
               <button type="button" class="btn btn-secondary" data-match-squad-add="substitutes" data-team-id="${escapeHtmlAttribute(teamId)}">Add to Bench</button>
               <button type="button" class="btn btn-primary" data-match-squad-save="true" data-team-id="${escapeHtmlAttribute(teamId)}"${isDirty ? '' : ' disabled'}>Save team list</button>
-            </div>
+            </div>`}
           </div>
           <p class="match-log-squad-helper">Only learners already registered in this sporting squad can be added to the match team list.</p>
           <p class="match-log-squad-helper">${escapeHtmlText(validationMessage)}</p>
@@ -3680,8 +3752,8 @@ function hydrateMatchLog(matchLogNode) {
             <span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>
           </div>
           <div class="match-log-squad-columns">
-            ${renderSquadList(teamId, 'starters', 'Starting XI', teamSheet.starters)}
-            ${renderSquadList(teamId, 'substitutes', 'Substitutes', teamSheet.substitutes)}
+            ${renderSquadList(teamId, 'starters', 'Starting XI', displayedTeamSheet.starters, { editable: !readOnly })}
+            ${renderSquadList(teamId, 'substitutes', 'Substitutes', displayedTeamSheet.substitutes, { editable: !readOnly })}
           </div>
           <p class="match-log-squad-active"><strong>Current on pitch:</strong> ${escapeHtmlText(activeNames)}</p>
         </article>
@@ -3691,17 +3763,19 @@ function hydrateMatchLog(matchLogNode) {
     squadManagerNode.innerHTML = cards.length
       ? `<div class="match-log-squad-grid">${cards.join('')}</div>`
       : '<div class="match-log-squad-empty">No team-list permissions are available for this fixture.</div>';
-    [fixture.homeId, fixture.awayId].filter((teamId) => canManageTeam(teamId)).forEach((teamId) => renderSquadCandidatePreview(teamId));
+    [fixture.homeId, fixture.awayId].filter((teamId) => canViewTeam(teamId)).forEach((teamId) => renderSquadCandidatePreview(teamId));
 
     if (squadStatusNode) {
       const homeSheet = getTeamSheet(fixture.homeId);
       const awaySheet = getTeamSheet(fixture.awayId);
-      if (canManageTeam(fixture.homeId) && canManageTeam(fixture.awayId)) {
+      if (canEditCanonicalTeam(fixture.homeId) && canEditCanonicalTeam(fixture.awayId)) {
         squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
       } else {
-        const ownTeamId = canManageTeam(fixture.homeId) ? fixture.homeId : fixture.awayId;
+        const ownTeamId = canViewTeam(fixture.homeId) ? fixture.homeId : fixture.awayId;
         const ownTeamName = ownTeamId === fixture.homeId ? fixture.homeName : fixture.awayName;
-        const ownSheet = ownTeamId === fixture.homeId ? homeSheet : awaySheet;
+        const ownSheet = canEditCanonicalTeam(ownTeamId)
+          ? ownTeamId === fixture.homeId ? homeSheet : awaySheet
+          : getCanonicalTeamListForTeam(ownTeamId);
         const ownTeamPlayers = getPlayersForTeam(ownTeamId);
         const selectedCount = ownSheet.starters.length + ownSheet.substitutes.length;
         const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - ownSheet.starters.length);
@@ -3765,8 +3839,15 @@ function hydrateMatchLog(matchLogNode) {
     const normalizedName = normalizeMatchSearchValue(typedName);
     if (!normalizedName) return null;
 
+    const card = squadManagerNode instanceof HTMLElement
+      ? squadManagerNode.querySelector(`[data-match-squad-card="${CSS.escape(String(teamId || '').trim())}"]`)
+      : null;
+    const searchMode = card instanceof HTMLElement
+      ? String(card.querySelector('[data-match-squad-search-mode]')?.getAttribute('data-match-squad-search-mode') || '').trim()
+      : '';
+
     return (
-      getPlayersForTeam(teamId).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) ||
+      getTeamListSearchPlayers(teamId, { readOnly: searchMode === 'readonly' }).find((player) => normalizeMatchSearchValue(player.name) === normalizedName) ||
       null
     );
   };
@@ -3783,6 +3864,7 @@ function hydrateMatchLog(matchLogNode) {
     if (!(input instanceof HTMLInputElement) || !(preview instanceof HTMLElement)) return;
 
     const typedName = String(input.value || '').trim();
+    const searchMode = String(card.querySelector('[data-match-squad-search-mode]')?.getAttribute('data-match-squad-search-mode') || '').trim();
     if (!typedName) {
       preview.innerHTML = '<span class="match-log-squad-candidate-empty">Type a player name to view card status before adding.</span>';
       return;
@@ -3790,7 +3872,7 @@ function hydrateMatchLog(matchLogNode) {
 
     const candidate = getSquadCandidateByTypedName(normalizedTeamId, typedName);
     if (!candidate) {
-      preview.innerHTML = '<span class="match-log-squad-candidate-empty">Player not found in the sporting squad.</span>';
+      preview.innerHTML = `<span class="match-log-squad-candidate-empty">${searchMode === 'readonly' ? 'Player not found in the submitted team list.' : 'Player not found in the sporting squad.'}</span>`;
       return;
     }
 
@@ -5312,7 +5394,7 @@ function hydrateMatchLog(matchLogNode) {
     if (saveButton instanceof HTMLElement) {
       const teamId = String(saveButton.dataset.teamId || '').trim();
       if (!teamId) return;
-      if (!canManageTeam(teamId)) return;
+      if (!canEditCanonicalTeam(teamId)) return;
       saveTeamSheetForTeam(teamId);
       return;
     }
@@ -5321,7 +5403,7 @@ function hydrateMatchLog(matchLogNode) {
     if (addButton instanceof HTMLElement) {
       const teamId = String(addButton.dataset.teamId || '').trim();
       const group = String(addButton.dataset.matchSquadAdd || '').trim();
-      if (!canManageTeam(teamId)) return;
+      if (!canEditCanonicalTeam(teamId)) return;
       const card = addButton.closest('[data-match-squad-card]');
       const input = card?.querySelector('[data-match-squad-search-input]');
       const typedName = input instanceof HTMLInputElement ? input.value : '';
@@ -5391,7 +5473,7 @@ function hydrateMatchLog(matchLogNode) {
     const clearButton = target.closest('[data-match-squad-clear]');
     if (clearButton instanceof HTMLElement) {
       const teamId = String(clearButton.dataset.teamId || '').trim();
-      if (!canManageTeam(teamId)) return;
+      if (!canEditCanonicalTeam(teamId)) return;
       const confirmed = window.confirm('Clear the starting XI and substitutes for this team?');
       if (!confirmed) return;
 
@@ -5403,7 +5485,7 @@ function hydrateMatchLog(matchLogNode) {
     const removeButton = target.closest('[data-match-squad-remove]');
     if (removeButton instanceof HTMLElement) {
       const teamId = String(removeButton.dataset.teamId || '').trim();
-      if (!canManageTeam(teamId)) return;
+      if (!canEditCanonicalTeam(teamId)) return;
       const group = String(removeButton.dataset.currentGroup || '').trim();
       const playerId = String(removeButton.dataset.playerId || '').trim();
       const current = getTeamSheet(teamId);
@@ -5418,7 +5500,7 @@ function hydrateMatchLog(matchLogNode) {
     const moveButton = target.closest('[data-match-squad-move]');
     if (moveButton instanceof HTMLElement) {
       const teamId = String(moveButton.dataset.teamId || '').trim();
-      if (!canManageTeam(teamId)) return;
+      if (!canEditCanonicalTeam(teamId)) return;
       const currentGroup = String(moveButton.dataset.currentGroup || '').trim();
       const nextGroup = String(moveButton.dataset.matchSquadMove || '').trim();
       const playerId = String(moveButton.dataset.playerId || '').trim();
@@ -5452,7 +5534,7 @@ function hydrateMatchLog(matchLogNode) {
     const addPlayerButton = target.closest('[data-match-manager-add-player]');
     if (addPlayerButton instanceof HTMLElement) {
       const houseId = String(addPlayerButton.dataset.matchManagerAddPlayer || '').trim().toLowerCase();
-      if (!canManageTeam(houseId)) return;
+      if (!canEditCanonicalTeam(houseId)) return;
       const card = addPlayerButton.closest('[data-match-manager-card]');
       const input = card?.querySelector(`[data-match-manager-player-input="${CSS.escape(houseId)}"]`);
       const typedName = input instanceof HTMLInputElement ? String(input.value || '').trim() : '';
@@ -5488,7 +5570,7 @@ function hydrateMatchLog(matchLogNode) {
     if (removePlayerButton instanceof HTMLElement) {
       const houseId = String(removePlayerButton.dataset.matchManagerRemovePlayer || '').trim().toLowerCase();
       const playerId = String(removePlayerButton.dataset.playerId || '').trim();
-      if (!canManageTeam(houseId) || !playerId) return;
+      if (!canEditCanonicalTeam(houseId) || !playerId) return;
       const squad = getManagedHouseSquad(houseId);
       saveManagedHouseSquad(houseId, {
         ...squad,
@@ -5502,7 +5584,7 @@ function hydrateMatchLog(matchLogNode) {
     const addOfficialButton = target.closest('[data-match-manager-add-official]');
     if (addOfficialButton instanceof HTMLElement) {
       const houseId = String(addOfficialButton.dataset.matchManagerAddOfficial || '').trim().toLowerCase();
-      if (!canManageTeam(houseId)) return;
+      if (!canEditCanonicalTeam(houseId)) return;
       const card = addOfficialButton.closest('[data-match-manager-card]');
       const input = card?.querySelector(`[data-match-manager-official-input="${CSS.escape(houseId)}"]`);
       const roleSelect = card?.querySelector(`[data-match-manager-official-role="${CSS.escape(houseId)}"]`);
@@ -5535,7 +5617,7 @@ function hydrateMatchLog(matchLogNode) {
     if (removeOfficialButton instanceof HTMLElement) {
       const houseId = String(removeOfficialButton.dataset.matchManagerRemoveOfficial || '').trim().toLowerCase();
       const officialId = String(removeOfficialButton.dataset.officialId || '').trim();
-      if (!canManageTeam(houseId) || !officialId) return;
+      if (!canEditCanonicalTeam(houseId) || !officialId) return;
       const squad = getManagedHouseSquad(houseId);
       saveManagedHouseSquad(houseId, {
         ...squad,
