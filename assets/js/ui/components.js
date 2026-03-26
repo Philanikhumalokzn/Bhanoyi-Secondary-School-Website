@@ -3630,7 +3630,16 @@ function hydrateMatchLog(matchLogNode) {
     if (!fixture) return null;
     const stored = logsByFixture[fixture.fixtureId];
     const safeStored = stored && typeof stored === 'object' ? stored : {};
-    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(fixture, resolveManagedSquadPlayersByTeam(fixture));
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(
+      fixture,
+      safeStored.playersByTeam && typeof safeStored.playersByTeam === 'object'
+        ? safeStored.playersByTeam
+        : {
+            homePlayers: Array.isArray(safeStored.homePlayers) ? safeStored.homePlayers : [],
+            awayPlayers: Array.isArray(safeStored.awayPlayers) ? safeStored.awayPlayers : []
+          },
+      resolveManagedSquadPlayersByTeam(fixture)
+    );
     const initialScores = {
       [fixture.homeId]: getInitialScoreForTeam(fixture.homeId),
       [fixture.awayId]: getInitialScoreForTeam(fixture.awayId),
@@ -5526,6 +5535,7 @@ function hydrateMatchLog(matchLogNode) {
     if (!(target instanceof HTMLInputElement) || target.name !== 'match-event-type') return;
     selectedTypeKey = target.value;
     nextButton.disabled = !selectedTypeKey;
+    renderAutocompleteOptions();
   });
 
   nextButton.addEventListener('click', () => {
@@ -5553,6 +5563,7 @@ function hydrateMatchLog(matchLogNode) {
 
     typeStep.classList.add('is-hidden');
     detailsStep.classList.remove('is-hidden');
+    renderAutocompleteOptions();
   });
 
   backButton.addEventListener('click', () => {
