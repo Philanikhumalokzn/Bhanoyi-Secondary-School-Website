@@ -169,23 +169,171 @@ const resolveActiveStaffSessionEmail = () => {
   return '';
 };
 
-const resolveActiveStaffProfile = () => {
+const HOUSE_ROLE_STORAGE_KEY = 'bhanoyi.houseRoleAssignments';
+
+const normalizeHouseRoleValue = (value = '') => String(value || '').trim().toLowerCase();
+
+const loadHouseRoleAssignmentsStore = () => {
+  if (typeof localStorage === 'undefined') return {};
+
+  try {
+    const raw = localStorage.getItem(HOUSE_ROLE_STORAGE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+    const normalized = {};
+    Object.entries(parsed).forEach(([houseId, value]) => {
+      const normalizedHouseId = normalizeHouseRoleValue(houseId);
+      if (!normalizedHouseId || !value || typeof value !== 'object' || Array.isArray(value)) return;
+
+      const rawEntry = value;
+      const entry = {
+        staffRoles: {},
+        learnerCaptaincies: {}
+      };
+
+      if (rawEntry.staffRoles && typeof rawEntry.staffRoles === 'object' && !Array.isArray(rawEntry.staffRoles)) {
+        Object.entries(rawEntry.staffRoles).forEach(([memberKey, roleIds]) => {
+          const normalizedRoles = Array.isArray(roleIds)
+            ? Array.from(new Set(roleIds.map((roleId) => normalizeHouseRoleValue(roleId)).filter(Boolean)))
+            : [];
+          if (!memberKey || !normalizedRoles.length) return;
+          entry.staffRoles[memberKey] = normalizedRoles;
+        });
+      }
+
+      if (rawEntry.learnerCaptaincies && typeof rawEntry.learnerCaptaincies === 'object' && !Array.isArray(rawEntry.learnerCaptaincies)) {
+        Object.entries(rawEntry.learnerCaptaincies).forEach(([memberKey, roleIds]) => {
+          const normalizedRoles = Array.isArray(roleIds)
+            ? Array.from(new Set(roleIds.map((roleId) => normalizeHouseRoleValue(roleId)).filter(Boolean)))
+            : [];
+          if (!memberKey || !normalizedRoles.length) return;
+          entry.learnerCaptaincies[memberKey] = normalizedRoles;
+        });
+      }
+
+      normalized[normalizedHouseId] = entry;
+    });
+
+    return normalized;
+  } catch {
+    return {};
+  }
+};
+
+const persistHouseRoleAssignmentsStore = (store) => {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(HOUSE_ROLE_STORAGE_KEY, JSON.stringify(store));
+};
+
+const createCanonicalStaffMemberKey = (storageKey, index) => {
+  if (!storageKey || !Number.isInteger(index) || index < 0) return '';
+  return `${storageKey}|staff|${index}`;
+};
+
+const createLegacyStaffMemberKey = (sectionKey, index) => {
+  if (!sectionKey || !Number.isInteger(index) || index < 0) return '';
+  return `${sectionKey}|staff|${index}`;
+};
+
+const getStaffMemberKeyCandidates = ({ storageKey = '', sectionKey = '', index = -1 }) => {
+  if (!Number.isInteger(index) || index < 0) return [];
+
+  return Array.from(
+    new Set([createCanonicalStaffMemberKey(storageKey, index), createLegacyStaffMemberKey(sectionKey, index)].filter(Boolean))
+  );
+};
+
+const getMergedStaffRoleIds = (staffRoles, memberKeys = []) =>
+  Array.from(
+    new Set(
+      memberKeys.flatMap((memberKey) => (Array.isArray(staffRoles?.[memberKey]) ? staffRoles[memberKey] : [])).map(normalizeHouseRoleValue).filter(Boolean)
+    )
+  );
+
+const writeCanonicalStaffRoles = (houseEntry, memberKeys, canonicalMemberKey, roleIds) => {
+  if (!houseEntry || !houseEntry.staffRoles || !canonicalMemberKey) return;
+
+  memberKeys.forEach((memberKey) => {
+    delete houseEntry.staffRoles[memberKey];
+  });
+
+  const normalizedRoles = Array.from(new Set((Array.isArray(roleIds) ? roleIds : []).map((roleId) => normalizeHouseRoleValue(roleId)).filter(Boolean)));
+  if (normalizedRoles.length) {
+    houseEntry.staffRoles[canonicalMemberKey] = normalizedRoles;
+  }
+};
+
+const getCanonicalHouseManagerMemberKey = (roleStore, houseId) => {
+  const normalizedHouseId = normalizeHouseRoleValue(houseId);
+  const houseEntry = normalizedHouseId ? roleStore?.[normalizedHouseId] : null;
+  if (!houseEntry || !houseEntry.staffRoles || typeof houseEntry.staffRoles !== 'object') return '';
+
+  return Object.entries(houseEntry.staffRoles)
+    .filter(([, roleIds]) => Array.isArray(roleIds) && roleIds.includes('house_manager'))
+    .map(([memberKey]) => String(memberKey || '').trim())
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftCanonical = left.startsWith('bhanoyi.enrollmentClasses.') ? 0 : 1;
+      const rightCanonical = right.startsWith('bhanoyi.enrollmentClasses.') ? 0 : 1;
+      if (leftCanonical !== rightCanonical) return leftCanonical - rightCanonical;
+      return left.localeCompare(right);
+    })[0] || '';
+};
+
+const resolveSectionKeyFromEnrollmentStorageKey = (storageKey) =>
+  String(storageKey || '').trim().replace(/^bhanoyi\.enrollmentClasses\./, '');
+
+const resolveActiveStaffContext = () => {
   const sessionEmail = resolveActiveStaffSessionEmail();
-  if (!sessionEmail) return null;
+  if (!sessionEmail || typeof localStorage === 'undefined') return null;
 
   const enrollmentKeys = Object.keys(localStorage).filter((key) => key.startsWith('bhanoyi.enrollmentClasses.'));
   for (const key of enrollmentKeys) {
     const parsed = readEnrollmentStoreLocal(key);
     const staffMembers = Array.isArray(parsed?.staffMembers) ? parsed.staffMembers : [];
-    const matched = staffMembers.find(
-      (entry) => String(entry?.loginEmail || entry?.email || '').trim().toLowerCase() === sessionEmail
+    const matchedIndex = staffMembers.findIndex(
+      (entry) => String(entry?.loginEmail || entry?.staffEmail || entry?.email || '').trim().toLowerCase() === sessionEmail
     );
-    if (matched) {
-      return matched;
-    }
+
+    if (matchedIndex < 0) continue;
+
+    const sectionKey = resolveSectionKeyFromEnrollmentStorageKey(key);
+    return {
+      profile: staffMembers[matchedIndex],
+      storageKey: key,
+      sectionKey,
+      index: matchedIndex,
+      memberKeys: getStaffMemberKeyCandidates({ storageKey: key, sectionKey, index: matchedIndex })
+    };
   }
 
   return null;
+};
+
+const resolveActiveStaffProfile = () => {
+  return resolveActiveStaffContext()?.profile || null;
+};
+
+const resolveActiveStaffManagerContext = () => {
+  const activeStaffContext = resolveActiveStaffContext();
+  if (!activeStaffContext) return null;
+
+  const managedHouseId = normalizeHouseRoleValue(activeStaffContext.profile?.houseId || activeStaffContext.profile?.house || '');
+  if (!managedHouseId) return null;
+
+  const roleStore = loadHouseRoleAssignmentsStore();
+  const canonicalHouseManagerMemberKey = getCanonicalHouseManagerMemberKey(roleStore, managedHouseId);
+  if (!canonicalHouseManagerMemberKey) return null;
+  if (!activeStaffContext.memberKeys.includes(canonicalHouseManagerMemberKey)) return null;
+
+  return {
+    ...activeStaffContext,
+    managedHouseId,
+    canonicalHouseManagerMemberKey
+  };
 };
 
 const isPublicAudienceEnabled = () => !isAdminModeEnabled() && !isStaffModeEnabled();
@@ -2958,9 +3106,9 @@ function hydrateMatchLog(matchLogNode) {
 
   const workflowSteps = initSportsWorkflowSteps(matchLogNode);
   const openButtons = Array.from(matchLogNode.querySelectorAll('[data-match-open-event-side]'));
-  const activeStaffProfile = isStaffModeEnabled() ? resolveActiveStaffProfile() : null;
-  const managedHouseId = String(activeStaffProfile?.houseId || '').trim().toLowerCase();
-  const isStaffManagerMode = isStaffModeEnabled() && Boolean(managedHouseId);
+  const activeStaffManagerContext = isStaffModeEnabled() ? resolveActiveStaffManagerContext() : null;
+  const managedHouseId = activeStaffManagerContext?.managedHouseId || '';
+  const isStaffManagerMode = Boolean(activeStaffManagerContext);
   const canOperateMatchLog = isAdminModeEnabled() || isStaffManagerMode;
   const managerSportOptions = buildManagedSportOptions(config.sport);
 
@@ -9100,21 +9248,15 @@ const hydrateEnrollmentManager = (managerNode) => {
       return;
     }
 
+    const roleStore = loadHouseRoleAssignmentsStore();
+
     staffListNode.innerHTML = filteredStaff
       .map(({ staff, index }) => {
         const displayName = resolveStaffDisplayName(staff);
-        let isHouseManager = false;
-        try {
-          const rawRoles = localStorage.getItem('bhanoyi.houseRoleAssignments');
-          const parsedRoles = rawRoles ? JSON.parse(rawRoles) : {};
-          const houseId = String(staff.houseId || '').trim();
-          const houseEntry = houseId && parsedRoles && typeof parsedRoles === 'object' ? parsedRoles[houseId] : null;
-          const memberKey = `${sectionKey}|staff|${index}`;
-          const rolesForMember = Array.isArray(houseEntry?.staffRoles?.[memberKey]) ? houseEntry.staffRoles[memberKey] : [];
-          isHouseManager = rolesForMember.includes('house_manager');
-        } catch {
-          isHouseManager = false;
-        }
+        const houseId = normalizeHouseId(staff.houseId || '');
+        const memberKeyCandidates = getStaffMemberKeyCandidates({ storageKey, sectionKey, index });
+        const canonicalHouseManagerMemberKey = getCanonicalHouseManagerMemberKey(roleStore, houseId);
+        const isHouseManager = Boolean(canonicalHouseManagerMemberKey && memberKeyCandidates.includes(canonicalHouseManagerMemberKey));
 
         const details = [
           staff.staffType === 'non_teaching_staff' ? 'Non-teaching staff' : 'Teaching staff',
@@ -9775,27 +9917,34 @@ const hydrateEnrollmentManager = (managerNode) => {
         return;
       }
 
-      const roleStoreKey = 'bhanoyi.houseRoleAssignments';
-      let roleStore = {};
-      try {
-        const raw = localStorage.getItem(roleStoreKey);
-        roleStore = raw ? JSON.parse(raw) : {};
-      } catch {
-        roleStore = {};
-      }
+      const normalizedHouseId = normalizeHouseId(houseId);
+      const roleStore = loadHouseRoleAssignmentsStore();
+      roleStore[normalizedHouseId] = roleStore[normalizedHouseId] || { staffRoles: {}, learnerCaptaincies: {} };
 
-      roleStore[houseId] = roleStore[houseId] || { staffRoles: {}, learnerCaptaincies: {} };
-      const memberKey = `${sectionKey}|staff|${index}`;
-      const currentRoles = Array.isArray(roleStore[houseId].staffRoles[memberKey]) ? roleStore[houseId].staffRoles[memberKey] : [];
-      const isManager = currentRoles.includes('house_manager');
+      const houseEntry = roleStore[normalizedHouseId];
+      const canonicalMemberKey = createCanonicalStaffMemberKey(storageKey, index);
+      const memberKeyCandidates = getStaffMemberKeyCandidates({ storageKey, sectionKey, index });
+      const currentRoles = getMergedStaffRoleIds(houseEntry.staffRoles, memberKeyCandidates);
+      const canonicalHouseManagerMemberKey = getCanonicalHouseManagerMemberKey(roleStore, normalizedHouseId);
+      const isManager = Boolean(canonicalHouseManagerMemberKey && memberKeyCandidates.includes(canonicalHouseManagerMemberKey));
+
       if (isManager) {
-        roleStore[houseId].staffRoles[memberKey] = currentRoles.filter((r) => r !== 'house_manager');
+        writeCanonicalStaffRoles(houseEntry, memberKeyCandidates, canonicalMemberKey, currentRoles.filter((roleId) => roleId !== 'house_manager'));
       } else {
-        roleStore[houseId].staffRoles[memberKey] = Array.from(new Set([...currentRoles, 'house_manager']));
+        Object.entries(houseEntry.staffRoles).forEach(([memberKey, roleIds]) => {
+          const remainingRoles = Array.isArray(roleIds) ? roleIds.filter((roleId) => roleId !== 'house_manager') : [];
+          if (remainingRoles.length) {
+            houseEntry.staffRoles[memberKey] = remainingRoles;
+          } else {
+            delete houseEntry.staffRoles[memberKey];
+          }
+        });
+
+        writeCanonicalStaffRoles(houseEntry, memberKeyCandidates, canonicalMemberKey, [...currentRoles.filter((roleId) => roleId !== 'house_manager'), 'house_manager']);
       }
 
       try {
-        localStorage.setItem(roleStoreKey, JSON.stringify(roleStore));
+        persistHouseRoleAssignmentsStore(roleStore);
         renderStaffMembers();
         if (statusNode) statusNode.textContent = `${resolveStaffDisplayName(staff)} ${isManager ? 'removed as' : 'set as'} house manager for ${houseId}.`;
       } catch {
@@ -17478,9 +17627,9 @@ const hydratePublicFixtureBoard = (boardNode) => {
   const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
   const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
   const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
-  const activeStaffProfile = isStaffModeEnabled() ? resolveActiveStaffProfile() : null;
-  const managedHouseId = String(activeStaffProfile?.houseId || '').trim().toLowerCase();
-  const isStaffManagerMode = isStaffModeEnabled() && Boolean(managedHouseId);
+  const activeStaffManagerContext = isStaffModeEnabled() ? resolveActiveStaffManagerContext() : null;
+  const managedHouseId = activeStaffManagerContext?.managedHouseId || '';
+  const isStaffManagerMode = Boolean(activeStaffManagerContext);
   const canOpenMatchLogs = isAdminModeEnabled() || isStaffManagerMode;
 
   const statusNode = boardNode.querySelector('[data-public-fixture-status]');
