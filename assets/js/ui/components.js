@@ -16843,7 +16843,10 @@ const hydratePublicFixtureBoard = (boardNode) => {
   const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
   const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
   const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
-  const canOpenMatchLogs = isAdminModeEnabled() || isStaffModeEnabled();
+  const activeStaffProfile = isStaffModeEnabled() ? resolveActiveStaffProfile() : null;
+  const managedHouseId = String(activeStaffProfile?.houseId || '').trim().toLowerCase();
+  const isStaffManagerMode = isStaffModeEnabled() && Boolean(managedHouseId);
+  const canOpenMatchLogs = isAdminModeEnabled() || isStaffManagerMode;
 
   const statusNode = boardNode.querySelector('[data-public-fixture-status]');
   const dateSelect = boardNode.querySelector('[data-public-fixture-date]');
@@ -16893,6 +16896,15 @@ const hydratePublicFixtureBoard = (boardNode) => {
     return 'first';
   };
 
+  const canAccessFixture = (fixture) => {
+    if (isAdminModeEnabled()) return true;
+    if (!isStaffManagerMode) return false;
+
+    const homeId = String(fixture?.homeId || '').trim().toLowerCase();
+    const awayId = String(fixture?.awayId || '').trim().toLowerCase();
+    return homeId === managedHouseId || awayId === managedHouseId;
+  };
+
   const readFixtures = () => {
     const rows = Object.entries(fixtureCatalog)
       .map(([fixtureId, fixtureData]) => {
@@ -16908,6 +16920,8 @@ const hydratePublicFixtureBoard = (boardNode) => {
           fixtureId,
           date: stamp.date,
           time: stamp.time,
+          homeId: String(fixture.homeId || '').trim().toLowerCase(),
+          awayId: String(fixture.awayId || '').trim().toLowerCase(),
           legBucket: resolveLegBucket(fixture),
           homeName,
           awayName,
@@ -16915,6 +16929,7 @@ const hydratePublicFixtureBoard = (boardNode) => {
         };
       })
       .filter(Boolean)
+      .filter((fixture) => canAccessFixture(fixture))
       .sort((left, right) => {
         const leftStamp = parseDateTimeStamp(left.stamp);
         const rightStamp = parseDateTimeStamp(right.stamp);
@@ -16996,7 +17011,7 @@ const hydratePublicFixtureBoard = (boardNode) => {
 
     if (statusNode) {
       if (!allFixtures.length) {
-        statusNode.textContent = 'No fixtures published yet.';
+        statusNode.textContent = isStaffManagerMode ? 'No fixtures for your house have been published yet.' : 'No fixtures published yet.';
       } else if (!selectedDate) {
         statusNode.textContent = 'Choose a day to view fixtures.';
       } else {
