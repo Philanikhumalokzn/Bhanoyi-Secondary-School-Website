@@ -1576,6 +1576,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
   const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
   const rightTeam = houseOptions.find((team) => team.id === teamPair.rightTeamId) || houseOptions[1] || leftTeam;
   const canReviewMatchEvents = isAdminModeEnabled();
+  const policySportOptions = buildManagedSportOptions(config.sport);
   const teamListPickerMarkup = `
               <div class="match-log-team-pickers">
                 <label>
@@ -1651,6 +1652,54 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   <button type="button" class="btn btn-secondary" data-match-resume>Resume match</button>
                 </div>
                 <p class="match-log-status" data-match-clock-status aria-live="polite">Match clock not started.</p>
+              </div>
+              <div class="match-log-clock-panel">
+                <div class="match-log-clock-grid">
+                  <p class="match-log-clock-item">
+                    <span>Competition rules</span>
+                    <strong>Admin controls</strong>
+                  </p>
+                </div>
+                <div class="match-log-team-pickers">
+                  <label>
+                    Sporting code
+                    <select data-match-policy-sport>
+                      ${policySportOptions.map((option) => `<option value="${escapeHtmlAttribute(option.key)}">${escapeHtmlText(option.label)}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label>
+                    Squad limit
+                    <input type="number" min="1" max="200" data-match-policy-squad-size />
+                  </label>
+                  <label>
+                    Starting players
+                    <input type="number" min="1" max="30" data-match-policy-starters />
+                  </label>
+                  <label>
+                    Bench limit
+                    <input type="number" min="0" max="50" data-match-policy-bench-size />
+                  </label>
+                </div>
+                <div class="match-log-team-pickers">
+                  <label>
+                    Team-list source
+                    <select data-match-policy-team-list-source>
+                      <option value="squad_only">Only from submitted sporting squad</option>
+                      <option value="house_pool">Allow direct house-pool selection</option>
+                    </select>
+                  </label>
+                  <label>
+                    Admin canonical edits
+                    <select data-match-policy-admin-edit>
+                      <option value="false">Read only</option>
+                      <option value="true">Allow admin edits</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="match-log-header-actions">
+                  <button type="button" class="btn btn-secondary" data-match-policy-save>Save competition rules</button>
+                  <p class="match-log-status" data-match-policy-status aria-live="polite">Competition rules use the default settings until changed.</p>
+                </div>
               </div>
             </div>
           </section>
@@ -2095,6 +2144,15 @@ const inferSportCodeMatches = (sportLabel, sportingCodes = []) => {
 };
 
 const MAX_HOUSE_SPORT_SQUAD_PLAYERS = 30;
+const MAX_MATCH_STARTERS = 11;
+const MAX_MATCH_SUBSTITUTES = 6;
+const DEFAULT_MATCH_COMPETITION_POLICY = {
+  squadSizeLimit: MAX_HOUSE_SPORT_SQUAD_PLAYERS,
+  startingPlayers: MAX_MATCH_STARTERS,
+  benchSizeLimit: MAX_MATCH_SUBSTITUTES,
+  teamListSource: 'squad_only',
+  adminCanEditCanonicalRecords: false
+};
 const HOUSE_SPORT_OFFICIAL_ROLES = ['House Manager', 'Coach', 'Assistant Coach', 'Team Manager', 'Physio / Medic', 'Other Official'];
 
 const normalizeManagedSportKey = (value) => {
@@ -2133,10 +2191,34 @@ const buildManagedSportOptions = (...labels) => {
 const getHouseSportSquadStorageKey = (fixtureSectionKey) =>
   `bhanoyi.houseSportSquads.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
 
+const getMatchCompetitionPolicyStorageKey = (fixtureSectionKey) =>
+  `bhanoyi.matchCompetitionPolicy.${String(fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator'}`;
+
 const createEmptyHouseSportSquad = () => ({
   players: [],
   officials: []
 });
+
+const normalizeMatchCompetitionPolicy = (value = {}, fallback = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const base = fallback && typeof fallback === 'object' && !Array.isArray(fallback) ? fallback : DEFAULT_MATCH_COMPETITION_POLICY;
+  const toPositiveInt = (candidate, defaultValue, minimum = 1, maximum = 99) => {
+    const parsed = Number(candidate);
+    if (!Number.isFinite(parsed)) return defaultValue;
+    return Math.min(maximum, Math.max(minimum, Math.floor(parsed)));
+  };
+  const normalizedTeamListSource = String(source.teamListSource || base.teamListSource || 'squad_only').trim().toLowerCase();
+
+  return {
+    squadSizeLimit: toPositiveInt(source.squadSizeLimit, base.squadSizeLimit || DEFAULT_MATCH_COMPETITION_POLICY.squadSizeLimit, 1, 200),
+    startingPlayers: toPositiveInt(source.startingPlayers, base.startingPlayers || DEFAULT_MATCH_COMPETITION_POLICY.startingPlayers, 1, 30),
+    benchSizeLimit: toPositiveInt(source.benchSizeLimit, base.benchSizeLimit || DEFAULT_MATCH_COMPETITION_POLICY.benchSizeLimit, 0, 50),
+    teamListSource: ['squad_only', 'house_pool'].includes(normalizedTeamListSource) ? normalizedTeamListSource : 'squad_only',
+    adminCanEditCanonicalRecords: Boolean(
+      source.adminCanEditCanonicalRecords ?? base.adminCanEditCanonicalRecords ?? DEFAULT_MATCH_COMPETITION_POLICY.adminCanEditCanonicalRecords
+    )
+  };
+};
 
 const normalizeManagedHouseSportOfficial = (entry, fallback = {}) => {
   const normalized = normalizeMatchStaffEntry(entry, fallback);
@@ -2154,7 +2236,7 @@ const normalizeManagedHouseSportOfficial = (entry, fallback = {}) => {
 const normalizeHouseSportSquadEntry = (entry, houseId) => {
   const source = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
   return {
-    players: normalizeMatchPlayersForTeam(source.players || [], { houseId }).slice(0, MAX_HOUSE_SPORT_SQUAD_PLAYERS),
+    players: normalizeMatchPlayersForTeam(source.players || [], { houseId }),
     officials: (Array.isArray(source.officials) ? source.officials : [])
       .map((official) => normalizeManagedHouseSportOfficial(official, { houseId }))
       .filter(Boolean)
@@ -2178,6 +2260,42 @@ const persistHouseSportSquadStore = (fixtureSectionKey, store) => {
   localStorage.setItem(storageKey, JSON.stringify(safeStore));
   void persistLocalStore(storageKey, safeStore);
   return storageKey;
+};
+
+const loadMatchCompetitionPolicyStore = (fixtureSectionKey) => {
+  try {
+    const raw = localStorage.getItem(getMatchCompetitionPolicyStorageKey(fixtureSectionKey));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistMatchCompetitionPolicyStore = (fixtureSectionKey, store) => {
+  const storageKey = getMatchCompetitionPolicyStorageKey(fixtureSectionKey);
+  const safeStore = store && typeof store === 'object' && !Array.isArray(store) ? store : {};
+  localStorage.setItem(storageKey, JSON.stringify(safeStore));
+  void persistLocalStore(storageKey, safeStore);
+  return storageKey;
+};
+
+const readMatchCompetitionPolicy = (store, sportKey, fallback = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  if (!normalizedSportKey) return normalizeMatchCompetitionPolicy({}, fallback);
+
+  const source = store && typeof store === 'object' && !Array.isArray(store) ? store[normalizedSportKey] : null;
+  return normalizeMatchCompetitionPolicy(source, fallback);
+};
+
+const writeMatchCompetitionPolicy = (store, sportKey, value, fallback = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const normalizedSportKey = normalizeManagedSportKey(sportKey);
+  if (!normalizedSportKey) return store;
+
+  const nextStore = store && typeof store === 'object' && !Array.isArray(store) ? { ...store } : {};
+  nextStore[normalizedSportKey] = normalizeMatchCompetitionPolicy(value, fallback);
+  return nextStore;
 };
 
 const readHouseSportSquad = (store, sportKey, houseId) => {
@@ -2309,8 +2427,6 @@ const loadEnrollmentStaffByHouse = (homeId, awayId) => {
   return byHouse;
 };
 
-const MAX_MATCH_STARTERS = 11;
-const MAX_MATCH_SUBSTITUTES = 6;
 const DEFAULT_MATCH_DISCIPLINE_POLICY = {
   straightRedSuspensionMatches: 1,
   secondYellowSuspensionMatches: 1,
@@ -2359,7 +2475,8 @@ const buildEmptySquadDirtyState = (fixture) => {
   };
 };
 
-const validateMatchTeamSheet = (sheet) => {
+const validateMatchTeamSheet = (sheet, limits = DEFAULT_MATCH_COMPETITION_POLICY) => {
+  const policy = normalizeMatchCompetitionPolicy(limits, DEFAULT_MATCH_COMPETITION_POLICY);
   const starters = normalizeMatchPlayersForTeam(sheet?.starters || []);
   const substitutes = normalizeMatchPlayersForTeam(sheet?.substitutes || []);
   const starterIds = new Set();
@@ -2376,12 +2493,12 @@ const validateMatchTeamSheet = (sheet) => {
   const overlapPlayers = substitutes.filter((player) => starterIds.has(player.id));
   const errors = [];
 
-  if (starters.length !== MAX_MATCH_STARTERS) {
-    errors.push(`Starting XI must contain exactly ${MAX_MATCH_STARTERS} players before saving.`);
+  if (starters.length !== policy.startingPlayers) {
+    errors.push(`Starting lineup must contain exactly ${policy.startingPlayers} players before saving.`);
   }
 
-  if (substitutes.length > MAX_MATCH_SUBSTITUTES) {
-    errors.push(`Substitutes may not exceed ${MAX_MATCH_SUBSTITUTES} players.`);
+  if (substitutes.length > policy.benchSizeLimit) {
+    errors.push(`Substitutes may not exceed ${policy.benchSizeLimit} players.`);
   }
 
   if (duplicateStarterIds.size) {
@@ -2410,7 +2527,7 @@ const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) =
     return source[teamId] || source[normalizedTeamId] || {};
   };
 
-  const normalizeTeamGroup = (values, teamId, maxItems, excludedIds = new Set()) => {
+  const normalizeTeamGroup = (values, teamId, excludedIds = new Set()) => {
     const teamPlayers = normalizeMatchPlayersForTeam(playersByTeam?.[teamId] || [], { houseId: teamId });
     const playerById = new Map(teamPlayers.map((player) => [player.id, player]));
     const playerByName = new Map(
@@ -2420,7 +2537,6 @@ const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) =
     const seen = new Set([...excludedIds]);
 
     (Array.isArray(values) ? values : []).forEach((entry) => {
-      if (resolved.length >= maxItems) return;
       const normalized = normalizeMatchPlayerEntry(entry, { houseId: teamId });
       if (!normalized) return;
       const matched =
@@ -2432,7 +2548,7 @@ const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) =
       resolved.push(matched);
     });
 
-    return normalizeMatchPlayersForTeam(resolved, { houseId: teamId }).slice(0, maxItems);
+    return normalizeMatchPlayersForTeam(resolved, { houseId: teamId });
   };
 
   return {
@@ -2440,13 +2556,11 @@ const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) =
       const teamSource = resolveTeamSource(fixture.homeId);
       const starters = normalizeTeamGroup(
         teamSource.starters || teamSource.starting || [],
-        fixture.homeId,
-        MAX_MATCH_STARTERS
+        fixture.homeId
       );
       const substitutes = normalizeTeamGroup(
         teamSource.substitutes || teamSource.bench || [],
         fixture.homeId,
-        MAX_MATCH_SUBSTITUTES,
         new Set(starters.map((player) => player.id))
       );
       return { starters, substitutes };
@@ -2455,13 +2569,11 @@ const normalizeFixtureSquadByTeam = (fixture, squadByTeam, playersByTeam = {}) =
       const teamSource = resolveTeamSource(fixture.awayId);
       const starters = normalizeTeamGroup(
         teamSource.starters || teamSource.starting || [],
-        fixture.awayId,
-        MAX_MATCH_STARTERS
+        fixture.awayId
       );
       const substitutes = normalizeTeamGroup(
         teamSource.substitutes || teamSource.bench || [],
         fixture.awayId,
-        MAX_MATCH_SUBSTITUTES,
         new Set(starters.map((player) => player.id))
       );
       return { starters, substitutes };
@@ -2748,6 +2860,14 @@ function hydrateMatchLog(matchLogNode) {
   const managerStatusNode = matchLogNode.querySelector('[data-match-manager-status]');
   const managerSportSelect = matchLogNode.querySelector('[data-match-manager-sport]');
   const managerSquadNode = matchLogNode.querySelector('[data-match-manager-squad]');
+  const policySportSelect = matchLogNode.querySelector('[data-match-policy-sport]');
+  const policySquadSizeInput = matchLogNode.querySelector('[data-match-policy-squad-size]');
+  const policyStartersInput = matchLogNode.querySelector('[data-match-policy-starters]');
+  const policyBenchInput = matchLogNode.querySelector('[data-match-policy-bench-size]');
+  const policyTeamListSourceSelect = matchLogNode.querySelector('[data-match-policy-team-list-source]');
+  const policyAdminEditSelect = matchLogNode.querySelector('[data-match-policy-admin-edit]');
+  const policySaveButton = matchLogNode.querySelector('[data-match-policy-save]');
+  const policyStatusNode = matchLogNode.querySelector('[data-match-policy-status]');
   const squadStatusNode = matchLogNode.querySelector('[data-match-squad-status]');
   const squadManagerNode = matchLogNode.querySelector('[data-match-squad-manager]');
   const matchDaySelect = matchLogNode.querySelector('[data-matchday-select]');
@@ -2840,6 +2960,34 @@ function hydrateMatchLog(matchLogNode) {
     });
   };
 
+  const renderCompetitionPolicyControls = (message = '') => {
+    if (policySportSelect instanceof HTMLSelectElement) {
+      policySportSelect.value = getSelectedPolicySportKey();
+    }
+
+    const policy = getSelectedPolicyCompetitionPolicy();
+
+    if (policySquadSizeInput instanceof HTMLInputElement) {
+      policySquadSizeInput.value = String(policy.squadSizeLimit);
+    }
+    if (policyStartersInput instanceof HTMLInputElement) {
+      policyStartersInput.value = String(policy.startingPlayers);
+    }
+    if (policyBenchInput instanceof HTMLInputElement) {
+      policyBenchInput.value = String(policy.benchSizeLimit);
+    }
+    if (policyTeamListSourceSelect instanceof HTMLSelectElement) {
+      policyTeamListSourceSelect.value = policy.teamListSource;
+    }
+    if (policyAdminEditSelect instanceof HTMLSelectElement) {
+      policyAdminEditSelect.value = policy.adminCanEditCanonicalRecords ? 'true' : 'false';
+    }
+    if (policyStatusNode instanceof HTMLElement) {
+      const sportLabel = managerSportOptions.find((entry) => entry.key === getSelectedPolicySportKey())?.label || 'Sport';
+      policyStatusNode.textContent = message || `${sportLabel}: squad ${policy.squadSizeLimit}, starters ${policy.startingPlayers}, bench ${policy.benchSizeLimit}, team lists from ${getTeamListSourceLabel(policy)}, admin canonical edits ${policy.adminCanEditCanonicalRecords ? 'enabled' : 'locked'}.`;
+    }
+  };
+
   let fixtureCatalog = {};
   let fixtureDateMap = {};
   let fixtureOptions = [];
@@ -2863,11 +3011,19 @@ function hydrateMatchLog(matchLogNode) {
   let pauseCompensationStartedAt = null;
   let clockTickerId = null;
   let houseSportSquadStore = loadHouseSportSquadStore(fixtureSectionKey);
+  let matchCompetitionPolicyStore = loadMatchCompetitionPolicyStore(fixtureSectionKey);
   let selectedManagerSportKey = managerSportOptions[0]?.key || 'soccer';
+  let selectedPolicySportKey = managerSportOptions[0]?.key || 'soccer';
 
   if (managerSportSelect instanceof HTMLSelectElement) {
     managerSportSelect.value = selectedManagerSportKey;
     managerSportSelect.disabled = isAdminModeEnabled();
+  }
+  if (policySportSelect instanceof HTMLSelectElement) {
+    policySportSelect.innerHTML = managerSportOptions
+      .map((option) => `<option value="${escapeHtmlAttribute(option.key)}">${escapeHtmlText(option.label)}</option>`)
+      .join('');
+    policySportSelect.value = selectedPolicySportKey;
   }
 
   const canViewTeam = (teamId) => {
@@ -2880,6 +3036,7 @@ function hydrateMatchLog(matchLogNode) {
   const canEditCanonicalTeam = (teamId) => {
     const normalizedTeamId = String(teamId || '').trim().toLowerCase();
     if (!normalizedTeamId) return false;
+    if (isAdminModeEnabled()) return getFixtureCompetitionPolicy().adminCanEditCanonicalRecords;
     return isStaffManagerMode && normalizedTeamId === managedHouseId;
   };
 
@@ -2906,6 +3063,22 @@ function hydrateMatchLog(matchLogNode) {
     const sportKey = getSelectedManagerSportKey();
     return managerSportOptions.find((entry) => entry.key === sportKey)?.label || 'Football';
   };
+
+  const getSelectedPolicySportKey = () =>
+    normalizeManagedSportKey(selectedPolicySportKey || getCurrentSportKey() || config.sport || '') || managerSportOptions[0]?.key || 'soccer';
+
+  const getCompetitionPolicy = (sportKey = getCurrentSportKey()) =>
+    readMatchCompetitionPolicy(matchCompetitionPolicyStore, sportKey, DEFAULT_MATCH_COMPETITION_POLICY);
+
+  const getSelectedPolicyCompetitionPolicy = () => getCompetitionPolicy(getSelectedPolicySportKey());
+
+  const getFixtureCompetitionPolicy = (fixture = getCurrentFixture()) =>
+    getCompetitionPolicy(normalizeManagedSportKey(fixture?.sport || getCurrentSportKey() || config.sport || ''));
+
+  const getTeamListSourceLabel = (policy) =>
+    normalizeMatchCompetitionPolicy(policy, DEFAULT_MATCH_COMPETITION_POLICY).teamListSource === 'house_pool'
+      ? 'the full house pool'
+      : 'the submitted sporting squad';
 
   const getAccessibleHouseIds = () => {
     if (isAdminModeEnabled()) {
@@ -2975,6 +3148,17 @@ function hydrateMatchLog(matchLogNode) {
     };
   };
 
+  const resolveTeamListPlayerPoolByTeam = (fixture) => {
+    if (!fixture) return {};
+    const policy = getCompetitionPolicy(normalizeManagedSportKey(fixture.sport || config.sport || getCurrentSportKey()));
+    if (policy.teamListSource === 'house_pool') {
+      return loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel(), {
+        filterBySportingCode: false
+      });
+    }
+    return resolveManagedSquadPlayersByTeam(fixture);
+  };
+
   const getCanonicalTeamListForTeam = (teamId) => {
     const normalizedTeamId = getNormalizedTeamId(teamId);
     const savedSheet = getTeamSheet(normalizedTeamId, { saved: true });
@@ -2999,7 +3183,7 @@ function hydrateMatchLog(matchLogNode) {
 
   const resolveFixturePlayersByTeam = (fixture, entry) => {
     const housePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel());
-    const nextSource = resolveManagedSquadPlayersByTeam(fixture);
+    const nextSource = resolveTeamListPlayerPoolByTeam(fixture);
     return {
       playersByTeam: normalizeFixturePlayersByTeam(fixture, nextSource),
       housePlayersByTeam
@@ -3032,6 +3216,7 @@ function hydrateMatchLog(matchLogNode) {
 
     const sportLabel = getSelectedManagerSportLabel();
     const sportKey = getSelectedManagerSportKey();
+    const sportPolicy = getCompetitionPolicy(sportKey);
     const cards = accessibleHouseIds.map((houseId) => {
       const squad = getManagedHouseSquad(houseId, sportKey);
       const selectedPlayerIds = new Set(squad.players.map((player) => player.id));
@@ -3040,7 +3225,7 @@ function hydrateMatchLog(matchLogNode) {
       const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !selectedOfficialIds.has(official.id));
       const totalHouseLearners = availablePlayers.length + squad.players.length;
       const totalHouseStaff = availableOfficials.length + squad.officials.length;
-      const remainingPlayerSlots = Math.max(0, MAX_HOUSE_SPORT_SQUAD_PLAYERS - squad.players.length);
+      const remainingPlayerSlots = Math.max(0, sportPolicy.squadSizeLimit - squad.players.length);
       const houseLabel = getHouseLabel(houseId);
       const readOnly = !canEditCanonicalTeam(houseId);
       const playerListId = `match-manager-player-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
@@ -3053,7 +3238,7 @@ function hydrateMatchLog(matchLogNode) {
           <header class="match-log-squad-card-head">
             <div>
               <h4>${escapeHtmlText(houseLabel)} ${escapeHtmlText(sportLabel)} Squad</h4>
-              <p class="match-log-squad-summary">Players ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} · Officials ${squad.officials.length}</p>
+              <p class="match-log-squad-summary">Players ${squad.players.length}/${sportPolicy.squadSizeLimit} · Officials ${squad.officials.length}</p>
               <p class="match-log-squad-helper">House totals: ${totalHouseLearners} learners · ${totalHouseStaff} staff. Squad spaces left: ${remainingPlayerSlots} learner slots.</p>
             </div>
           </header>
@@ -3109,7 +3294,7 @@ function hydrateMatchLog(matchLogNode) {
             <section class="match-log-squad-group">
               <header class="match-log-squad-group-head">
                 <h5>Registered players</h5>
-                <span>${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS}</span>
+                <span>${squad.players.length}/${sportPolicy.squadSizeLimit}</span>
               </header>
               ${squad.players.length
                 ? `<ul class="match-log-squad-list">${squad.players
@@ -3175,7 +3360,7 @@ function hydrateMatchLog(matchLogNode) {
           const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !squad.officials.some((selected) => selected.id === official.id));
           const totalHouseLearners = availablePlayers.length + squad.players.length;
           const totalHouseStaff = availableOfficials.length + squad.officials.length;
-          return `${getHouseLabel(houseId)}: ${totalHouseLearners} learners, ${totalHouseStaff} staff, squad ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} players, ${squad.officials.length} staff roles`;
+          return `${getHouseLabel(houseId)}: ${totalHouseLearners} learners, ${totalHouseStaff} staff, squad ${squad.players.length}/${sportPolicy.squadSizeLimit} players, ${squad.officials.length} staff roles`;
         })
         .join(' · ');
       managerStatusNode.textContent = `Managing ${sportLabel} squads. ${summary}.`;
@@ -3507,6 +3692,7 @@ function hydrateMatchLog(matchLogNode) {
       return;
     }
 
+    const fixturePolicy = getFixtureCompetitionPolicy(fixture);
     const savedAvailability = getMatchAvailabilityForTeam(teamId, { excludeEventId: editingEventId, saved: true });
     if (savedAvailability.isReady) {
       inlineNoticeNode.textContent = '';
@@ -3515,7 +3701,7 @@ function hydrateMatchLog(matchLogNode) {
     }
 
     const teamName = teamId === fixture.awayId ? fixture.awayName : fixture.homeName;
-    inlineNoticeNode.textContent = `${teamName}: save a valid team list with exactly ${MAX_MATCH_STARTERS} starters before player suggestions will appear for this event. Substitutes can be up to ${MAX_MATCH_SUBSTITUTES}.`;
+    inlineNoticeNode.textContent = `${teamName}: save a valid team list with exactly ${fixturePolicy.startingPlayers} starters before player suggestions will appear for this event. Substitutes can be up to ${fixturePolicy.benchSizeLimit}.`;
     inlineNoticeNode.classList.remove('is-hidden');
   };
 
@@ -3622,13 +3808,14 @@ function hydrateMatchLog(matchLogNode) {
     }
 
     const renderSquadList = (teamId, groupKey, title, entries, { editable = true } = {}) => {
+      const fixturePolicy = getFixtureCompetitionPolicy(fixture);
       const moveTarget = groupKey === 'starters' ? 'substitutes' : 'starters';
       const moveLabel = groupKey === 'starters' ? 'To bench' : 'To XI';
       return `
         <section class="match-log-squad-group">
           <header class="match-log-squad-group-head">
             <h5>${title}</h5>
-            <span>${entries.length}/${groupKey === 'starters' ? MAX_MATCH_STARTERS : MAX_MATCH_SUBSTITUTES}</span>
+            <span>${entries.length}/${groupKey === 'starters' ? fixturePolicy.startingPlayers : fixturePolicy.benchSizeLimit}</span>
           </header>
           ${entries.length
             ? `<ul class="match-log-squad-list">${entries
@@ -3676,23 +3863,24 @@ function hydrateMatchLog(matchLogNode) {
       const readOnly = !canEditCanonicalTeam(teamId);
       const displayedTeamSheet = readOnly ? getCanonicalTeamListForTeam(teamId) : teamSheet;
       const availability = getMatchAvailabilityForTeam(teamId, { saved: readOnly });
-      const validation = validateMatchTeamSheet(displayedTeamSheet);
-      const savedValidation = validateMatchTeamSheet(savedTeamSheet);
+      const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+      const validation = validateMatchTeamSheet(displayedTeamSheet, fixturePolicy);
+      const savedValidation = validateMatchTeamSheet(savedTeamSheet, fixturePolicy);
       const isDirty = Boolean(squadDirtyByTeam?.[teamId]);
       const searchPlayers = getTeamListSearchPlayers(teamId, { readOnly });
       const selectedCount = displayedTeamSheet.starters.length + displayedTeamSheet.substitutes.length;
       const totalSquadPlayers = teamPlayers.length;
       const remainingSquadChoices = searchPlayers.length;
-      const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - displayedTeamSheet.starters.length);
-      const remainingBench = Math.max(0, MAX_MATCH_SUBSTITUTES - displayedTeamSheet.substitutes.length);
+      const remainingStarters = Math.max(0, fixturePolicy.startingPlayers - displayedTeamSheet.starters.length);
+      const remainingBench = Math.max(0, fixturePolicy.benchSizeLimit - displayedTeamSheet.substitutes.length);
       const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
       const activeNames = availability.isReady
         ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
         : validation.hasSelections
-          ? 'Starting XI must be exactly 11 players before this team list can go live.'
+          ? `Starting lineup must be exactly ${fixturePolicy.startingPlayers} players before this team list can go live.`
           : 'No team list set yet. Set the starting XI and substitutes before logging on-pitch events.';
       const validationMessage = validation.isReady
-        ? `Starting XI fixed at ${MAX_MATCH_STARTERS}. Substitutes ${displayedTeamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}.`
+        ? `Starting lineup fixed at ${fixturePolicy.startingPlayers}. Substitutes ${displayedTeamSheet.substitutes.length}/${fixturePolicy.benchSizeLimit}.`
         : validation.errors[0];
       const saveStateMessage = readOnly
         ? savedValidation.isReady
@@ -3709,7 +3897,7 @@ function hydrateMatchLog(matchLogNode) {
           <header class="match-log-squad-card-head">
             <div>
               <h4>${escapeHtmlText(teamName)}</h4>
-              <p class="match-log-squad-summary">Starting XI ${displayedTeamSheet.starters.length}/${MAX_MATCH_STARTERS} · Substitutes ${displayedTeamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}</p>
+              <p class="match-log-squad-summary">Starting lineup ${displayedTeamSheet.starters.length}/${fixturePolicy.startingPlayers} · Substitutes ${displayedTeamSheet.substitutes.length}/${fixturePolicy.benchSizeLimit}</p>
               <p class="match-log-squad-helper">Team list selected ${selectedCount}/${totalSquadPlayers} squad players. Remaining: ${remainingStarters} starters, ${remainingBench} substitutes, ${remainingSquadChoices} still available to add.</p>
             </div>
             ${readOnly ? '' : `<button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>`}
@@ -3769,7 +3957,8 @@ function hydrateMatchLog(matchLogNode) {
       const homeSheet = getTeamSheet(fixture.homeId);
       const awaySheet = getTeamSheet(fixture.awayId);
       if (canEditCanonicalTeam(fixture.homeId) && canEditCanonicalTeam(fixture.awayId)) {
-        squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
+        const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+        squadStatusNode.textContent = `${fixture.homeName}: ${homeSheet.starters.length}/${fixturePolicy.startingPlayers} starters, ${homeSheet.substitutes.length}/${fixturePolicy.benchSizeLimit} substitutes · ${fixture.awayName}: ${awaySheet.starters.length}/${fixturePolicy.startingPlayers} starters, ${awaySheet.substitutes.length}/${fixturePolicy.benchSizeLimit} substitutes.`;
       } else {
         const ownTeamId = canViewTeam(fixture.homeId) ? fixture.homeId : fixture.awayId;
         const ownTeamName = ownTeamId === fixture.homeId ? fixture.homeName : fixture.awayName;
@@ -3778,8 +3967,9 @@ function hydrateMatchLog(matchLogNode) {
           : getCanonicalTeamListForTeam(ownTeamId);
         const ownTeamPlayers = getPlayersForTeam(ownTeamId);
         const selectedCount = ownSheet.starters.length + ownSheet.substitutes.length;
-        const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - ownSheet.starters.length);
-        const remainingBench = Math.max(0, MAX_MATCH_SUBSTITUTES - ownSheet.substitutes.length);
+        const fixturePolicy = getFixtureCompetitionPolicy(fixture);
+        const remainingStarters = Math.max(0, fixturePolicy.startingPlayers - ownSheet.starters.length);
+        const remainingBench = Math.max(0, fixturePolicy.benchSizeLimit - ownSheet.substitutes.length);
         squadStatusNode.textContent = `${ownTeamName}: squad ${ownTeamPlayers.length} players, selected ${selectedCount}, remaining ${remainingStarters} starters and ${remainingBench} substitutes.`;
       }
     }
@@ -4346,13 +4536,13 @@ function hydrateMatchLog(matchLogNode) {
     return [
       {
         title: `${fixture.homeName} Starting XI`,
-        metaLine: `${homeSheet.starters.length}/${MAX_MATCH_STARTERS} selected`,
+        metaLine: `${homeSheet.starters.length}/${fixturePolicy.startingPlayers} selected`,
         columns: squadColumns,
         rows: buildSquadRows(homeSheet.starters)
       },
       {
         title: `${fixture.homeName} Substitutes`,
-        metaLine: `${homeSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} selected`,
+        metaLine: `${homeSheet.substitutes.length}/${fixturePolicy.benchSizeLimit} selected`,
         columns: squadColumns,
         rows: buildSquadRows(homeSheet.substitutes)
       },
@@ -4364,13 +4554,13 @@ function hydrateMatchLog(matchLogNode) {
       },
       {
         title: `${fixture.awayName} Starting XI`,
-        metaLine: `${awaySheet.starters.length}/${MAX_MATCH_STARTERS} selected`,
+        metaLine: `${awaySheet.starters.length}/${fixturePolicy.startingPlayers} selected`,
         columns: squadColumns,
         rows: buildSquadRows(awaySheet.starters)
       },
       {
         title: `${fixture.awayName} Substitutes`,
-        metaLine: `${awaySheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} selected`,
+        metaLine: `${awaySheet.substitutes.length}/${fixturePolicy.benchSizeLimit} selected`,
         columns: squadColumns,
         rows: buildSquadRows(awaySheet.substitutes)
       },
@@ -4431,6 +4621,7 @@ function hydrateMatchLog(matchLogNode) {
 
   function buildMatchTeamSheetTemplateSections(fixture) {
     if (!fixture) return [];
+    const fixturePolicy = getFixtureCompetitionPolicy(fixture);
 
     const squadTemplateColumns = [
       { key: 'slot', header: '#', width: 6, align: 'center' },
@@ -4465,15 +4656,15 @@ function hydrateMatchLog(matchLogNode) {
     const buildSectionsForTeam = (teamName) => [
       {
         title: `${teamName} Starting XI Template`,
-        metaLine: `${MAX_MATCH_STARTERS} slots`,
+        metaLine: `${fixturePolicy.startingPlayers} slots`,
         columns: squadTemplateColumns,
-        rows: buildBlankSquadRows(MAX_MATCH_STARTERS, 'Starter')
+        rows: buildBlankSquadRows(fixturePolicy.startingPlayers, 'Starter')
       },
       {
         title: `${teamName} Substitutes Template`,
-        metaLine: `${MAX_MATCH_SUBSTITUTES} slots`,
+        metaLine: `${fixturePolicy.benchSizeLimit} slots`,
         columns: squadTemplateColumns,
-        rows: buildBlankSquadRows(MAX_MATCH_SUBSTITUTES, 'Substitute')
+        rows: buildBlankSquadRows(fixturePolicy.benchSizeLimit, 'Substitute')
       },
       {
         title: `${teamName} Team Officials`,
@@ -4750,6 +4941,7 @@ function hydrateMatchLog(matchLogNode) {
       });
       renderManagedHouseSquadWorkspace();
       renderSquadManager();
+      renderCompetitionPolicyControls();
       renderClockStatus();
       syncModalTeamState();
       renderAutocompleteOptions();
@@ -4929,6 +5121,7 @@ function hydrateMatchLog(matchLogNode) {
 
     renderManagedHouseSquadWorkspace();
     renderSquadManager();
+    renderCompetitionPolicyControls();
     renderClockStatus();
     syncModalTeamState();
     renderAutocompleteOptions();
@@ -5110,8 +5303,12 @@ function hydrateMatchLog(matchLogNode) {
     const fixtureSportKey = normalizeManagedSportKey(fixture?.sport || '');
     if (fixtureSportKey) {
       selectedManagerSportKey = fixtureSportKey;
+      selectedPolicySportKey = fixtureSportKey;
       if (managerSportSelect instanceof HTMLSelectElement) {
         managerSportSelect.value = fixtureSportKey;
+      }
+      if (policySportSelect instanceof HTMLSelectElement) {
+        policySportSelect.value = fixtureSportKey;
       }
     }
     loadCurrentFixtureLog();
@@ -5409,6 +5606,7 @@ function hydrateMatchLog(matchLogNode) {
       const typedName = input instanceof HTMLInputElement ? input.value : '';
       const candidate = getSquadCandidateByTypedName(teamId, typedName);
       const current = getTeamSheet(teamId);
+      const fixturePolicy = getFixtureCompetitionPolicy();
 
       if (!candidate) {
         showSmartToast('Player not found in the sporting squad. Add them to the house sporting squad first.', { tone: 'error' });
@@ -5447,13 +5645,13 @@ function hydrateMatchLog(matchLogNode) {
         if (!confirmed) return;
       }
 
-      if (group === 'starters' && current.starters.length >= MAX_MATCH_STARTERS) {
-        showSmartToast(`Only ${MAX_MATCH_STARTERS} players can be in the starting XI.`, { tone: 'error' });
+      if (group === 'starters' && current.starters.length >= fixturePolicy.startingPlayers) {
+        showSmartToast(`Only ${fixturePolicy.startingPlayers} players can be in the starting lineup.`, { tone: 'error' });
         return;
       }
 
-      if (group === 'substitutes' && current.substitutes.length >= MAX_MATCH_SUBSTITUTES) {
-        showSmartToast(`Only ${MAX_MATCH_SUBSTITUTES} substitutes can be added.`, { tone: 'error' });
+      if (group === 'substitutes' && current.substitutes.length >= fixturePolicy.benchSizeLimit) {
+        showSmartToast(`Only ${fixturePolicy.benchSizeLimit} substitutes can be added.`, { tone: 'error' });
         return;
       }
 
@@ -5505,16 +5703,17 @@ function hydrateMatchLog(matchLogNode) {
       const nextGroup = String(moveButton.dataset.matchSquadMove || '').trim();
       const playerId = String(moveButton.dataset.playerId || '').trim();
       const current = getTeamSheet(teamId);
+      const fixturePolicy = getFixtureCompetitionPolicy();
       const player = (Array.isArray(current[currentGroup]) ? current[currentGroup] : []).find((entry) => entry.id === playerId);
       if (!player) return;
 
-      if (nextGroup === 'starters' && current.starters.length >= MAX_MATCH_STARTERS) {
-        showSmartToast(`Only ${MAX_MATCH_STARTERS} players can be in the starting XI.`, { tone: 'error' });
+      if (nextGroup === 'starters' && current.starters.length >= fixturePolicy.startingPlayers) {
+        showSmartToast(`Only ${fixturePolicy.startingPlayers} players can be in the starting lineup.`, { tone: 'error' });
         return;
       }
 
-      if (nextGroup === 'substitutes' && current.substitutes.length >= MAX_MATCH_SUBSTITUTES) {
-        showSmartToast(`Only ${MAX_MATCH_SUBSTITUTES} substitutes can be added.`, { tone: 'error' });
+      if (nextGroup === 'substitutes' && current.substitutes.length >= fixturePolicy.benchSizeLimit) {
+        showSmartToast(`Only ${fixturePolicy.benchSizeLimit} substitutes can be added.`, { tone: 'error' });
         return;
       }
 
@@ -5545,12 +5744,13 @@ function hydrateMatchLog(matchLogNode) {
       }
 
       const squad = getManagedHouseSquad(houseId);
+      const sportPolicy = getCompetitionPolicy(getSelectedManagerSportKey());
       if (squad.players.some((player) => player.id === candidate.id)) {
         showSmartToast(`${candidate.name} is already in this sporting squad.`, { tone: 'error' });
         return;
       }
-      if (squad.players.length >= MAX_HOUSE_SPORT_SQUAD_PLAYERS) {
-        showSmartToast(`Only ${MAX_HOUSE_SPORT_SQUAD_PLAYERS} players can be registered for one sporting squad.`, { tone: 'error' });
+      if (squad.players.length >= sportPolicy.squadSizeLimit) {
+        showSmartToast(`Only ${sportPolicy.squadSizeLimit} players can be registered for one sporting squad.`, { tone: 'error' });
         return;
       }
 
@@ -5675,6 +5875,39 @@ function hydrateMatchLog(matchLogNode) {
     selectedManagerSportKey = normalizeManagedSportKey(managerSportSelect.value) || managerSportOptions[0]?.key || 'soccer';
     loadCurrentFixtureLog();
     render();
+  });
+
+  policySportSelect?.addEventListener('change', () => {
+    if (!(policySportSelect instanceof HTMLSelectElement)) return;
+    selectedPolicySportKey = normalizeManagedSportKey(policySportSelect.value) || managerSportOptions[0]?.key || 'soccer';
+    renderCompetitionPolicyControls();
+  });
+
+  policySaveButton?.addEventListener('click', () => {
+    if (!isAdminModeEnabled()) return;
+    const currentPolicy = getSelectedPolicyCompetitionPolicy();
+    const nextPolicy = normalizeMatchCompetitionPolicy(
+      {
+        squadSizeLimit: policySquadSizeInput instanceof HTMLInputElement ? policySquadSizeInput.value : currentPolicy.squadSizeLimit,
+        startingPlayers: policyStartersInput instanceof HTMLInputElement ? policyStartersInput.value : currentPolicy.startingPlayers,
+        benchSizeLimit: policyBenchInput instanceof HTMLInputElement ? policyBenchInput.value : currentPolicy.benchSizeLimit,
+        teamListSource: policyTeamListSourceSelect instanceof HTMLSelectElement ? policyTeamListSourceSelect.value : currentPolicy.teamListSource,
+        adminCanEditCanonicalRecords: policyAdminEditSelect instanceof HTMLSelectElement ? policyAdminEditSelect.value === 'true' : currentPolicy.adminCanEditCanonicalRecords
+      },
+      currentPolicy
+    );
+
+    if (nextPolicy.startingPlayers + nextPolicy.benchSizeLimit > nextPolicy.squadSizeLimit) {
+      renderCompetitionPolicyControls('Squad size must be at least the total of starting players plus substitutes.', { tone: 'error' });
+      showSmartToast('Squad size must be at least the total of starting players plus substitutes.', { tone: 'error' });
+      return;
+    }
+
+    matchCompetitionPolicyStore = writeMatchCompetitionPolicy(matchCompetitionPolicyStore, getSelectedPolicySportKey(), nextPolicy, DEFAULT_MATCH_COMPETITION_POLICY);
+    persistMatchCompetitionPolicyStore(fixtureSectionKey, matchCompetitionPolicyStore);
+    loadCurrentFixtureLog();
+    render();
+    showSmartToast('Competition rules saved.', { tone: 'success' });
   });
 
   modalTeamSelect?.addEventListener('change', () => {
