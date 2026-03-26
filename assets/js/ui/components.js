@@ -15969,7 +15969,7 @@ ${detailMarkup}
 };
 
 const renderSectionByType = (section, sectionIndex, context = {}) => {
-  if (!isAdminModeEnabled() && isAdminOnlySectionForPublic(section)) {
+  if (isPublicAudienceEnabled() && isAdminOnlySectionForPublic(section)) {
     return '';
   }
 
@@ -16842,6 +16842,8 @@ const hydratePublicFixtureBoard = (boardNode) => {
   const fixtureSectionKey = String(config.fixtureSectionKey || 'sports_fixture_creator').trim() || 'sports_fixture_creator';
   const fixtureCatalogStorageKey = getFixtureCatalogStorageKey(fixtureSectionKey);
   const fixtureDateStorageKey = getFixtureDateStorageKey(fixtureSectionKey);
+  const matchLogByFixtureStorageKey = getMatchLogByFixtureStorageKey(fixtureSectionKey);
+  const canOpenMatchLogs = isAdminModeEnabled() || isStaffModeEnabled();
 
   const statusNode = boardNode.querySelector('[data-public-fixture-status]');
   const dateSelect = boardNode.querySelector('[data-public-fixture-date]');
@@ -16855,6 +16857,7 @@ const hydratePublicFixtureBoard = (boardNode) => {
   let selectedDate = '';
   let fixtureCatalog = {};
   let fixtureDateMap = {};
+  let logsByFixture = {};
 
   const parseDateTimeStamp = (stamp) => {
     const normalized = normalizeFixtureStampGlobal(stamp);
@@ -16930,12 +16933,33 @@ const hydratePublicFixtureBoard = (boardNode) => {
 
     targetNode.innerHTML = fixtures
       .map(
-        (fixture) => `
+        (fixture) => {
+          const storedLog = logsByFixture[fixture.fixtureId];
+          const summaryMeta = summarizeMatchLogEntry(storedLog);
+          const summaryLabel = summaryMeta.compactLabel || 'No log yet';
+          const logButtonMarkup = canOpenMatchLogs
+            ? `
+              <div class="fixture-date-edit-wrap">
+                <span class="fixture-date-label">${escapeHtmlText(summaryLabel)}</span>
+                <button
+                  type="button"
+                  class="fixture-date-link"
+                  data-fixture-open-log
+                  data-fixture-log-id="${escapeHtmlAttribute(fixture.fixtureId)}"
+                  data-fixture-log-date="${escapeHtmlAttribute(fixture.date)}"
+                >${summaryMeta.eventCount > 0 ? 'Edit<wbr> log' : 'Log<wbr> match'}</button>
+              </div>
+            `
+            : '';
+
+          return `
           <li class="public-fixture-item">
             <p class="public-fixture-time">${escapeHtmlText(formatTimeLabel(fixture.time))}</p>
             <p class="public-fixture-teams">${escapeHtmlText(fixture.homeName)} <span aria-hidden="true">vs</span> ${escapeHtmlText(fixture.awayName)}</p>
+            ${logButtonMarkup}
           </li>
-        `
+        `;
+        }
       )
       .join('');
   };
@@ -16984,6 +17008,7 @@ const hydratePublicFixtureBoard = (boardNode) => {
   const refresh = () => {
     fixtureCatalog = readLocalStorageObject(fixtureCatalogStorageKey);
     fixtureDateMap = readLocalStorageObject(fixtureDateStorageKey);
+    logsByFixture = readLocalStorageObject(matchLogByFixtureStorageKey);
     render();
   };
 
@@ -16994,7 +17019,13 @@ const hydratePublicFixtureBoard = (boardNode) => {
 
   window.addEventListener('storage', (event) => {
     if (!event.key) return;
-    if (event.key !== fixtureCatalogStorageKey && event.key !== fixtureDateStorageKey) return;
+    if (
+      event.key !== fixtureCatalogStorageKey &&
+      event.key !== fixtureDateStorageKey &&
+      event.key !== matchLogByFixtureStorageKey
+    ) {
+      return;
+    }
     refresh();
   });
 
@@ -17002,6 +17033,33 @@ const hydratePublicFixtureBoard = (boardNode) => {
     const sectionFromEvent = String(event?.detail?.sectionKey || '').trim();
     if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
     refresh();
+  });
+
+  window.addEventListener('bhanoyi:match-log-updated', (event) => {
+    const sectionFromEvent = String(event?.detail?.fixtureSectionKey || '').trim();
+    if (sectionFromEvent && sectionFromEvent !== fixtureSectionKey) return;
+    refresh();
+  });
+
+  boardNode.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-fixture-open-log]');
+    if (!(trigger instanceof HTMLElement)) return;
+
+    event.preventDefault();
+    const fixtureId = String(trigger.dataset.fixtureLogId || '').trim();
+    const fixtureDate = normalizeFixtureDateOnlyGlobal(trigger.dataset.fixtureLogDate || '');
+    if (!fixtureId) return;
+
+    window.dispatchEvent(
+      new CustomEvent('bhanoyi:open-match-log-modal', {
+        detail: {
+          fixtureSectionKey,
+          fixtureId,
+          fixtureDate,
+          preferredSide: 'left'
+        }
+      })
+    );
   });
 
   void Promise.all([
