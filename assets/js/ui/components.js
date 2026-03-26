@@ -2948,13 +2948,7 @@ function hydrateMatchLog(matchLogNode) {
     };
     [fixture.homeId, fixture.awayId].forEach((teamId) => {
       const managedSquadPlayers = getManagedHouseSquad(teamId, normalizeManagedSportKey(fixture.sport || getCurrentSportKey())).players;
-      if (managedSquadPlayers.length) {
-        nextSource[teamId] = managedSquadPlayers;
-        return;
-      }
-      if (!Array.isArray(nextSource[teamId]) || !nextSource[teamId].length) {
-        nextSource[teamId] = housePlayersByTeam[teamId] || [];
-      }
+      nextSource[teamId] = managedSquadPlayers;
     });
     return {
       playersByTeam: normalizeFixturePlayersByTeam(
@@ -3663,6 +3657,7 @@ function hydrateMatchLog(matchLogNode) {
               <button type="button" class="btn btn-primary" data-match-squad-save="true" data-team-id="${escapeHtmlAttribute(teamId)}"${isDirty ? '' : ' disabled'}>Save team list</button>
             </div>
           </div>
+          <p class="match-log-squad-helper">Only learners already registered in this sporting squad can be added to the match team list.</p>
           <p class="match-log-squad-helper">${escapeHtmlText(validationMessage)}</p>
           <p class="match-log-squad-helper">${escapeHtmlText(saveStateMessage)}</p>
           <div class="match-log-squad-candidate-preview" data-match-squad-preview="${escapeHtmlAttribute(teamId)}">
@@ -3775,7 +3770,7 @@ function hydrateMatchLog(matchLogNode) {
 
     const candidate = getSquadCandidateByTypedName(normalizedTeamId, typedName);
     if (!candidate) {
-      preview.innerHTML = '<span class="match-log-squad-candidate-empty">Select a learner from the suggestions to view status.</span>';
+      preview.innerHTML = '<span class="match-log-squad-candidate-empty">Player not found in the sporting squad.</span>';
       return;
     }
 
@@ -5321,7 +5316,7 @@ function hydrateMatchLog(matchLogNode) {
       const current = getTeamSheet(teamId);
 
       if (!candidate) {
-        showSmartToast('Choose a learner from the team list before adding them to the match squad.', { tone: 'error' });
+        showSmartToast('Player not found in the sporting squad. Add them to the house sporting squad first.', { tone: 'error' });
         return;
       }
 
