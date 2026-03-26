@@ -3150,20 +3150,30 @@ body.match-log-workspace-open {
   gap: 12px;
 }
 
+.match-log-manager-toolbar {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+}
+
 .match-log-manager-toolbar label {
   display: grid;
   gap: 6px;
   font-weight: 600;
-  max-width: 280px;
+  max-width: none;
 }
 
-.match-log-manager-toolbar select {
+.match-log-manager-toolbar select,
+.match-log-manager-toolbar input {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 9px 10px;
   font: inherit;
   background: var(--surface);
   color: var(--text);
+}
+
+.match-log-manager-toolbar-search {
+  min-width: min(100%, 240px);
 }
 
 .match-log-squad-grid {
@@ -3373,6 +3383,27 @@ body.match-log-workspace-open {
   min-height: 30px;
   padding: 5px 9px;
   font-size: 0.76rem;
+}
+
+.match-log-inline-role-field {
+  display: grid;
+  gap: 4px;
+  min-width: 130px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.match-log-inline-role-field select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.match-log-squad-house-list {
+  grid-column: 1 / -1;
 }
 
 .match-log-squad-empty {
@@ -5479,8 +5510,16 @@ body.match-log-workspace-open {
     grid-template-columns: 1fr;
   }
 
+  .match-log-manager-toolbar {
+    grid-template-columns: 1fr;
+  }
+
   .match-log-squad-control-actions {
     justify-content: stretch;
+  }
+
+  .match-log-inline-role-field {
+    min-width: 0;
   }
 
   .match-log-workspace-modal {
