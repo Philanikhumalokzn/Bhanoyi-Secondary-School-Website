@@ -2957,28 +2957,20 @@ function hydrateMatchLog(matchLogNode) {
     return getAvailableHouseOfficials(houseId).find((official) => normalizeMatchSearchValue(official.name) === normalizedName) || null;
   };
 
-  const resolveFixturePlayersByTeam = (fixture, entry) => {
-    const persistedPlayersByTeam = entry?.playersByTeam || {
-      homePlayers: entry?.homePlayers,
-      awayPlayers: entry?.awayPlayers
-    };
-    const housePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel());
-    const nextSource = {
-      ...(persistedPlayersByTeam && typeof persistedPlayersByTeam === 'object' ? persistedPlayersByTeam : {})
-    };
-    [fixture.homeId, fixture.awayId].forEach((teamId) => {
-      const managedSquadPlayers = getManagedHouseSquad(teamId, normalizeManagedSportKey(fixture.sport || getCurrentSportKey())).players;
-      nextSource[teamId] = managedSquadPlayers;
-    });
+  const resolveManagedSquadPlayersByTeam = (fixture) => {
+    if (!fixture) return {};
+    const sportKey = normalizeManagedSportKey(fixture.sport || config.sport || getSelectedManagerSportKey());
     return {
-      playersByTeam: normalizeFixturePlayersByTeam(
-        fixture,
-        nextSource,
-        fixture.playersByTeam || {
-          homePlayers: fixture.homePlayers,
-          awayPlayers: fixture.awayPlayers
-        }
-      ),
+      [fixture.homeId]: getManagedHouseSquad(fixture.homeId, sportKey).players,
+      [fixture.awayId]: getManagedHouseSquad(fixture.awayId, sportKey).players
+    };
+  };
+
+  const resolveFixturePlayersByTeam = (fixture, entry) => {
+    const housePlayersByTeam = loadEnrollmentPlayersByHouse(fixture.homeId, fixture.awayId, fixture.sport || config.sport || getCurrentSportLabel());
+    const nextSource = resolveManagedSquadPlayersByTeam(fixture);
+    return {
+      playersByTeam: normalizeFixturePlayersByTeam(fixture, nextSource),
       housePlayersByTeam
     };
   };
@@ -3203,17 +3195,7 @@ function hydrateMatchLog(matchLogNode) {
     if (!fixture) return null;
     const stored = logsByFixture[fixture.fixtureId];
     const safeStored = stored && typeof stored === 'object' ? stored : {};
-    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(
-      fixture,
-      safeStored.playersByTeam || {
-        homePlayers: safeStored.homePlayers,
-        awayPlayers: safeStored.awayPlayers
-      },
-      fixture.playersByTeam || {
-        homePlayers: fixture.homePlayers,
-        awayPlayers: fixture.awayPlayers
-      }
-    );
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(fixture, resolveManagedSquadPlayersByTeam(fixture));
     const initialScores = {
       [fixture.homeId]: getInitialScoreForTeam(fixture.homeId),
       [fixture.awayId]: getInitialScoreForTeam(fixture.awayId),
@@ -3979,14 +3961,7 @@ function hydrateMatchLog(matchLogNode) {
     if (!fixture) return;
     const scores = computeScores(fixture);
     const baseEntry = getFixtureEntry(fixture);
-    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(
-      fixture,
-      currentPlayersByTeam,
-      fixture.playersByTeam || {
-        homePlayers: fixture.homePlayers,
-        awayPlayers: fixture.awayPlayers
-      }
-    );
+    const normalizedPlayersByTeam = normalizeFixturePlayersByTeam(fixture, resolveManagedSquadPlayersByTeam(fixture));
     const normalizedSquadByTeam = normalizeFixtureSquadByTeam(fixture, savedSquadByTeam, normalizedPlayersByTeam);
     const playerEventIndex = buildPlayerEventIndex(currentEvents, fixture, normalizedPlayersByTeam);
 
