@@ -1576,6 +1576,23 @@ const renderMatchLogSection = (section, sectionIndex) => {
   const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
   const rightTeam = houseOptions.find((team) => team.id === teamPair.rightTeamId) || houseOptions[1] || leftTeam;
   const canReviewMatchEvents = isAdminModeEnabled();
+  const teamListPickerMarkup = `
+              <div class="match-log-team-pickers">
+                <label>
+                  Match day
+                  <select data-matchday-select>
+                    <option value="">Select fixture date</option>
+                  </select>
+                </label>
+                <label>
+                  Fixture
+                  <select data-match-fixture-select>
+                    <option value="">Select match on chosen date</option>
+                  </select>
+                </label>
+              </div>
+              <p class="match-log-status" data-match-selected-fixture aria-live="polite">Choose a fixture date, then pick a match to manage.</p>
+  `;
   return `
     <section class="section ${section.alt ? 'section-alt' : ''} match-log-modal-host" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
       <div class="match-log-workspace-modal is-hidden" data-match-workspace-modal>
@@ -1589,6 +1606,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
             <button type="button" class="btn btn-secondary" data-match-workspace-close>Close</button>
           </header>
           <article class="match-log-shell" data-match-log="true" data-match-log-id="${fallbackSectionKey}" data-match-log-config="${escapeHtmlAttribute(JSON.stringify(config))}">
+          ${canReviewMatchEvents
+            ? `
           <section class="sports-workflow-step is-expanded" data-sports-workflow-step data-sports-workflow-id="setup-log">
             <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="true">
               <span>Set Up Match Logging</span>
@@ -1605,21 +1624,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
                   <button type="button" class="btn btn-secondary" data-match-reset>Reset log</button>
                 </div>
               </header>
-              <div class="match-log-team-pickers">
-                <label>
-                  Match day
-                  <select data-matchday-select>
-                    <option value="">Select fixture date</option>
-                  </select>
-                </label>
-                <label>
-                  Fixture
-                  <select data-match-fixture-select>
-                    <option value="">Select match on chosen date</option>
-                  </select>
-                </label>
-              </div>
-              <p class="match-log-status" data-match-selected-fixture aria-live="polite">Choose a fixture date, then pick a match to log.</p>
+              ${teamListPickerMarkup}
               <div class="match-log-clock-panel">
                 <div class="match-log-clock-grid">
                   <p class="match-log-clock-item">
@@ -1649,6 +1654,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
               </div>
             </div>
           </section>
+          `
+            : ''}
           <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="manage-squads">
             <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Manage House Sporting Squad</span>
@@ -1669,6 +1676,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
               <span>Set Team Lists</span>
             </button>
             <div class="sports-workflow-body" data-sports-workflow-body>
+              ${canReviewMatchEvents ? '' : teamListPickerMarkup}
               <p class="match-log-status" data-match-squad-status aria-live="polite">Choose a fixture to set the starting XI and substitutes for both teams.</p>
               <div class="match-log-squad-manager" data-match-squad-manager></div>
             </div>
@@ -3003,6 +3011,9 @@ function hydrateMatchLog(matchLogNode) {
       const selectedOfficialIds = new Set(squad.officials.map((official) => official.id));
       const availablePlayers = getAvailableHousePlayersForSport(houseId, sportLabel).filter((player) => !selectedPlayerIds.has(player.id));
       const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !selectedOfficialIds.has(official.id));
+      const totalHouseLearners = availablePlayers.length + squad.players.length;
+      const totalHouseStaff = availableOfficials.length + squad.officials.length;
+      const remainingPlayerSlots = Math.max(0, MAX_HOUSE_SPORT_SQUAD_PLAYERS - squad.players.length);
       const houseLabel = getHouseLabel(houseId);
       const playerListId = `match-manager-player-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
       const officialListId = `match-manager-official-options-${String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '_')}-${houseId}`;
@@ -3013,6 +3024,7 @@ function hydrateMatchLog(matchLogNode) {
             <div>
               <h4>${escapeHtmlText(houseLabel)} ${escapeHtmlText(sportLabel)} Squad</h4>
               <p class="match-log-squad-summary">Players ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} · Officials ${squad.officials.length}</p>
+              <p class="match-log-squad-helper">House totals: ${totalHouseLearners} learners · ${totalHouseStaff} staff. Squad spaces left: ${remainingPlayerSlots} learner slots.</p>
             </div>
           </header>
           <p class="match-log-squad-helper">Only learners from this house can join the squad. Match-day team lists are chosen from these saved players.</p>
@@ -3108,7 +3120,11 @@ function hydrateMatchLog(matchLogNode) {
       const summary = accessibleHouseIds
         .map((houseId) => {
           const squad = getManagedHouseSquad(houseId, sportKey);
-          return `${getHouseLabel(houseId)}: ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} players`;
+          const availablePlayers = getAvailableHousePlayersForSport(houseId, sportLabel).filter((player) => !squad.players.some((selected) => selected.id === player.id));
+          const availableOfficials = getAvailableHouseOfficials(houseId).filter((official) => !squad.officials.some((selected) => selected.id === official.id));
+          const totalHouseLearners = availablePlayers.length + squad.players.length;
+          const totalHouseStaff = availableOfficials.length + squad.officials.length;
+          return `${getHouseLabel(houseId)}: ${totalHouseLearners} learners, ${totalHouseStaff} staff, squad ${squad.players.length}/${MAX_HOUSE_SPORT_SQUAD_PLAYERS} players, ${squad.officials.length} staff roles`;
         })
         .join(' · ');
       managerStatusNode.textContent = `Managing ${sportLabel} squads. ${summary}.`;
@@ -3617,6 +3633,11 @@ function hydrateMatchLog(matchLogNode) {
       const isDirty = Boolean(squadDirtyByTeam?.[teamId]);
       const selectedIds = new Set([...teamSheet.starters, ...teamSheet.substitutes].map((player) => player.id));
       const availablePlayers = teamPlayers.filter((player) => !selectedIds.has(player.id));
+      const selectedCount = teamSheet.starters.length + teamSheet.substitutes.length;
+      const totalSquadPlayers = teamPlayers.length;
+      const remainingSquadChoices = availablePlayers.length;
+      const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - teamSheet.starters.length);
+      const remainingBench = Math.max(0, MAX_MATCH_SUBSTITUTES - teamSheet.substitutes.length);
       const datalistId = `match-squad-options-${String(sectionKey || 'sports_log').replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(teamId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
       const activeNames = availability.isReady
         ? availability.active.map((player) => player.name).join(', ') || 'No active players selected yet.'
@@ -3638,6 +3659,7 @@ function hydrateMatchLog(matchLogNode) {
             <div>
               <h4>${escapeHtmlText(teamName)}</h4>
               <p class="match-log-squad-summary">Starting XI ${teamSheet.starters.length}/${MAX_MATCH_STARTERS} · Substitutes ${teamSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES}</p>
+              <p class="match-log-squad-helper">Team list selected ${selectedCount}/${totalSquadPlayers} squad players. Remaining: ${remainingStarters} starters, ${remainingBench} substitutes, ${remainingSquadChoices} still available to add.</p>
             </div>
             <button type="button" class="btn btn-secondary" data-match-squad-clear="true" data-team-id="${escapeHtmlAttribute(teamId)}">Clear list</button>
           </header>
@@ -3698,7 +3720,11 @@ function hydrateMatchLog(matchLogNode) {
         const ownTeamId = canManageTeam(fixture.homeId) ? fixture.homeId : fixture.awayId;
         const ownTeamName = ownTeamId === fixture.homeId ? fixture.homeName : fixture.awayName;
         const ownSheet = ownTeamId === fixture.homeId ? homeSheet : awaySheet;
-        squadStatusNode.textContent = `${ownTeamName}: ${ownSheet.starters.length}/${MAX_MATCH_STARTERS} starters, ${ownSheet.substitutes.length}/${MAX_MATCH_SUBSTITUTES} substitutes.`;
+        const ownTeamPlayers = getPlayersForTeam(ownTeamId);
+        const selectedCount = ownSheet.starters.length + ownSheet.substitutes.length;
+        const remainingStarters = Math.max(0, MAX_MATCH_STARTERS - ownSheet.starters.length);
+        const remainingBench = Math.max(0, MAX_MATCH_SUBSTITUTES - ownSheet.substitutes.length);
+        squadStatusNode.textContent = `${ownTeamName}: squad ${ownTeamPlayers.length} players, selected ${selectedCount}, remaining ${remainingStarters} starters and ${remainingBench} substitutes.`;
       }
     }
   };
