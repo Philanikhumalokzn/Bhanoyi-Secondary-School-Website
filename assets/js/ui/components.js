@@ -1575,6 +1575,7 @@ const renderMatchLogSection = (section, sectionIndex) => {
 
   const leftTeam = houseOptions.find((team) => team.id === teamPair.leftTeamId) || houseOptions[0];
   const rightTeam = houseOptions.find((team) => team.id === teamPair.rightTeamId) || houseOptions[1] || leftTeam;
+  const canReviewMatchEvents = isAdminModeEnabled();
   return `
     <section class="section ${section.alt ? 'section-alt' : ''} match-log-modal-host" data-editable-section="true" data-section-index="${sectionIndex}" data-section-type="match-log" data-section-key="${fallbackSectionKey}">
       <div class="match-log-workspace-modal is-hidden" data-match-workspace-modal>
@@ -1672,6 +1673,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
               <div class="match-log-squad-manager" data-match-squad-manager></div>
             </div>
           </section>
+          ${canReviewMatchEvents
+            ? `
           <section class="sports-workflow-step is-collapsed" data-sports-workflow-step data-sports-workflow-id="log-events">
             <button type="button" class="sports-workflow-toggle" data-sports-workflow-toggle aria-expanded="false">
               <span>Log and Review Match Events</span>
@@ -1754,6 +1757,8 @@ const renderMatchLogSection = (section, sectionIndex) => {
               </div>
             </div>
           </section>
+          `
+            : ''}
           <div class="match-log-modal is-hidden" data-match-modal>
             <div class="match-log-modal-backdrop" data-match-close-modal></div>
             <article class="panel match-log-modal-panel" role="dialog" aria-modal="true" aria-label="Add match event">
@@ -2859,7 +2864,7 @@ function hydrateMatchLog(matchLogNode) {
     return isStaffManagerMode && normalizedTeamId === managedHouseId;
   };
 
-  const canEditTeamEvents = (teamId) => canManageTeam(teamId);
+  const canEditTeamEvents = (teamId) => isAdminModeEnabled() && canManageTeam(teamId);
 
   const getCurrentFixture = () => fixtureOptions.find((entry) => entry.fixtureId === selectedFixtureId) || null;
 
