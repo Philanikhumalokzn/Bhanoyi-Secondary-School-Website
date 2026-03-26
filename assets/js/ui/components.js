@@ -2880,6 +2880,14 @@ function hydrateMatchLog(matchLogNode) {
     return managerSportOptions.find((entry) => entry.key === sportKey)?.label || 'Football';
   };
 
+  const getSelectedManagerSportKey = () =>
+    normalizeManagedSportKey(selectedManagerSportKey || config.sport || '') || managerSportOptions[0]?.key || 'soccer';
+
+  const getSelectedManagerSportLabel = () => {
+    const sportKey = getSelectedManagerSportKey();
+    return managerSportOptions.find((entry) => entry.key === sportKey)?.label || 'Football';
+  };
+
   const getAccessibleHouseIds = () => {
     if (isAdminModeEnabled()) {
       return Array.from(new Set((Array.isArray(config.houseOptions) ? config.houseOptions : []).map((entry) => String(entry.id || '').trim().toLowerCase()).filter(Boolean)));
@@ -2896,10 +2904,10 @@ function hydrateMatchLog(matchLogNode) {
     );
   };
 
-  const getManagedHouseSquad = (houseId, sportKey = getCurrentSportKey()) =>
+  const getManagedHouseSquad = (houseId, sportKey = getSelectedManagerSportKey()) =>
     readHouseSportSquad(houseSportSquadStore, sportKey, houseId);
 
-  const saveManagedHouseSquad = (houseId, entry, sportKey = getCurrentSportKey()) => {
+  const saveManagedHouseSquad = (houseId, entry, sportKey = getSelectedManagerSportKey()) => {
     houseSportSquadStore = writeHouseSportSquad(houseSportSquadStore, sportKey, houseId, entry);
     persistHouseSportSquadStore(fixtureSectionKey, houseSportSquadStore);
     window.dispatchEvent(
@@ -2913,7 +2921,7 @@ function hydrateMatchLog(matchLogNode) {
     );
   };
 
-  const getAvailableHousePlayersForSport = (houseId, sportLabel = getCurrentSportLabel()) => {
+  const getAvailableHousePlayersForSport = (houseId, sportLabel = getSelectedManagerSportLabel()) => {
     const byHouse = loadEnrollmentPlayersByHouse(houseId, houseId, sportLabel);
     return normalizeMatchPlayersForTeam(byHouse[String(houseId || '').trim().toLowerCase()] || [], { houseId });
   };
@@ -2983,8 +2991,8 @@ function hydrateMatchLog(matchLogNode) {
       return;
     }
 
-    const sportLabel = getCurrentSportLabel();
-    const sportKey = getCurrentSportKey();
+    const sportLabel = getSelectedManagerSportLabel();
+    const sportKey = getSelectedManagerSportKey();
     const cards = accessibleHouseIds.map((houseId) => {
       const squad = getManagedHouseSquad(houseId, sportKey);
       const selectedPlayerIds = new Set(squad.players.map((player) => player.id));
