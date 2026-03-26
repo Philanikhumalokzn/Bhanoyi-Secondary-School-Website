@@ -2197,7 +2197,7 @@ const writeHouseSportSquad = (store, sportKey, houseId, entry) => {
   return nextStore;
 };
 
-const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel) => {
+const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel, { filterBySportingCode = true } = {}) => {
   const targetHouseIds = new Set(
     [String(homeId || '').trim().toLowerCase(), String(awayId || '').trim().toLowerCase()].filter(Boolean)
   );
@@ -2256,6 +2256,10 @@ const loadEnrollmentPlayersByHouse = (homeId, awayId, sportLabel) => {
 
   targetHouseIds.forEach((houseId) => {
     const allPlayers = normalizeMatchPlayersForTeam(houseBuckets.get(houseId) || [], { houseId });
+    if (!filterBySportingCode) {
+      byHouse[houseId] = allPlayers;
+      return;
+    }
     const sportFiltered = allPlayers.filter((player) => inferSportCodeMatches(sportLabel, player.sportingCodes));
     byHouse[houseId] = sportFiltered.length ? sportFiltered : allPlayers;
   });
@@ -2922,7 +2926,7 @@ function hydrateMatchLog(matchLogNode) {
   };
 
   const getAvailableHousePlayersForSport = (houseId, sportLabel = getSelectedManagerSportLabel()) => {
-    const byHouse = loadEnrollmentPlayersByHouse(houseId, houseId, sportLabel);
+    const byHouse = loadEnrollmentPlayersByHouse(houseId, houseId, sportLabel, { filterBySportingCode: false });
     return normalizeMatchPlayersForTeam(byHouse[String(houseId || '').trim().toLowerCase()] || [], { houseId });
   };
 
