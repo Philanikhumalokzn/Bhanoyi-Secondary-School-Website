@@ -98,6 +98,15 @@ Note: Contact and Admissions email endpoints are currently implemented under `/a
 3. Sign in through `/admin.html` once after deploy so staff auth sync can provision/update staff users.
 4. Then retry the staff login using the exact `loginEmail` and `loginPassword` shown in Enrollment.
 
+## If House Manager team lists save but admin cannot log scorers live
+
+1. Re-run `supabase/policies.sql` after pulling the latest code.
+2. Confirm the `site_settings` policies now allow authenticated staff to manage:
+   - `local_store:bhanoyi.matchLogByFixture.*`
+   - `local_store:bhanoyi.houseSportSquads.*`
+3. Ask the House Manager to re-save the sporting squad and the fixture team list once.
+4. Reload the admin Sports page and reopen the same fixture.
+
 Important:
 Entering a staff email/password in Enrollment only stores the intended credentials in the enrollment profile. Those become real login credentials only after `/api/staff-auth-sync` successfully creates or updates the matching Supabase Auth user.
 

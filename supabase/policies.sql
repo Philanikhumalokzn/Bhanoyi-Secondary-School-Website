@@ -127,6 +127,20 @@ with check (
   )
 );
 
+drop policy if exists "Authenticated staff manage sports local stores" on public.site_settings;
+create policy "Authenticated staff manage sports local stores"
+on public.site_settings
+for all
+to authenticated
+using (
+  setting_key like 'local_store:bhanoyi.matchLogByFixture.%'
+  or setting_key like 'local_store:bhanoyi.houseSportSquads.%'
+)
+with check (
+  setting_key like 'local_store:bhanoyi.matchLogByFixture.%'
+  or setting_key like 'local_store:bhanoyi.houseSportSquads.%'
+);
+
 do $$
 begin
   if to_regclass('public.site_hero_notice') is not null then
