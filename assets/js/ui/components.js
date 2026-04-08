@@ -7006,6 +7006,7 @@ const renderEnrollmentManagerSection = (section, sectionIndex) => {
               <h3>Manage Class</h3>
               <p class="enrollment-class-modal-subtitle" data-enrollment-manage-title></p>
               <div class="enrollment-class-modal-actions enrollment-class-modal-actions-top">
+                <button type="button" class="btn btn-secondary" data-enrollment-export-class-list>Download class list</button>
                 <button type="button" class="btn btn-secondary" data-enrollment-clear-learners data-enrollment-admin-only>Clear class list</button>
               </div>
               <section class="sports-workflow-step is-collapsed enrollment-class-modal-section" data-manage-workflow-step data-manage-workflow-id="class-details">
@@ -7143,6 +7144,7 @@ const hydrateEnrollmentManager = (managerNode) => {
   const importLearnersButton = managerNode.querySelector('[data-enrollment-import-learners]');
   const bulkImportFileInput = managerNode.querySelector('[data-enrollment-bulk-import-files]');
   const bulkImportLearnersButton = managerNode.querySelector('[data-enrollment-bulk-import-learners]');
+  const exportClassListButton = managerNode.querySelector('[data-enrollment-export-class-list]');
   const clearLearnersButtons = Array.from(managerNode.querySelectorAll('[data-enrollment-clear-learners]'));
   const learnerListNode = managerNode.querySelector('[data-enrollment-learner-list]');
   const staffWorkflowStep = managerNode.querySelector('[data-enrollment-workflow-id="staff"]');
@@ -7196,6 +7198,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     !(importLearnersButton instanceof HTMLButtonElement) ||
     !(bulkImportFileInput instanceof HTMLInputElement) ||
     !(bulkImportLearnersButton instanceof HTMLButtonElement) ||
+    !(exportClassListButton instanceof HTMLButtonElement) ||
     !clearLearnersButtons.length ||
     !(learnerListNode instanceof HTMLElement) ||
     !(staffTypeSelect instanceof HTMLSelectElement) ||
@@ -8565,6 +8568,124 @@ const hydrateEnrollmentManager = (managerNode) => {
     });
   };
 
+  const resolveHouseName = (houseId) => {
+    const normalizedHouseId = normalizeText(houseId, 30).toLowerCase();
+    if (!normalizedHouseId) return '';
+    const matchedHouse = schoolHouseOptions.find((house) => house.id === normalizedHouseId);
+    return matchedHouse ? normalizeText(matchedHouse.name, 80) : '';
+  };
+
+  const toSafeExportToken = (value, fallback = 'export') => {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return normalized || fallback;
+  };
+
+  const getCurrentClassExportProfile = (grade = selectedManageGrade, letter = selectedManageLetter) => {
+    const normalizedGrade = String(grade || '').trim();
+    const normalizedLetter = normalizeLetter(letter);
+    const storedProfile = getClassProfile(normalizedGrade, normalizedLetter);
+    const isActiveManageClass =
+      normalizedGrade &&
+      normalizedLetter &&
+      normalizedGrade === selectedManageGrade &&
+      normalizedLetter === selectedManageLetter;
+
+    if (!isActiveManageClass) {
+      return storedProfile;
+    }
+
+    return normalizeProfile({
+      teacher: isAdminMode ? manageTeacherSelect.value : storedProfile.teacher,
+      room: isAdminMode ? manageRoomInput.value : storedProfile.room,
+      capacity: String(manageLearners.length),
+      notes: isAdminMode ? manageNotesInput.value : storedProfile.notes,
+      learners: manageLearners
+    });
+  };
+
+  const resolveClassTeacherExportRow = (grade, letter, profile) => {
+    const assignedTeacher =
+      staffMembers.find(
+        (staff) =>
+          normalizeStaffType(staff?.staffType || '') === 'teaching_staff' &&
+          isStaffAssignedToClass(staff, grade, letter)
+      ) ||
+      (loggedInStaff && isStaffAssignedToClass(loggedInStaff, grade, letter) ? loggedInStaff : null);
+
+    const teacherName = normalizeText(profile?.teacher || resolveStaffDisplayName(assignedTeacher), 120);
+    if (!teacherName) return null;
+
+    return {
+      fullName: teacherName,
+      role: 'Class Teacher',
+      postLevel: normalizeText(assignedTeacher?.postLevel || '', 12),
+      identifier: normalizeText(assignedTeacher?.staffNumber || '', 40),
+      gender: normalizeText(assignedTeacher?.gender || '', 20)
+    };
+  };
+
+  const buildClassListExportConfig = (grade, letter) => {
+    const normalizedGrade = String(grade || '').trim();
+    const normalizedLetter = normalizeLetter(letter);
+    if (!normalizedGrade || !normalizedLetter) return null;
+
+    const classLabel = `Grade ${normalizedGrade}${normalizedLetter}`;
+    const profile = getCurrentClassExportProfile(normalizedGrade, normalizedLetter);
+    const learners = normalizeLearners(profile.learners);
+    const teacherRow = resolveClassTeacherExportRow(normalizedGrade, normalizedLetter, profile);
+    const teacherLabel = teacherRow?.fullName || normalizeText(profile.teacher || '', 120) || 'No class teacher assigned';
+    const roomLabel = normalizeText(profile.room || '', 40);
+    const capacityLabel = normalizeText(profile.capacity || '', 4) || String(learners.length);
+    const metaParts = [`Learners: ${learners.length}`, `Capacity: ${capacityLabel}`];
+
+    if (roomLabel) {
+      metaParts.push(`Room: ${roomLabel}`);
+    }
+
+    const noteParts = [];
+    if (!learners.length) {
+      noteParts.push('No learners are currently saved for this class.');
+    }
+    noteParts.push('Notice: This class list reflects the current enrollment data shown in the manager workspace.');
+    if (profile.notes) {
+      noteParts.push(`Class notes: ${profile.notes}`);
+    }
+
+    return {
+      classLabel,
+      fileName: `${toSafeExportToken(`grade ${normalizedGrade}${normalizedLetter}`, 'class')}-class-list.xlsx`,
+      sheetName: `Class ${normalizedGrade}${normalizedLetter}`.slice(0, 31),
+      contextLine: `${classLabel} • ${teacherLabel}`,
+      metaLine: metaParts.join(' • '),
+      managementRows: teacherRow ? [teacherRow] : [],
+      rows: learners.map((learner, index) => ({
+        number: index + 1,
+        learnerName: normalizeText(learner.name, 120),
+        admissionNo: normalizeText(learner.admissionNo || '', 40),
+        gender: normalizeText(learner.gender || '', 20),
+        house: resolveHouseName(learner.houseId || '') || 'Unassigned',
+        rclRole: normalizeText(learner.rclRole || '', 40),
+        sportingCodes: Array.isArray(learner.sportingCodes) && learner.sportingCodes.length
+          ? learner.sportingCodes.map((entry) => normalizeText(entry, 80)).filter(Boolean).join(', ')
+          : 'Unassigned'
+      })),
+      note: noteParts.join(' '),
+      signatures: teacherRow
+        ? [
+            {
+              anchor: 'left',
+              name: teacherRow.fullName,
+              role: 'Class Teacher'
+            }
+          ]
+        : []
+    };
+  };
+
   const canCurrentUserManageClass = (grade, letter) => {
     if (isAdminMode) return true;
     if (!isStaffMode) return false;
@@ -9286,6 +9407,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     importLearnersButton.disabled = !isAdminMode;
     bulkImportFileInput.disabled = !isAdminMode;
     bulkImportLearnersButton.disabled = !isAdminMode;
+    exportClassListButton.disabled = !canCurrentUserManageClass(normalizedGrade, normalizedLetter);
     clearLearnersButtons.forEach((button) => {
       if (!(button instanceof HTMLButtonElement)) return;
       button.disabled = !isAdminMode;
@@ -9312,6 +9434,59 @@ const hydrateEnrollmentManager = (managerNode) => {
       refreshManageModalWorkflowHeights();
     });
   };
+
+  exportClassListButton.addEventListener('click', async () => {
+    const exportGrade = String(selectedManageGrade || '').trim();
+    const exportLetter = normalizeLetter(selectedManageLetter || '');
+    if (!exportGrade || !exportLetter) return;
+    if (!canCurrentUserManageClass(exportGrade, exportLetter)) return;
+
+    const exportConfig = buildClassListExportConfig(exportGrade, exportLetter);
+    if (!exportConfig) return;
+
+    const originalLabel = exportClassListButton.textContent;
+    exportClassListButton.disabled = true;
+    exportClassListButton.textContent = 'Preparing...';
+
+    try {
+      await exportProfessionalWorkbook({
+        fileName: exportConfig.fileName,
+        sheetName: exportConfig.sheetName,
+        title: 'Official Class List',
+        contextLine: exportConfig.contextLine,
+        metaLine: exportConfig.metaLine,
+        managementSection: {
+          title: `${exportConfig.classLabel} Management`,
+          rows: exportConfig.managementRows
+        },
+        columns: [
+          { header: 'No.', key: 'number', width: 8, align: 'center' },
+          { header: 'Learner Name', key: 'learnerName', width: 30, align: 'left' },
+          { header: 'Admission No.', key: 'admissionNo', width: 18, align: 'center' },
+          { header: 'Gender', key: 'gender', width: 12, align: 'center' },
+          { header: 'House', key: 'house', width: 18, align: 'center' },
+          { header: 'RCL Role', key: 'rclRole', width: 20, align: 'center' },
+          { header: 'Sporting Codes', key: 'sportingCodes', width: 34, align: 'left', wrapText: true }
+        ],
+        rows: exportConfig.rows,
+        note: exportConfig.note,
+        signatures: exportConfig.signatures
+      });
+
+      if (statusNode) {
+        statusNode.textContent = `${exportConfig.classLabel} class list exported (.xlsx).`;
+      }
+      showSmartToast(`${exportConfig.classLabel} class list exported (.xlsx).`, { tone: 'success' });
+    } catch {
+      if (statusNode) {
+        statusNode.textContent = `Could not export the ${exportConfig.classLabel} class list right now.`;
+      }
+      showSmartToast('Could not export the class list right now.', { tone: 'error' });
+    } finally {
+      exportClassListButton.disabled = !canCurrentUserManageClass(exportGrade, exportLetter);
+      exportClassListButton.textContent = originalLabel;
+    }
+  });
 
   const openModalForGrade = (grade) => {
     if (!isAdminMode) return;
