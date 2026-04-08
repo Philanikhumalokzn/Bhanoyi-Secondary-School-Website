@@ -8628,6 +8628,18 @@ const hydrateEnrollmentManager = (managerNode) => {
     };
   };
 
+  const formatLearnerNameForExport = (value) => {
+    const normalized = normalizeText(value, 120);
+    if (!normalized) return '';
+    if (normalized.includes(',')) return normalized;
+
+    const parts = normalized.split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return normalized;
+
+    const [surname, ...givenNames] = parts;
+    return `${surname}, ${givenNames.join(' ')}`;
+  };
+
   const buildClassListExportConfig = (grade, letter) => {
     const normalizedGrade = String(grade || '').trim();
     const normalizedLetter = normalizeLetter(letter);
@@ -8664,7 +8676,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       managementRows: teacherRow ? [teacherRow] : [],
       rows: learners.map((learner, index) => ({
         number: index + 1,
-        learnerName: normalizeText(learner.name, 120),
+        learnerName: formatLearnerNameForExport(learner.name),
         admissionNo: normalizeText(learner.admissionNo || '', 40),
         gender: normalizeText(learner.gender || '', 20),
         house: resolveHouseName(learner.houseId || '') || 'Unassigned',
@@ -9461,7 +9473,7 @@ const hydrateEnrollmentManager = (managerNode) => {
         },
         columns: [
           { header: 'No.', key: 'number', width: 8, align: 'center' },
-          { header: 'Learner Name', key: 'learnerName', width: 30, align: 'left' },
+          { header: 'Surname, First Name(s)', key: 'learnerName', width: 30, align: 'left' },
           { header: 'Admission No.', key: 'admissionNo', width: 18, align: 'center' },
           { header: 'Gender', key: 'gender', width: 12, align: 'center' },
           { header: 'House', key: 'house', width: 18, align: 'center' },
