@@ -8628,7 +8628,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     };
   };
 
-  const formatLearnerNameForExport = (value) => {
+  const formatLearnerNameForDisplay = (value) => {
     const normalized = normalizeText(value, 120);
     if (!normalized) return '';
     if (normalized.includes(',')) return normalized;
@@ -8676,7 +8676,7 @@ const hydrateEnrollmentManager = (managerNode) => {
       managementRows: teacherRow ? [teacherRow] : [],
       rows: learners.map((learner, index) => ({
         number: index + 1,
-        learnerName: formatLearnerNameForExport(learner.name),
+        learnerName: formatLearnerNameForDisplay(learner.name),
         admissionNo: normalizeText(learner.admissionNo || '', 40),
         gender: normalizeText(learner.gender || '', 20),
         house: resolveHouseName(learner.houseId || '') || 'Unassigned',
@@ -8795,7 +8795,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const sportingCodeDefinitions = getSportingCodeDefinitions();
     const rclRoleOptions = ['', 'President', 'Deputy President', 'Secretary', 'Treasurer', 'Class Representative'];
 
-    learnerProfileTitleNode.textContent = `Grade ${selectedManageGrade}${selectedManageLetter} • ${learner.name}`;
+    learnerProfileTitleNode.textContent = `Grade ${selectedManageGrade}${selectedManageLetter} • ${formatLearnerNameForDisplay(learner.name)}`;
     learnerProfileNameInput.value = String(learner.name || '');
     learnerProfileAdmissionInput.value = String(learner.admissionNo || '');
     learnerProfileGenderSelect.value = String(learner.gender || '');
@@ -8939,7 +8939,7 @@ const hydrateEnrollmentManager = (managerNode) => {
     const defaultCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
 
     activeLearnerSportsIndex = index;
-    learnerSportsTitleNode.textContent = `${learner.name} • ${learner.gender || 'Unspecified gender'} • Default: ${defaultCode}`;
+    learnerSportsTitleNode.textContent = `${formatLearnerNameForDisplay(learner.name)} • ${learner.gender || 'Unspecified gender'} • Default: ${defaultCode}`;
     learnerSportsSelect.innerHTML = sportingCodeDefinitions
       .map((entry) => {
         const selected = assignedCodes.some(
@@ -9053,6 +9053,7 @@ const hydrateEnrollmentManager = (managerNode) => {
 
     learnerListNode.innerHTML = filteredLearners
       .map(({ learner, index }) => {
+        const learnerDisplayName = formatLearnerNameForDisplay(learner.name);
         const sportingCodes = Array.isArray(learner.sportingCodes) ? learner.sportingCodes : [];
         const assignedSportsLabel = formatSportingCodesSummary(sportingCodes);
         const defaultSportCode = getDefaultSportingCodesByGender(learner.gender || '')[0] || 'No default code';
@@ -9086,7 +9087,7 @@ const hydrateEnrollmentManager = (managerNode) => {
           <div class="enrollment-learner-item">
             <div class="enrollment-learner-summary">
               <div class="enrollment-learner-topline">
-                <span class="enrollment-learner-name">${escapeHtmlText(learner.name)}${learner.admissionNo ? ` • ${escapeHtmlText(learner.admissionNo)}` : ''}</span>
+                <span class="enrollment-learner-name">${escapeHtmlText(learnerDisplayName)}${learner.admissionNo ? ` • ${escapeHtmlText(learner.admissionNo)}` : ''}</span>
                 <div class="enrollment-learner-topmeta">
                   <span class="enrollment-class-empty">${escapeHtmlText(topGenderLabel)}</span>
                   <button
@@ -9101,7 +9102,7 @@ const hydrateEnrollmentManager = (managerNode) => {
                 ${houseOptionsMarkup}
               </div>
             </div>
-            ${isAdminMode ? `<div class="enrollment-learner-actions"><button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learner.name)}" title="Remove learner ${escapeHtmlAttribute(learner.name)}">×</button></div>` : ''}
+            ${isAdminMode ? `<div class="enrollment-learner-actions"><button type="button" class="enrollment-class-remove" data-enrollment-remove-learner-index="${index}" aria-label="Remove learner ${escapeHtmlAttribute(learnerDisplayName)}" title="Remove learner ${escapeHtmlAttribute(learnerDisplayName)}">×</button></div>` : ''}
           </div>
         `;
       })
