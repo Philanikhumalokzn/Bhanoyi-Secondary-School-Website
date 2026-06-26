@@ -156,6 +156,7 @@ const installPublicCrudSurfaceGuard = () => {
     '[data-calendar-save]',
     '[data-calendar-new]',
     '[data-calendar-delete]',
+    '[data-calendar-export]',
     '[data-event-type-add]',
     '[data-event-types-save]',
     '[data-terms-save]',

@@ -14754,6 +14754,18 @@ const renderSchoolCalendarSection = (section, sectionIndex) => {
           </section>
           <section class="calendar-workflow-step is-collapsed" data-calendar-workflow-step data-calendar-admin-only>
             <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="false">
+              <span>Export Calendar</span>
+            </button>
+            <div class="calendar-workflow-body" data-calendar-workflow-body>
+              <p class="school-calendar-intro">Export all school events as a professionally formatted Excel file for distribution to staff and parents.</p>
+              <div class="school-calendar-actions">
+                <button type="button" class="btn btn-primary" data-calendar-export>Export to Excel</button>
+              </div>
+              <p class="school-calendar-status" data-calendar-export-status aria-live="polite"></p>
+            </div>
+          </section>
+          <section class="calendar-workflow-step is-collapsed" data-calendar-workflow-step data-calendar-admin-only>
+            <button type="button" class="calendar-workflow-toggle" data-calendar-workflow-toggle aria-expanded="false">
               <span>Manage Event Types</span>
             </button>
             <div class="calendar-workflow-body" data-calendar-workflow-body>
@@ -14877,6 +14889,8 @@ const hydrateSchoolCalendar = (calendarShell) => {
   const termsSaveButton = calendarShell.querySelector('[data-terms-save]');
   const newButton = calendarShell.querySelector('[data-calendar-new]');
   const deleteButton = calendarShell.querySelector('[data-calendar-delete]');
+  const exportButton = calendarShell.querySelector('[data-calendar-export]');
+  const exportStatusNode = calendarShell.querySelector('[data-calendar-export-status]');
   const dayOverlay = calendarShell.querySelector('[data-calendar-day-overlay]');
   const dayOverlayTitle = calendarShell.querySelector('[data-calendar-day-title]');
   const dayOverlayList = calendarShell.querySelector('[data-calendar-day-list]');
@@ -16571,6 +16585,76 @@ ${detailMarkup}
       const idInput = form.querySelector('input[name="id"]');
       const eventId = (idInput instanceof HTMLInputElement ? idInput.value : '').trim();
       deleteCalendarEventById(eventId, { closeEditor: false });
+    });
+
+    exportButton?.addEventListener('click', async () => {
+      if (!isAdminMode) return;
+      
+      if (exportStatusNode) exportStatusNode.textContent = 'Preparing export...';
+      showSmartToast('Preparing calendar export...', { tone: 'info' });
+      
+      try {
+        const allEvents = calendar.getEvents()
+          .filter((entry) => entry.display !== 'background')
+          .sort((left, right) => eventStartStamp(left) - eventStartStamp(right));
+        
+        if (!allEvents.length) {
+          if (exportStatusNode) exportStatusNode.textContent = 'No events to export.';
+          showSmartToast('No events to export yet.', { tone: 'info' });
+          return;
+        }
+
+        const columns = [
+          { key: 'date', header: 'Date', width: 12, align: 'center' },
+          { key: 'time', header: 'Time', width: 10, align: 'center' },
+          { key: 'title', header: 'Event Title', width: 28, align: 'left', wrapText: true },
+          { key: 'type', header: 'Type', width: 14, align: 'left' },
+          { key: 'notes', header: 'Notes', width: 26, align: 'left', wrapText: true }
+        ];
+
+        const rows = allEvents.map((entry) => {
+          const startDate = normalizeDateString(entry.startStr || entry.start || '');
+          const startTime = normalizeTimeString(entry.startStr || entry.start || '');
+          const eventType = String(entry.extendedProps?.eventType || 'General').trim();
+          const notes = String(entry.extendedProps?.notes || '').trim();
+          
+          const dateLabel = startDate ? new Date(`${startDate}T00:00:00`).toLocaleDateString('en-GB', {
+            weekday: 'short',
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit'
+          }) : '';
+          
+          return {
+            date: dateLabel,
+            time: startTime && !entry.allDay ? startTime : entry.allDay ? 'All day' : '',
+            title: String(entry.title || '').trim(),
+            type: eventType,
+            notes: notes
+          };
+        });
+
+        const stamp = new Date().toISOString().slice(0, 10);
+        const fileName = `bhanoyi-school-calendar-${stamp}.xlsx`;
+        
+        await exportProfessionalWorkbook({
+          fileName,
+          sheetName: 'School Calendar',
+          title: 'School Calendar',
+          contextLine: `All scheduled school events and activities`,
+          metaLine: `Generated: ${new Date().toLocaleString('en-GB')} | Total Events: ${allEvents.length}`,
+          columns,
+          rows,
+          note: 'All-day events are indicated in the Time column. Timed events show start time only.'
+        });
+
+        if (exportStatusNode) exportStatusNode.textContent = 'Calendar exported successfully.';
+        showSmartToast('Calendar exported (.xlsx) with all events.', { tone: 'success' });
+      } catch (error) {
+        console.error('Calendar export error:', error);
+        if (exportStatusNode) exportStatusNode.textContent = 'Export failed. Try again.';
+        showSmartToast('Could not export calendar right now.', { tone: 'error' });
+      }
     });
 
     if (eventTypeSelect instanceof HTMLSelectElement) {
